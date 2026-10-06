@@ -1,0 +1,1947 @@
+{
+  "components": {
+    "schemas": {
+      "Analysis": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzed_at": {
+            "format": "date-time",
+            "title": "Analyzed At",
+            "type": "string"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "caveats": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Caveats",
+            "type": "array"
+          },
+          "copy_of": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CopyOf"
+            },
+            "title": "Copy Of",
+            "type": "array"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "depth": {
+            "enum": [
+              "basic",
+              "full"
+            ],
+            "title": "Depth",
+            "type": "string"
+          },
+          "evidence": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "flags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Flag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageInfo",
+            "default": {
+              "labels": [],
+              "near_duplicates": [],
+              "ocr": [],
+              "palette": [],
+              "status": "skipped"
+            }
+          },
+          "launchpad": {
+            "default": "unknown",
+            "enum": [
+              "pump.fun",
+              "unknown"
+            ],
+            "title": "Launchpad",
+            "type": "string"
+          },
+          "market": {
+            "$ref": "#/components/schemas/Market",
+            "default": {}
+          },
+          "mint": {
+            "title": "Mint",
+            "type": "string"
+          },
+          "normalized": {
+            "$ref": "#/components/schemas/Normalized",
+            "default": {
+              "emoji_keywords": [],
+              "markers": [],
+              "name_tokens": [],
+              "obfuscation": []
+            }
+          },
+          "raw": {
+            "$ref": "#/components/schemas/RawFields",
+            "default": {}
+          },
+          "referent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Referent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_version": {
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "ticker_explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker Explanation"
+          },
+          "trend": {
+            "$ref": "#/components/schemas/Trend",
+            "default": {
+              "matched": false,
+              "terms": []
+            }
+          },
+          "versions": {
+            "$ref": "#/components/schemas/Versions"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mint",
+          "summary",
+          "depth",
+          "analyzed_at",
+          "versions"
+        ],
+        "title": "Analysis",
+        "type": "object"
+      },
+      "BatchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Analysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ca": {
+            "title": "Ca",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial",
+                  "pending",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "invalid",
+                "type": "string"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "ca",
+          "status"
+        ],
+        "title": "BatchItem",
+        "type": "object"
+      },
+      "BatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cas": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Cas",
+            "type": "array"
+          },
+          "depth": {
+            "default": "basic",
+            "enum": [
+              "basic",
+              "full"
+            ],
+            "title": "Depth",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cas"
+        ],
+        "title": "BatchRequest",
+        "type": "object"
+      },
+      "BatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "request_id"
+        ],
+        "title": "BatchResponse",
+        "type": "object"
+      },
+      "Category": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "confidence"
+        ],
+        "title": "Category",
+        "type": "object"
+      },
+      "CopyOf": {
+        "additionalProperties": false,
+        "properties": {
+          "mint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mint"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "signals": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "title": "CopyOf",
+        "type": "object"
+      },
+      "Evidence": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "weight": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "weight",
+          "detail",
+          "source"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "Flag": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warn",
+              "high"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "detail"
+        ],
+        "title": "Flag",
+        "type": "object"
+      },
+      "FlagEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warn",
+              "high"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "description"
+        ],
+        "title": "FlagEntry",
+        "type": "object"
+      },
+      "Freshness": {
+        "additionalProperties": false,
+        "properties": {
+          "age_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age S"
+          },
+          "analyzed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyzed At"
+          },
+          "from_cache": {
+            "default": false,
+            "title": "From Cache",
+            "type": "boolean"
+          },
+          "max_age_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Age S"
+          }
+        },
+        "title": "Freshness",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImageInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "animated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Animated"
+          },
+          "labels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ImageLabel"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "near_duplicates": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NearDuplicate"
+            },
+            "title": "Near Duplicates",
+            "type": "array"
+          },
+          "ocr": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ocr",
+            "type": "array"
+          },
+          "palette": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Palette",
+            "type": "array"
+          },
+          "pdq": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdq"
+          },
+          "phash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phash"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "default": "skipped",
+            "enum": [
+              "ok",
+              "missing",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "ImageInfo",
+        "type": "object"
+      },
+      "ImageLabel": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "score",
+          "model"
+        ],
+        "title": "ImageLabel",
+        "type": "object"
+      },
+      "JobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ca": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "enum": [
+                  "basic",
+                  "full"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "request_id"
+        ],
+        "title": "JobResponse",
+        "type": "object"
+      },
+      "Market": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Complete"
+          },
+          "creator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator"
+          },
+          "curve_progress": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curve Progress"
+          },
+          "graduated_pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graduated Pool"
+          },
+          "is_mayhem_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Mayhem Mode"
+          },
+          "quote_mint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Mint"
+          }
+        },
+        "title": "Market",
+        "type": "object"
+      },
+      "MetaResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/TaxonomyEntry"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "depths": {
+            "items": {
+              "enum": [
+                "basic",
+                "full"
+              ],
+              "type": "string"
+            },
+            "title": "Depths",
+            "type": "array"
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/FlagEntry"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "service_version": {
+            "title": "Service Version",
+            "type": "string"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/Versions"
+          }
+        },
+        "required": [
+          "schema_version",
+          "service_version",
+          "versions",
+          "categories",
+          "flags",
+          "depths",
+          "disclaimer"
+        ],
+        "title": "MetaResponse",
+        "type": "object"
+      },
+      "NearDuplicate": {
+        "additionalProperties": false,
+        "properties": {
+          "distance": {
+            "title": "Distance",
+            "type": "integer"
+          },
+          "known_coin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Coin"
+          },
+          "mint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mint"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          }
+        },
+        "required": [
+          "distance"
+        ],
+        "title": "NearDuplicate",
+        "type": "object"
+      },
+      "Normalized": {
+        "additionalProperties": false,
+        "properties": {
+          "emoji_keywords": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Emoji Keywords",
+            "type": "array"
+          },
+          "markers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Markers",
+            "type": "array"
+          },
+          "name_tokens": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Name Tokens",
+            "type": "array"
+          },
+          "obfuscation": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Obfuscation",
+            "type": "array"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "ticker_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker Base"
+          }
+        },
+        "title": "Normalized",
+        "type": "object"
+      },
+      "RawFields": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "telegram": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram"
+          },
+          "twitter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Twitter"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "title": "RawFields",
+        "type": "object"
+      },
+      "Referent": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desc"
+          },
+          "kind": {
+            "enum": [
+              "famous_animal",
+              "meme",
+              "person",
+              "coin",
+              "event",
+              "concept",
+              "place",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "label",
+          "kind",
+          "confidence"
+        ],
+        "title": "Referent",
+        "type": "object"
+      },
+      "TaxonomyEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "description"
+        ],
+        "title": "TaxonomyEntry",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Analysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ca": {
+            "title": "Ca",
+            "type": "string"
+          },
+          "depth": {
+            "enum": [
+              "basic",
+              "full"
+            ],
+            "title": "Depth",
+            "type": "string"
+          },
+          "errors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UpstreamError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness",
+            "default": {
+              "from_cache": false
+            }
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "stale_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Analysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "partial",
+              "pending",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ca",
+          "status",
+          "depth",
+          "request_id"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "Trend": {
+        "additionalProperties": false,
+        "properties": {
+          "matched": {
+            "default": false,
+            "title": "Matched",
+            "type": "boolean"
+          },
+          "terms": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrendTerm"
+            },
+            "title": "Terms",
+            "type": "array"
+          }
+        },
+        "title": "Trend",
+        "type": "object"
+      },
+      "TrendTerm": {
+        "additionalProperties": false,
+        "properties": {
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "spike": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spike"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "source"
+        ],
+        "title": "TrendTerm",
+        "type": "object"
+      },
+      "UpstreamError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "code"
+        ],
+        "title": "UpstreamError",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Versions": {
+        "additionalProperties": false,
+        "properties": {
+          "known_coins": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Coins"
+          },
+          "lexicon": {
+            "title": "Lexicon",
+            "type": "string"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Models",
+            "type": "object"
+          },
+          "rules": {
+            "title": "Rules",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rules",
+          "lexicon"
+        ],
+        "title": "Versions",
+        "type": "object"
+      },
+      "XAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "followers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Followers"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "joined": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Joined"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "username_changes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username Changes"
+          },
+          "verified_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Type"
+          }
+        },
+        "title": "XAuthor",
+        "type": "object"
+      },
+      "XInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetch_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetch Source"
+          },
+          "object_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Time"
+          },
+          "predates_token_by_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predates Token By S"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/XRef"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "narrative_reference",
+                  "launch_announcement",
+                  "official_account",
+                  "spoofed",
+                  "search_only",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation"
+          },
+          "reuse_count": {
+            "default": 0,
+            "title": "Reuse Count",
+            "type": "integer"
+          },
+          "status": {
+            "default": "none",
+            "enum": [
+              "ok",
+              "deleted",
+              "suspended",
+              "not_fetched",
+              "failed",
+              "none"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "title": "XInfo",
+        "type": "object"
+      },
+      "XRef": {
+        "additionalProperties": false,
+        "properties": {
+          "community_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Community Id"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "kind": {
+            "enum": [
+              "tweet",
+              "profile",
+              "community",
+              "search",
+              "list",
+              "shortlink",
+              "foreign",
+              "homepage",
+              "unknown",
+              "invalid",
+              "empty"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "tweet_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tweet Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "url_handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url Handle"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "XRef",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Explains what a pump.fun token means, given its contract address. Deterministic analysis of name, ticker, image and linked X/Twitter content.",
+    "title": "TokenSage",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Poll an analysis job",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/v1/meta": {
+      "get": {
+        "operationId": "meta_v1_meta_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Versions, taxonomy and flag codes",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/v1/tokens/{ca}": {
+      "get": {
+        "operationId": "get_token_v1_tokens__ca__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ca",
+            "required": true,
+            "schema": {
+              "title": "Ca",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "basic",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            }
+          },
+          {
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 25,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Wait"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_age",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 604800,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Age"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "comma list: evidence,raw",
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "comma list: evidence,raw",
+              "title": "Include"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Analysis pending; poll again."
+          },
+          "400": {
+            "description": "invalid_ca"
+          },
+          "401": {
+            "description": "unauthorized"
+          },
+          "404": {
+            "description": "token_not_found"
+          },
+          "422": {
+            "description": "not_a_token_mint | not_pumpfun"
+          },
+          "429": {
+            "description": "rate_limited"
+          },
+          "503": {
+            "description": "overloaded"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Analyze a pump.fun token by contract address",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/v1/tokens:batch": {
+      "post": {
+        "operationId": "batch_v1_tokens_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Prefetch up to 50 CAs",
+        "tags": [
+          "v1"
+        ]
+      }
+    }
+  }
+}

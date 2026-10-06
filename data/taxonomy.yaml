@@ -1,0 +1,131 @@
+# Category taxonomy (guide §5.10) and flag codes. Served by GET /v1/meta so consumers
+# never hard-code labels. Adding entries is a minor (compatible) change.
+categories:
+  - label: animal
+    description: Animal mascot; sub-labels name the species.
+  - label: animal/dog
+    description: Dog-themed (Shiba, corgi, pug, a specific famous dog).
+  - label: animal/cat
+    description: Cat-themed.
+  - label: animal/frog
+    description: Frog-themed (incl. Pepe-like frogs).
+  - label: animal/monkey
+    description: Monkey or ape.
+  - label: animal/hippo
+    description: Hippo (e.g. Moo Deng).
+  - label: animal/squirrel
+    description: Squirrel (e.g. Peanut).
+  - label: animal/bird
+    description: Bird.
+  - label: animal/bear_bull
+    description: Bear or bull (often market-sentiment jokes).
+  - label: animal/fish
+    description: Fish or sea creature.
+  - label: animal/other
+    description: Another animal.
+  - label: meme_template
+    description: Based on an internet meme or template.
+  - label: meme_template/pepe_wojak_chad
+    description: Pepe, Wojak, Chad, Gigachad family.
+  - label: meme_template/x_wif_hat
+    description: The "X wif hat" template derived from dogwifhat.
+  - label: meme_template/chill_guy
+    description: The "Just a chill guy" family.
+  - label: meme_template/npc
+    description: NPC meme.
+  - label: meme_template/brainrot
+    description: Brainrot slang (skibidi, sigma, rizz, gyatt).
+  - label: meme_template/copypasta
+    description: Copypasta or catchphrase.
+  - label: meme_template/other
+    description: Another meme or template.
+  - label: ai_agent
+    description: AI, AI-agent lore, or an AI-launched coin.
+  - label: political
+    description: Politics, elections, leaders, slogans.
+  - label: celebrity
+    description: A celebrity or influencer.
+  - label: celebrity/elon
+    description: Elon Musk related.
+  - label: celebrity/musician
+    description: Musician.
+  - label: celebrity/athlete
+    description: Athlete or sports figure.
+  - label: celebrity/streamer_kol
+    description: Streamer, influencer or crypto KOL.
+  - label: celebrity/other
+    description: Another public figure.
+  - label: news_event
+    description: Tied to a recent news story or viral event.
+  - label: food_object_abstract
+    description: Food, an object, an emotion or an abstract concept.
+  - label: regional_language
+    description: Country, city or language-community themed (e.g. CJK-name metas).
+  - label: crypto_native
+    description: Crypto slang or self-referential crypto culture.
+  - label: crypto_native/slang
+    description: Built on crypto slang (wagmi, jeet, send it).
+  - label: crypto_native/pumpfun_meta
+    description: Jokes about pump.fun itself or the current "meta".
+  - label: crypto_native/cto
+    description: Community takeover coin.
+  - label: crypto_native/utility_claim
+    description: Claims utility (a tool, a protocol).
+  - label: derivative
+    description: Copies or derives from an existing coin.
+  - label: derivative/copycat
+    description: Same ticker or name as an existing coin.
+  - label: derivative/template_family
+    description: Follows a naming template of a prior coin (Baby X, X wif hat).
+  - label: derivative/sequel
+    description: Version marker (2.0, v2, classic, og).
+  - label: derivative/homoglyph_spoof
+    description: Look-alike characters imitating a known ticker or name.
+  - label: derivative/logo_reuse
+    description: Logo is a near-duplicate of another coin's.
+  - label: humor_crude_offensive
+    description: Crude humour, slurs or shock content detected in text.
+
+flags:
+  - code: spoofed_tweet_handle
+    severity: high
+    description: The handle in the linked tweet URL does not match the tweet's real author.
+  - code: homoglyph_ticker
+    severity: warn
+    description: Ticker or name uses look-alike Unicode characters.
+  - code: recycled_x_account
+    severity: high
+    description: The linked X account has changed its username before.
+  - code: borrowed_narrative
+    severity: info
+    description: The linked tweet is by an unrelated notable account; the coin borrows its narrative.
+  - code: x_link_reused
+    severity: warn
+    description: The same tweet, handle or community is linked by many other tokens.
+  - code: tweet_deleted
+    severity: warn
+    description: The linked tweet no longer exists.
+  - code: account_suspended
+    severity: warn
+    description: The linked X account is suspended.
+  - code: fresh_x_account
+    severity: info
+    description: The linked X account is days old with few posts.
+  - code: shell_community
+    severity: info
+    description: The linked X Community was created shortly before the token.
+  - code: search_link_only
+    severity: info
+    description: The "twitter" field is a search or hashtag link, not an account.
+  - code: copycat
+    severity: warn
+    description: Same ticker base or name as an existing coin.
+  - code: serial_creator
+    severity: info
+    description: The creator wallet has launched many coins.
+  - code: metadata_unresolved
+    severity: info
+    description: The off-chain metadata could not be fetched; analysis used on-chain fields only.
+  - code: non_pumpfun
+    severity: info
+    description: The mint has no pump.fun bonding curve; analysed best-effort.

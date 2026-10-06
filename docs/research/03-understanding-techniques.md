@@ -319,9 +319,14 @@ None of these weights could be downloaded in this sandbox, so all figures are **
 3. Run matchers. Each emits an `Evidence` record:
 
 ```python
-Evidence(kind="known_coin_match", label="derivative", weight=0.9,
-         detail="name 'dogwifhat 2.0' ~ dogwifhat (WIF) 100% + version marker '2.0'",
-         source="coingecko:dogwifhat", url="https://www.coingecko.com/en/coins/dogwifhat")
+Evidence(
+    kind="known_coin_match",
+    label="derivative",
+    weight=0.9,
+    detail="name 'dogwifhat 2.0' ~ dogwifhat (WIF) 100% + version marker '2.0'",
+    source="coingecko:dogwifhat",
+    url="https://www.coingecko.com/en/coins/dogwifhat",
+)
 ```
 
 4. Aggregate per label with noisy-OR: `conf = 1 - Π(1 - w_i)`.
