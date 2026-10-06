@@ -12,6 +12,8 @@ envVarGroups:
         value: "true"
       - key: ENABLE_CLIP
         value: "false"
+      - key: ENABLE_EMBED
+        value: "false" # needs EMBED_MODEL_PATH (MiniLM ONNX + vocab.txt) when true
       - key: ENABLE_CORPUS
         value: "false"
       - key: ENABLE_PAID_X

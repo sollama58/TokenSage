@@ -55,8 +55,8 @@ from tokensage.api.schemas import (
     XMatch as XMatchOut,
 )
 from tokensage.config import Settings
+from tokensage.engine import embed, pairing, wikilookup, xmatch, xsignals
 from tokensage.engine import image as image_stage
-from tokensage.engine import pairing, wikilookup, xmatch, xsignals
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.pipeline import (
     RULES_VERSION,
@@ -931,6 +931,9 @@ async def analyze(
         pair=await pair_lookup.lookup(conn, ctx.rpc, r.quote_mint),
     )
     inp.logo_features = cached_feats  # hashes from cache: still compared with other logos
+    if ctx.settings.enable_embed:
+        # first call loads the ONNX model from disk: keep that off the event loop
+        inp.encoder = await asyncio.to_thread(embed.default_encoder, ctx.settings)
     await _queue_pair_analysis(conn, inp.pair)
     if depth == "full":
         tweet, profile = await fulldepth.x_content(conn, ctx.http, ctx.settings, x)

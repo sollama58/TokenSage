@@ -429,6 +429,14 @@ If nothing fits, report "ticker unrelated to name" (itself mildly informative).
   - MobileCLIP-S0 is smaller and better, but its Apple licence needs review.
   - **This is local inference, not an external AI API**, and the engine must work fully without it.
 
+### 5.6a Optional embedding classifier (flag `ENABLE_EMBED`, off by default)
+- **What:** a local MiniLM-class sentence encoder in ONNX (e.g. `all-MiniLM-L6-v2`, ~90 MB file, ~150 MB RSS) embeds the token's **name** (segmented), **description** and **linked tweet text**. Each text gets the taxonomy label whose prompt in `data/embed_labels.yaml` is nearest by cosine, when that clears `threshold` and beats the next label by `min_margin`.
+- **Guesses only:** rows are `kind: "embedding"`, `source: "embed:minilm"`, detail "embedding guess: …", weight 0.25–0.4 (hard cap 0.4 in code). They add categories, **never a referent**.
+- **Fallback only:** by default (`only_when_unresolved: true`) it runs only when the rule layers left the token with no topical category (`derivative/*`, the pair label and `tradfi/tokenized_stock` do not count as resolving it), so it never outvotes the lexicon or gazetteer.
+- **Model files:** `EMBED_MODEL_PATH` is the `.onnx` file or a directory holding `model.onnx` (or the Hugging Face `onnx/model.onnx` layout) and `vocab.txt`; `EMBED_VOCAB_PATH` overrides the vocab location. The tokenizer is a small pure-Python BERT WordPiece (`engine/embed.py`), so no extra dependency. The model is loaded once, lazily, off the event loop; mean pooling over the attention mask unless the export has a `sentence_embedding` output.
+- **Safe to leave half-configured:** with the flag off nothing is loaded and `onnxruntime` is not imported by this stage. With the flag on and the model missing or broken, one `embed_model_unavailable` warning is logged and the engine runs exactly as without it.
+- **This is local inference, not an external AI API**, like OCR and CLIP. Tune `threshold` on the labelled set (Phase 6) before switching it on; tests use a stubbed encoder.
+
 ### 5.7 S7 X reference analysis
 Signals, with research-backed meanings:
 
@@ -644,6 +652,7 @@ Upstream failures *after* the token is resolved (IPFS down, X blocked, OCR crash
 | onnxruntime base | ~44 MB |
 | RapidOCR | ~130 MB |
 | CLIP B/32 vision | ~500 MB |
+| MiniLM sentence encoder (optional, `ENABLE_EMBED`) | ~150 MB |
 
 - **Analyzer without CLIP:** ~300–350 MB, which fits on 512 MB with care. Process one image at a time, load OCR lazily, and cap the image pixel count. If it runs out of memory, move the analyzer to Standard (2 GB, $25).
 - **API:** ~150 MB. It must not import the analysis modules.
@@ -797,6 +806,8 @@ envVarGroups:
         value: "true"
       - key: ENABLE_CLIP
         value: "false"
+      - key: ENABLE_EMBED
+        value: "false"            # §5.6a; also set EMBED_MODEL_PATH when true
       - key: ENABLE_CORPUS
         value: "false"            # §6.6; runs as a task inside the analyzer worker when true
       - key: ENABLE_PAID_X
@@ -1036,6 +1047,7 @@ Deploy a throwaway Starter worker (or use the Render shell) that runs `scripts/s
 
 ### Phase 8: Optional local models
 - `ENABLE_CLIP`: the vision tower in ONNX, precomputed label embeddings, worker on Standard.
+- `ENABLE_EMBED` (built, off by default, §5.6a): MiniLM sentence embeddings as a fallback category guesser for names, descriptions and tweets nothing else resolves. Ship the model files in the image or a disk, set `EMBED_MODEL_PATH`, tune the threshold.
 - MobileCLIP after a licence review.
 
 **Accept when** the measured precision lift on the labelled set justifies the extra $18/month.
