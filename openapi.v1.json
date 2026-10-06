@@ -829,6 +829,17 @@
             ],
             "title": "Is Mayhem Mode"
           },
+          "pair": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pair"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token the coin trades against (from quote_mint)"
+          },
           "quote_mint": {
             "anyOf": [
               {
@@ -1006,6 +1017,148 @@
           }
         },
         "title": "Normalized",
+        "type": "object"
+      },
+      "Pair": {
+        "additionalProperties": false,
+        "description": "The token the coin trades against on its bonding curve. SOL and stablecoins carry no\nmeaning; any other token feeds the analysis (category crypto_native/paired_ecosystem,\nderivative/pair_family when the name builds on it, flag non_sol_pair).",
+        "properties": {
+          "builds_on": {
+            "default": false,
+            "description": "The coin's name or ticker builds on the pair token's",
+            "title": "Builds On",
+            "type": "boolean"
+          },
+          "builds_on_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builds On Detail"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "sol",
+              "stablecoin",
+              "token"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "mint": {
+            "title": "Mint",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "referent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairReferent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the pair token itself refers to, when known"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the pair token was identified: neutral (SOL/stablecoin), known_coin, analysis (a stored TokenSage analysis), db, onchain, none",
+            "title": "Source"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          }
+        },
+        "required": [
+          "mint",
+          "kind"
+        ],
+        "title": "Pair",
+        "type": "object"
+      },
+      "PairReferent": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desc"
+          },
+          "kind": {
+            "enum": [
+              "famous_animal",
+              "meme",
+              "person",
+              "coin",
+              "event",
+              "concept",
+              "place",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "kind",
+          "confidence"
+        ],
+        "title": "PairReferent",
         "type": "object"
       },
       "RawFields": {

@@ -93,7 +93,7 @@ Every error has one shape:
 |---|---|
 | `schema_version` | `"1"`. Adding fields/labels is compatible; breaking changes get a new version and path |
 | `mint`, `created_at`, `launchpad` | Canonical CA; token creation time (may be `null`); `pump.fun` or `unknown` |
-| `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `creator`, `quote_mint` |
+| `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `creator`, `quote_mint`, and `pair` (the token it trades against; see below) |
 | `raw` | Name, symbol, description and social links as found in the metadata (**untrusted text, escape before rendering**) |
 | `normalized` | Cleaned tokens, ticker base, version markers (`version:2`), emoji keywords, obfuscation flags |
 | `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`. May be `null` |
@@ -151,6 +151,45 @@ Rough guide: a launch post naming the coin and its cashtag with the logo attache
 0.95+. A post that only mentions `$TICKER` scores about 0.55 (`related`). A borrowed post by
 a large account about something else scores near 0 (`unrelated`, usually alongside
 `borrowed_narrative`).
+
+### `market.pair`: the token the coin trades against (all depths)
+
+Most pump.fun coins trade against SOL; some against a stablecoin. Those say nothing about
+the coin and only get reported. A coin paired against **another token** was launched into
+that token's community, and it often builds on that token by name (e.g. "Baby Bonk" paired
+with BONK). That pairing feeds the analysis.
+
+```json
+"pair": {
+  "mint": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  "symbol": "BONK", "name": "Bonk",
+  "kind": "token",
+  "source": "onchain",
+  "builds_on": true,
+  "builds_on_detail": "same ticker base as $BONK",
+  "referent": {"label": "Bonk", "kind": "coin", "desc": "Solana dog coin; 'bonk' meme", "confidence": 0.95},
+  "categories": [{"label": "animal/dog", "confidence": 0.97}]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `kind` | `sol`, `stablecoin` (USDC, USDT, USD1) or `token`. Only `token` affects the analysis |
+| `source` | How the pair token was identified: `neutral` (SOL/stablecoin), `analysis` (our stored analysis of it), `db`, `onchain` (its Metaplex / Token-2022 metadata, cached for a week), `none` (unidentified) |
+| `builds_on` | The coin's name or ticker builds on the pair token's: same ticker base, ticker contains it (`BBONK`), or the name contains its ticker or a distinctive word of its name |
+| `referent`, `categories` | What the pair token itself is about: from our stored analysis of it, else from reading its own name and ticker |
+
+How it changes the analysis when `kind` is `token`:
+- category `crypto_native/paired_ecosystem` is always added (it does not lift `crypto_native`),
+  and flag `non_sol_pair` (info) is raised;
+- when `builds_on`, category `derivative/pair_family` is added and the pair token's referent
+  becomes a strong referent candidate for the coin (Baby Bonk → Bonk). Its categories count
+  at 0.6× their confidence;
+- otherwise the pair token's categories count weakly (0.25×) and its referent is reported
+  here only: the coin's own name, ticker and logo still decide what it refers to.
+
+`market.pair` is `null` when the quote mint is unknown, e.g. a coin analysed from hints
+before it is visible on-chain.
 
 ## Other endpoints
 

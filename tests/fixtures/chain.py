@@ -51,9 +51,12 @@ def b64(b: bytes) -> list[str]:
     return [base64.b64encode(b).decode(), "base64"]
 
 
-def curve_bytes(real_token_reserves: int, complete: bool, creator: str = CREATOR) -> bytes:
+def curve_bytes(
+    real_token_reserves: int, complete: bool, creator: str = CREATOR, quote: str | None = None
+) -> bytes:
     body = struct.pack("<QQQQQ?", 1_000, 30_000_000_000, real_token_reserves, 0, 10**15, complete)
-    body += b58decode(creator) + struct.pack("<??", False, False) + bytes(32)
+    body += b58decode(creator) + struct.pack("<??", False, False)
+    body += b58decode(quote) if quote else bytes(32)
     body += struct.pack("<Q??", 0, False, False)
     return BONDING_CURVE_DISC + body
 
@@ -115,11 +118,19 @@ class FakeChain:
         self.accounts[_global_pda()] = acct(PUMP_PROGRAM, b64(global_bytes()))
 
     def add_t22_pump(
-        self, mint: str, name: str, symbol: str, uri: str, progress: float = 0.4
+        self,
+        mint: str,
+        name: str,
+        symbol: str,
+        uri: str,
+        progress: float = 0.4,
+        quote: str | None = None,
     ) -> None:
         self.accounts[mint] = parsed_mint(TOKEN_2022, [t22_metadata_ext(name, symbol, uri)])
         real = int(INITIAL_REAL * (1 - progress))
-        self.accounts[bonding_curve_pda(mint)] = acct(PUMP_PROGRAM, b64(curve_bytes(real, False)))
+        self.accounts[bonding_curve_pda(mint)] = acct(
+            PUMP_PROGRAM, b64(curve_bytes(real, False, quote=quote))
+        )
 
     def add_spl_pump(
         self, mint: str, name: str, symbol: str, uri: str, complete: bool = True
@@ -134,6 +145,13 @@ class FakeChain:
 
     def add_plain_spl(self, mint: str) -> None:
         self.accounts[mint] = parsed_mint(SPL_TOKEN)
+
+    def add_spl_token(self, mint: str, name: str, symbol: str, uri: str = "") -> None:
+        """A plain (non-pump) SPL mint with Metaplex metadata, e.g. a pair token."""
+        self.accounts[mint] = parsed_mint(SPL_TOKEN)
+        self.accounts[metaplex.metadata_pda(mint)] = acct(
+            metaplex.METAPLEX_PROGRAM, b64(metaplex.encode_metadata_for_tests(name, symbol, uri))
+        )
 
     def add_wallet(self, addr: str) -> None:
         self.accounts[addr] = acct("11111111111111111111111111111111", ["", "base64"])

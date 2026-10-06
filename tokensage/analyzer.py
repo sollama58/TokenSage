@@ -26,6 +26,8 @@ from tokensage.api.schemas import (
     ImageInfo,
     Market,
     NearDuplicate,
+    Pair,
+    PairReferent,
     RawFields,
     Referent,
     ReferentKind,
@@ -53,7 +55,7 @@ from tokensage.api.schemas import (
 )
 from tokensage.config import Settings
 from tokensage.engine import image as image_stage
-from tokensage.engine import xmatch, xsignals
+from tokensage.engine import pairing, xmatch, xsignals
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.pipeline import (
     RULES_VERSION,
@@ -66,6 +68,7 @@ from tokensage.engine.pipeline import (
 )
 from tokensage.engine.xref import parse_x_ref, snowflake_time
 from tokensage.resolve import metadata as md
+from tokensage.resolve import pair as pair_lookup
 from tokensage.resolve.resolver import Resolved, ResolveError, resolve
 from tokensage.resolve.rpc import SolanaRpc
 from tokensage.sources import lookups
@@ -556,6 +559,7 @@ def build_document(
             creator=r.creator,
             is_mayhem_mode=r.is_mayhem,
             quote_mint=r.quote_mint,
+            pair=_pair_out(out.pair) if out is not None else None,
         ),
         raw=raw,
         normalized=_normalized_view(out),
@@ -581,6 +585,33 @@ def build_document(
     if partial:
         doc.caveats.append("partial: metadata pending; the next request may be more complete")
     return doc
+
+
+def _pair_out(p: pairing.PairAssessment | None) -> Pair | None:
+    if p is None:
+        return None
+    ref = None
+    if p.referent is not None:
+        ref = PairReferent(
+            label=p.referent.label,
+            kind=_REFERENT_KINDS.get(p.referent.kind, "other"),
+            desc=p.referent.desc,
+            confidence=round(max(0.0, min(1.0, p.referent.score)), 3),
+        )
+    return Pair(
+        mint=p.mint,
+        symbol=p.symbol,
+        name=p.name,
+        kind=p.kind,  # type: ignore[arg-type]
+        source=p.source,
+        builds_on=p.builds_on,
+        builds_on_detail=p.builds_on_detail,
+        referent=ref,
+        categories=[
+            Category(label=lbl, confidence=round(max(0.0, min(1.0, c)), 3))
+            for lbl, c in p.categories
+        ],
+    )
 
 
 def _normalized_view(out: EngineOutput | None) -> NormalizedOut:
@@ -855,6 +886,7 @@ async def analyze(
         x_kind=x.ref.kind if x else None,
         x_object_time=x.object_time if x else None,
         ctx=dbc,
+        pair=await pair_lookup.lookup(conn, ctx.rpc, r.quote_mint),
     )
     if depth == "full":
         tweet, profile = await fulldepth.x_content(conn, ctx.http, ctx.settings, x)

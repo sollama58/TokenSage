@@ -71,6 +71,8 @@ categories:
     description: Community takeover coin.
   - label: crypto_native/utility_claim
     description: Claims utility (a tool, a protocol).
+  - label: crypto_native/paired_ecosystem
+    description: Trades against another token instead of SOL or a stablecoin, so it was launched into that token's community.
   - label: derivative
     description: Copies or derives from an existing coin.
   - label: derivative/copycat
@@ -83,6 +85,8 @@ categories:
     description: Look-alike characters imitating a known ticker or name.
   - label: derivative/logo_reuse
     description: Logo is a near-duplicate of another coin's.
+  - label: derivative/pair_family
+    description: Name or ticker builds on the token it trades against (e.g. Baby BONK paired with BONK).
   - label: humor_crude_offensive
     description: Crude humour, slurs or shock content detected in text.
 
@@ -102,6 +106,9 @@ flags:
   - code: x_content_mismatch
     severity: warn
     description: The linked X post or profile was fetched but does not match the token (x.match.fit below 0.2).
+  - code: non_sol_pair
+    severity: info
+    description: The coin trades against another token rather than SOL or a stablecoin (see market.pair).
   - code: x_image_match
     severity: info
     description: An image in the linked X post (or the linked profile's avatar/banner) is a near-duplicate of the token logo.
