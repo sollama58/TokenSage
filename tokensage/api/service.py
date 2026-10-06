@@ -74,6 +74,19 @@ async def _enforce_quotas(conn: asyncpg.Connection, key: ApiKey, depth: str, ref
     await usage.bump(conn, key.name, full=1 if depth == "full" else 0, refresh=1 if refresh else 0)
 
 
+async def quota_headers(pool: asyncpg.Pool, key: ApiKey) -> dict[str, str]:
+    """Today's remaining daily quotas for this key (UTC day), so callers can back off
+    before a 429."""
+    from tokensage.api import usage
+
+    async with pool.acquire() as conn:
+        u = await usage.today(conn, key.name)
+    return {
+        "X-Quota-Full-Remaining": str(max(0, key.full_per_day - u.full_calls)),
+        "X-Quota-Refresh-Remaining": str(max(0, key.refresh_per_day - u.refreshes)),
+    }
+
+
 async def get_or_enqueue(
     pool: asyncpg.Pool,
     waiter: queue.DoneWaiter,
@@ -110,8 +123,13 @@ async def get_or_enqueue(
             from tokensage.api import errors
 
             raise errors.overloaded()
-        if key is not None:
-            await _enforce_quotas(conn, key, depth, refresh)
+
+        async def charge(j: queue.Job) -> None:
+            # Only a newly created job costs quota. Joining an open job (the documented
+            # 202 -> retry loop) or reusing one that just finished is free.
+            if key is not None and j.inserted:
+                await _enforce_quotas(conn, key, depth, refresh)
+
         job = await queue.enqueue(
             conn,
             "analyze",
@@ -121,6 +139,7 @@ async def get_or_enqueue(
             requested_by=requested_by,
             # a refresh always re-analyses; otherwise reuse a job that just finished
             reuse_done_within_s=0 if refresh else REUSE_DONE_WITHIN_S,
+            before_commit=charge,
         )
         if callback_url and key is not None:
             from tokensage import callbacks

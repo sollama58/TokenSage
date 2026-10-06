@@ -285,7 +285,16 @@ class BatchItem(_Model):
     status: Status | Literal["invalid"]
     analysis: Analysis | None = None
     job_id: int | None = None
-    error: str | None = None
+    error: str | None = Field(
+        default=None,
+        description=(
+            "Why the item has no job: the CA is invalid, or status 'failed' with "
+            "'quota_exceeded' / 'overloaded' when that item was rejected (others still queue)"
+        ),
+    )
+    retry_after_s: int | None = Field(
+        default=None, description="For a rejected item: seconds to wait before retrying it"
+    )
 
 
 class BatchResponse(_Model):

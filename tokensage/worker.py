@@ -115,7 +115,7 @@ class Worker:
                 doc, _ = latest
                 result = TokenResponse(
                     ca=target.mint,
-                    status="complete",
+                    status=service._status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
                     analysis=Analysis.model_validate(doc),
                     request_id=f"callback-{job.id}",

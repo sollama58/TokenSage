@@ -129,8 +129,12 @@ async def test_queue_full_returns_503_overloaded(
         assert r.status_code == 503, r.text
         assert r.json()["error"]["code"] == "overloaded"
         assert r.headers["retry-after"]
+        # batch items are rejected one by one instead of failing the whole request
         b = await c.post("/v1/tokens:batch", json={"cas": [MINT]})
-        assert b.status_code == 503
+        assert b.status_code == 200
+        item = b.json()["items"][0]
+        assert item["status"] == "failed" and item["error"] == "overloaded"
+        assert item["job_id"] is None and item["retry_after_s"]
 
 
 async def test_invalid_callback_url_is_rejected(

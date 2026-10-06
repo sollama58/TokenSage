@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -35,6 +36,8 @@ class Job:
     last_error: str | None
     error_code: str | None = None
     payload: dict[str, Any] | None = None
+    # True only when enqueue() created this row (not joined an open job or reused a done one)
+    inserted: bool = False
 
     @classmethod
     def from_record(cls, r: asyncpg.Record) -> Job:
@@ -49,6 +52,7 @@ class Job:
             last_error=r["last_error"],
             error_code=r["error_code"],
             payload=r["payload"] if "payload" in r.keys() else None,
+            inserted=bool(r["inserted"]) if "inserted" in r.keys() else False,
         )
 
 
@@ -60,13 +64,17 @@ async def enqueue(
     priority: int = PRIORITY_BACKGROUND,
     requested_by: str | None = None,
     reuse_done_within_s: float = 0,
+    before_commit: Callable[[Job], Awaitable[None]] | None = None,
 ) -> Job:
     """Insert a job, or return the open one for (kind, mint, depth). Raises the priority
     of an existing job if the new request is more urgent.
 
     With reuse_done_within_s > 0, an identical job that finished that recently is returned
     instead of a new one. This closes the race where a caller misses the cache just before
-    the running job commits its result and would otherwise enqueue a duplicate."""
+    the running job commits its result and would otherwise enqueue a duplicate.
+
+    before_commit runs inside the same transaction once the job is known (job.inserted says
+    whether it is new). If it raises, nothing is committed: a newly inserted job disappears."""
     async with conn.transaction():
         # Serialise against complete() for the same key, so a caller sees the job either
         # still open (and joins it) or finished (and reuses it), never the commit in between.
@@ -74,7 +82,9 @@ async def enqueue(
         row = await _enqueue_row(
             conn, kind, mint, depth, priority, requested_by, reuse_done_within_s
         )
-    job = Job.from_record(row)
+        job = Job.from_record(row)
+        if before_commit is not None:
+            await before_commit(job)
     if job.status != "done":
         await conn.execute("select pg_notify($1, $2)", CHANNEL_NEW, str(job.id))
     return job
@@ -97,7 +107,7 @@ async def _enqueue_row(
     row = await conn.fetchrow(
         """
         with recent as (
-          select * from job
+          select job.*, false as inserted from job
           where $6 > 0 and kind = $1 and mint is not distinct from $2
             and depth is not distinct from $3 and status = 'done'
             and finished_at > now() - make_interval(secs => $6)
@@ -109,7 +119,7 @@ async def _enqueue_row(
           where not exists (select 1 from recent)
           on conflict (kind, mint, depth) where status in ('pending','running')
           do update set priority = least(job.priority, excluded.priority)
-          returning *
+          returning *, (xmax = 0) as inserted
         )
         select * from ins
         union all

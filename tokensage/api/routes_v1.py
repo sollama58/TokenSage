@@ -20,6 +20,7 @@ from tokensage.api.schemas import (
     FlagEntry,
     JobResponse,
     MetaResponse,
+    RawFields,
     TaxonomyEntry,
     TokenResponse,
     Versions,
@@ -66,7 +67,15 @@ async def get_token(
     wait: Annotated[int | None, Query(ge=0, le=25)] = None,
     max_age: Annotated[int | None, Query(ge=0, le=7 * 86400)] = None,
     refresh: bool = False,
-    include: Annotated[str | None, Query(description="comma list: evidence,raw")] = None,
+    include: Annotated[
+        str | None,
+        Query(
+            description=(
+                "comma list of optional parts to keep: evidence, raw. Omit to get everything; "
+                "a part left out of the list is dropped (evidence -> [], raw -> empty)"
+            )
+        ),
+    ] = None,
 ) -> TokenResponse:
     settings = request.app.state.settings
     mint = _ca(ca)
@@ -88,14 +97,28 @@ async def get_token(
     if res.status == "pending":
         response.status_code = 202
         response.headers["Retry-After"] = "3"
-    if include is not None and "evidence" not in include.split(",") and res.analysis:
-        res.analysis.evidence = []
+    response.headers.update(await service.quota_headers(request.app.state.pool, key))
+    _apply_include(res, include)
     return res
+
+
+def _apply_include(res: TokenResponse, include: str | None) -> None:
+    if include is None:
+        return
+    parts = {p.strip().lower() for p in include.split(",") if p.strip()}
+    for a in (res.analysis, res.stale_analysis):
+        if a is None:
+            continue
+        if "evidence" not in parts:
+            a.evidence = []
+        if "raw" not in parts:
+            a.raw = RawFields()
 
 
 @router.post("/tokens:batch", response_model=BatchResponse, summary="Prefetch up to 50 CAs")
 async def batch(
     request: Request,
+    response: Response,
     body: BatchRequest,
     key: Annotated[ApiKey, Depends(require_api_key)],
 ) -> BatchResponse:
@@ -118,24 +141,40 @@ async def batch(
         except ValueError as e:
             items.append(BatchItem(ca=raw, status="invalid", error=str(e)))
             continue
-        res = await service.get_or_enqueue(
-            request.app.state.pool,
-            request.app.state.waiter,
-            settings,
-            mint=mint,
-            depth=body.depth,
-            wait_s=0,
-            max_age_s=None,
-            refresh=False,
-            requested_by=key.name,
-            request_id=request.state.request_id,
-            priority=queue.PRIORITY_BATCH,
-            key=key,
-            callback_url=cb,
-        )
+        try:
+            res = await service.get_or_enqueue(
+                request.app.state.pool,
+                request.app.state.waiter,
+                settings,
+                mint=mint,
+                depth=body.depth,
+                wait_s=0,
+                max_age_s=None,
+                refresh=False,
+                requested_by=key.name,
+                request_id=request.state.request_id,
+                priority=queue.PRIORITY_BATCH,
+                key=key,
+                callback_url=cb,
+            )
+        except errors.ApiError as e:
+            if e.code not in ("quota_exceeded", "overloaded"):
+                raise
+            # Reject this item only; items already queued keep their job ids.
+            retry = (e.headers or {}).get("Retry-After")
+            items.append(
+                BatchItem(
+                    ca=mint,
+                    status="failed",
+                    error=e.code,
+                    retry_after_s=int(retry) if retry and retry.isdigit() else None,
+                )
+            )
+            continue
         items.append(
             BatchItem(ca=mint, status=res.status, analysis=res.analysis, job_id=res.job_id)
         )
+    response.headers.update(await service.quota_headers(request.app.state.pool, key))
     return BatchResponse(items=items, request_id=request.state.request_id)
 
 
@@ -158,7 +197,7 @@ async def get_job(
                 doc, _ = latest
                 result = TokenResponse(
                     ca=job.mint,
-                    status="complete",
+                    status=service._status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
                     analysis=Analysis.model_validate(doc),
                     request_id=rid,

@@ -26,8 +26,13 @@ flow and the rendered result. Useful for checking what a given CA returns before
   `Retry-After` (seconds).
 - Each key also has **daily quotas** (UTC day) for the expensive calls: `depth=full` analyses
   (default 2000/day) and `refresh=true` re-analyses (default 200/day). Cached reads and
-  `depth=basic` work are not quota-limited. Exceeding a quota → `429 quota_exceeded` with
-  `Retry-After` set to the seconds until UTC midnight. The owner can see today's counters per key.
+  `depth=basic` work are not quota-limited. A unit is charged only when a request creates a
+  new analysis job: re-requesting a pending analysis (the 202 → retry loop), polling
+  `GET /v1/jobs/{id}`, or a batch item that joins an already-open job costs nothing, even after
+  the quota is used up. Exceeding a quota → `429 quota_exceeded` with `Retry-After` set to the
+  seconds until UTC midnight. The owner can see today's counters per key.
+- `GET /v1/tokens/{ca}` and `POST /v1/tokens:batch` responses carry today's remaining quota in
+  `X-Quota-Full-Remaining` and `X-Quota-Refresh-Remaining`, so you can back off before a `429`.
 - Send an `X-Request-Id` header if you want to correlate logs; otherwise one is generated.
   The response echoes it in `X-Request-Id` and in every body's `request_id`.
 
@@ -45,7 +50,7 @@ GET /v1/tokens/{ca}?depth=full&wait=10
 | `wait` | `10` | Seconds to wait for a fresh analysis before answering `202` (0–25) |
 | `max_age` | by token age | Accept a cached analysis up to this many seconds old. Defaults: 5 min for tokens < 1 h old, 1 h up to 7 days, 24 h after that |
 | `refresh` | `false` | Force a new analysis (rate-limited more strictly) |
-| `include` | `evidence` | Comma list. Drop `evidence` to get a smaller body |
+| `include` | all parts | Comma list of optional parts to keep: `evidence`, `raw`. Omit it to get everything; a part you leave out is emptied (`evidence: []`, `raw` fields null). `include=evidence` drops `raw`; `include=raw` drops `evidence` |
 
 ### Status codes
 
@@ -96,7 +101,7 @@ Every error has one shape:
 | `ticker_explanation` | Plain-language explanation of the ticker |
 | `copy_of[]` | Coins this one copies or derives from, with the signals that say so |
 | `image` | Hashes, OCR text, palette, near-duplicates, optional visual labels. `source_url` is the gateway URL. **Images are not screened for NSFW content; decide yourself whether to show them** |
-| `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author (handle, followers, verification type, join date, username changes), text, `relation` (`narrative_reference` = the coin is *about* someone else's earlier tweet; `launch_announcement`; `official_account`; `spoofed` = the URL's handle is not the tweet's real author; `search_only`), `status` (`ok`, `deleted`, `suspended`, `not_fetched`, `failed`), `reuse_count` (other tokens linking the same tweet/handle), and `quoted` when the linked tweet is a quote tweet: the quoted post's `id`, `url`, `status`, `author`, `text`, `created_at` and `predates_token_by_s`. A launch post that quotes someone else's earlier post usually takes its meaning from that post, so the quoted text feeds the analysis too, and a large or verified quoted author raises `borrowed_narrative` |
+| `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author (handle, followers, verification type, join date, username changes), text, `relation` (`narrative_reference` = the coin is *about* someone else's earlier tweet; `launch_announcement`; `official_account`; `spoofed` = the URL's handle is not the tweet's real author; `search_only`), `status` (`ok`, `deleted`, `suspended`, `not_fetched`, `failed`), `reuse_count` (other tokens linking the same tweet/handle; a Community link has `status: "not_fetched"`, because no free source serves Community name, description or creation time: X's own API and twitterapi.io both charge for it), and `quoted` when the linked tweet is a quote tweet: the quoted post's `id`, `url`, `status`, `author`, `text`, `created_at` and `predates_token_by_s`. A launch post that quotes someone else's earlier post usually takes its meaning from that post, so the quoted text feeds the analysis too, and a large or verified quoted author raises `borrowed_narrative` |
 | `trend` | Trending-topic matches (Wikipedia spikes, news headlines) |
 | `flags[]` | `{code, severity, detail}`. Codes and descriptions are listed by `GET /v1/meta` |
 | `summary` | Template-generated plain-language summary |
@@ -104,15 +109,17 @@ Every error has one shape:
 | `caveats[]` | Automatic caveats (single weak source, ambiguous referent, deleted tweet, …) |
 | `depth`, `analyzed_at`, `versions` | What was run, when, and with which rule/lexicon versions |
 
-Confidences are probabilities in 0–1, calibrated so that about 80% of "0.8" labels are right
-(Phase 6 of the build plan). Flags and categories are **informational, not financial advice**.
+Confidences are scores in 0–1. **They are uncalibrated until Phase 6** of the build plan, which
+fits them against hand-labelled tokens so that about 80% of "0.8" labels are right. Until then,
+use them to rank and threshold, not as probabilities. Flags and categories are **informational,
+not financial advice**.
 
 ## Other endpoints
 
 | Call | Purpose |
 |---|---|
-| `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below) |
-| `GET /v1/jobs/{job_id}` | `pending \| running \| done \| failed`, with the result when done |
+| `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below). Items are handled one by one: if the daily quota runs out or the queue is full partway through, the remaining items come back as `status: "failed"` with `error: "quota_exceeded"` or `"overloaded"` and `retry_after_s`, while items already queued keep their `job_id` |
+| `GET /v1/jobs/{job_id}` | `pending \| running \| done \| failed`, with the result when done. `result.status` is `complete` or `partial`, exactly as `GET /v1/tokens/{ca}` would report it (webhook callbacks carry the same) |
 | `GET /v1/meta` | Schema/rule versions, the full category taxonomy, flag codes, and the disclaimer. Use it instead of hard-coding labels |
 | `GET /healthz` | Liveness (no auth) |
 
