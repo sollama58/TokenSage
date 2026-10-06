@@ -74,6 +74,22 @@ class Family:
     weight: float
 
 
+@dataclass(frozen=True)
+class Stock:
+    """A listed company or ETF (data/stocks.yaml)."""
+
+    ticker: str  # e.g. TSLA, BRK.B
+    name: str
+    kind: str  # stock | etf
+    categories: tuple[str, ...]  # tradfi/stock or tradfi/index_etf first, then extras
+    desc: str
+    entity_label: str  # the lexicon entity it becomes, e.g. "Tesla (TSLA)"
+
+    @property
+    def compact_ticker(self) -> str:
+        return self.ticker.replace(".", "").upper()
+
+
 @dataclass
 class Knowledge:
     slang: dict[str, SlangTerm]
@@ -88,6 +104,7 @@ class Knowledge:
     wordnet: dict[str, list[str]]
     emoji: dict[str, list[str]]
     versions: dict[str, str] = field(default_factory=dict)
+    stocks: dict[str, Stock] = field(default_factory=dict)  # by compact ticker
 
     # -- derived indexes
     def coin_by_symbol(self) -> dict[str, list[KnownCoin]]:
@@ -119,6 +136,40 @@ def _yaml(name: str) -> Any:
 def _json(name: str) -> Any:
     with (DATA_DIR / name).open(encoding="utf-8") as f:
         return json.load(f)
+
+
+def _stocks() -> tuple[dict[str, Stock], list[Entity]]:
+    """Stocks and the lexicon entities they become: the company name (unless it is a common
+    word), extra aliases, the ticker (unless it is a word) and the xStock ticker (TSLAx)."""
+    stocks: dict[str, Stock] = {}
+    entities: list[Entity] = []
+    for e in _yaml("stocks.yaml")["stocks"]:
+        ticker = str(e["ticker"]).upper()
+        compact = ticker.replace(".", "")
+        name = str(e["name"])
+        kind = str(e.get("kind", "stock"))
+        base = "tradfi/index_etf" if kind == "etf" else "tradfi/stock"
+        cats = tuple(dict.fromkeys([base, *(e.get("categories") or [])]))
+        label = f"{name} ({ticker})"
+        stocks[compact] = Stock(ticker, name, kind, cats, str(e.get("desc", "")), label)
+        aliases = [str(a) for a in e.get("aliases") or []]
+        if not e.get("name_is_word"):
+            aliases.append(name)
+        if not e.get("ticker_is_word") and len(compact) >= 3:
+            aliases.append(compact.lower())
+        if len(compact) >= 3:
+            aliases.append(compact.lower() + "x")  # the xStock (TSLAx); "max" for MA is a word
+        entities.append(
+            Entity(
+                label=label,
+                kind="other",
+                aliases=tuple(dict.fromkeys(aliases)),
+                categories=cats,
+                desc=str(e.get("desc", "")),
+                popularity=0.5,
+            )
+        )
+    return stocks, entities
 
 
 @lru_cache
@@ -159,6 +210,8 @@ def load_knowledge() -> Knowledge:
         )
         for e in _yaml("entities_seed.yaml")["entities"]
     ]
+    stocks, stock_entities = _stocks()
+    entities += stock_entities
     t = _yaml("templates.yaml")
     markers = [
         MarkerRule(re.compile(m["pattern"]), m["code"], m.get("kind"), float(m.get("weight", 0.3)))
@@ -178,6 +231,7 @@ def load_knowledge() -> Knowledge:
         slang=slang,
         coins=coins,
         entities=entities,
+        stocks=stocks,
         markers=markers,
         families=families,
         ticker_prefixes=[str(p).upper() for p in t["ticker"]["prefixes"]],
@@ -186,5 +240,5 @@ def load_knowledge() -> Knowledge:
         scoring={k: float(v) for k, v in t["scoring"].items()},
         wordnet=_json("wordnet_classes.json"),
         emoji=_json("cldr_emoji_en.json"),
-        versions={"lexicon": "2026-10-06", "known_coins": "seed-2026-10-06"},
+        versions={"lexicon": "2026-10-06.2", "known_coins": "seed-2026-10-06"},
     )

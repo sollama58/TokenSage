@@ -76,7 +76,9 @@ categories:
   - label: derivative
     description: Copies or derives from an existing coin.
   - label: derivative/copycat
-    description: Same ticker or name as an existing coin.
+    description: Same ticker, name or logo as a coin launched in the 30 days before it (riding a live coin).
+  - label: derivative/reference
+    description: Named after an established coin (same ticker or name as a well-known coin), not a recent launch.
   - label: derivative/template_family
     description: Follows a naming template of a prior coin (Baby X, X wif hat).
   - label: derivative/sequel
@@ -87,6 +89,14 @@ categories:
     description: Logo is a near-duplicate of another coin's.
   - label: derivative/pair_family
     description: Name or ticker builds on the token it trades against (e.g. Baby BONK paired with BONK).
+  - label: tradfi
+    description: Stocks, companies, ETFs and traditional markets.
+  - label: tradfi/stock
+    description: About a listed company or its stock (Tesla, Nvidia, $TSLA).
+  - label: tradfi/index_etf
+    description: About a stock index or ETF (S&P 500, Nasdaq-100, gold ETF).
+  - label: tradfi/tokenized_stock
+    description: Trades against a tokenized stock (an xStock such as TSLAx), so it was launched for that stock's crowd.
   - label: humor_crude_offensive
     description: Crude humour, slurs or shock content detected in text.
 
@@ -106,6 +116,9 @@ flags:
   - code: x_content_mismatch
     severity: warn
     description: The linked X post or profile was fetched but does not match the token (x.match.fit below 0.2).
+  - code: references_known_coin
+    severity: info
+    description: Builds on an established, well-known coin's name or ticker; not counted as a copycat.
   - code: non_sol_pair
     severity: info
     description: The coin trades against another token rather than SOL or a stablecoin (see market.pair).
@@ -132,7 +145,7 @@ flags:
     description: The "twitter" field is a search or hashtag link, not an account.
   - code: copycat
     severity: warn
-    description: Same ticker base or name as an existing coin.
+    description: Copies the name, ticker or logo of a coin launched in the 30 days before it.
   - code: serial_creator
     severity: info
     description: The creator wallet has launched many coins.
@@ -144,7 +157,7 @@ flags:
     description: Name uses full-width, zero-width, small-caps, leetspeak or repeated-letter tricks.
   - code: earlier_same_name
     severity: warn
-    description: Other tokens with the same name or ticker existed before this one.
+    description: Another token with the same name or ticker launched in the 30 days before this one.
   - code: regional_script
     severity: info
     description: Name is written in a non-Latin script (regional / language meta).

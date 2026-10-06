@@ -365,6 +365,19 @@
       "CopyOf": {
         "additionalProperties": false,
         "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the copied token launched (when known)",
+            "title": "Created At"
+          },
           "mint": {
             "anyOf": [
               {
@@ -386,6 +399,18 @@
               }
             ],
             "title": "Name"
+          },
+          "recent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True: it launched within the copycat window (30 d) before this token, so this is a copy of a live coin (flag copycat). False: an established coin this one builds on (flag references_known_coin)",
+            "title": "Recent"
           },
           "signals": {
             "default": [],
@@ -1061,10 +1086,14 @@
             "type": "array"
           },
           "kind": {
+            "description": "sol, stablecoin, lst (staked SOL) and major (wrapped BTC/ETH) carry no meaning; token and tokenized_stock (an xStock such as TSLAx) feed the analysis",
             "enum": [
               "sol",
               "stablecoin",
-              "token"
+              "lst",
+              "major",
+              "token",
+              "tokenized_stock"
             ],
             "title": "Kind",
             "type": "string"
@@ -1117,6 +1146,18 @@
               }
             ],
             "title": "Symbol"
+          },
+          "underlying": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a tokenized stock: the stock ticker (TSLA for TSLAx)",
+            "title": "Underlying"
           }
         },
         "required": [
@@ -1305,6 +1346,15 @@
               }
             ],
             "title": "Source"
+          },
+          "supported_by": {
+            "default": [],
+            "description": "Inputs that point at this referent (name, symbol, description, image, x, trend, chain, db); several independent ones make it more trustworthy",
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported By",
+            "type": "array"
           }
         },
         "required": [

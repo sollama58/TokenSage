@@ -1,0 +1,75 @@
+# Listed companies and ETFs that coins reference, and the underlyings of tokenized stocks
+# (Backed "xStocks" on Solana: TSLAx, NVDAx, SPYx, ... = ticker + "x"). Used two ways:
+# - a coin paired against an xStock (or named after a stock) is read in that stock's light
+# - company names and tickers become lexicon entities ("Tesla", "$NVDA", "TSLAx")
+#
+# aliases: extra surfaces matched as words. The ticker is added automatically unless
+# ticker_is_word (COIN, HOOD, SPY, META, ...): a common word must not read as a stock.
+# The company name is added unless name_is_word (Apple, Meta, Oracle, Visa, ...): then only
+# the aliases given here (e.g. "apple inc") count.
+# categories: beyond tradfi/stock (or tradfi/index_etf for kind: etf).
+stocks:
+  - {ticker: TSLA, name: Tesla, aliases: [tesla inc, tesla motors], categories: [celebrity/elon], desc: "Tesla, Inc. (NASDAQ: TSLA), EV maker led by Elon Musk"}
+  - {ticker: NVDA, name: Nvidia, aliases: [nvidia corp], categories: [ai_agent], desc: "Nvidia (NASDAQ: NVDA), AI chip maker"}
+  - {ticker: AAPL, name: Apple, name_is_word: true, aliases: [apple inc, apple stock], desc: "Apple Inc. (NASDAQ: AAPL)"}
+  - {ticker: MSFT, name: Microsoft, aliases: [microsoft corp], categories: [ai_agent], desc: "Microsoft (NASDAQ: MSFT)"}
+  - {ticker: AMZN, name: Amazon, aliases: [amazon com, amazon stock], desc: "Amazon.com (NASDAQ: AMZN)"}
+  - {ticker: GOOGL, name: Alphabet, aliases: [google, alphabet inc], categories: [ai_agent], desc: "Alphabet / Google (NASDAQ: GOOGL)"}
+  - {ticker: META, name: Meta Platforms, ticker_is_word: true, aliases: [meta platforms, facebook], desc: "Meta Platforms (NASDAQ: META), Facebook/Instagram owner"}
+  - {ticker: NFLX, name: Netflix, desc: "Netflix (NASDAQ: NFLX)"}
+  - {ticker: AMD, name: Advanced Micro Devices, aliases: [advanced micro devices], categories: [ai_agent], desc: "AMD (NASDAQ: AMD), chip maker"}
+  - {ticker: AVGO, name: Broadcom, desc: "Broadcom (NASDAQ: AVGO), chip maker"}
+  - {ticker: INTC, name: Intel, name_is_word: true, aliases: [intel corp, intel stock], desc: "Intel (NASDAQ: INTC)"}
+  - {ticker: ORCL, name: Oracle, name_is_word: true, aliases: [oracle corp, oracle stock], categories: [ai_agent], desc: "Oracle (NYSE: ORCL)"}
+  - {ticker: PLTR, name: Palantir, categories: [ai_agent], desc: "Palantir (NASDAQ: PLTR), data/AI software"}
+  - {ticker: CRM, name: Salesforce, desc: "Salesforce (NYSE: CRM)"}
+  - {ticker: CRWD, name: CrowdStrike, desc: "CrowdStrike (NASDAQ: CRWD)"}
+  - {ticker: CSCO, name: Cisco, desc: "Cisco (NASDAQ: CSCO)"}
+  - {ticker: IBM, name: IBM, desc: "IBM (NYSE: IBM)"}
+  - {ticker: MRVL, name: Marvell, desc: "Marvell Technology (NASDAQ: MRVL)"}
+  - {ticker: APP, name: AppLovin, ticker_is_word: true, desc: "AppLovin (NASDAQ: APP)"}
+  - {ticker: NOW, name: ServiceNow, ticker_is_word: true, desc: "ServiceNow (NYSE: NOW)"}
+  - {ticker: COIN, name: Coinbase, ticker_is_word: true, categories: [crypto_native], desc: "Coinbase (NASDAQ: COIN), crypto exchange"}
+  - {ticker: MSTR, name: MicroStrategy, aliases: [microstrategy, strategy inc], categories: [crypto_native], desc: "Strategy / MicroStrategy (NASDAQ: MSTR), Saylor's bitcoin treasury company"}
+  - {ticker: HOOD, name: Robinhood, ticker_is_word: true, aliases: [robinhood markets], categories: [crypto_native], desc: "Robinhood Markets (NASDAQ: HOOD), retail broker"}
+  - {ticker: CRCL, name: Circle, name_is_word: true, aliases: [circle internet, circle stock, usdc issuer], categories: [crypto_native], desc: "Circle Internet Group (NYSE: CRCL), USDC issuer"}
+  - {ticker: GME, name: GameStop, categories: [meme_template/other], desc: "GameStop (NYSE: GME), the original meme stock"}
+  - {ticker: AMC, name: AMC Entertainment, aliases: [amc entertainment, amc theatres], categories: [meme_template/other], desc: "AMC Entertainment (NYSE: AMC), meme stock"}
+  - {ticker: OPEN, name: Opendoor, ticker_is_word: true, categories: [meme_template/other], desc: "Opendoor (NASDAQ: OPEN), 2025 meme stock"}
+  - {ticker: JPM, name: JPMorgan, aliases: [jp morgan, jpmorgan chase], desc: "JPMorgan Chase (NYSE: JPM)"}
+  - {ticker: GS, name: Goldman Sachs, desc: "Goldman Sachs (NYSE: GS)"}
+  - {ticker: BAC, name: Bank of America, desc: "Bank of America (NYSE: BAC)"}
+  - {ticker: MA, name: Mastercard, desc: "Mastercard (NYSE: MA)"}
+  - {ticker: V, name: Visa, name_is_word: true, aliases: [visa inc], desc: "Visa (NYSE: V)"}
+  - {ticker: BRK.B, name: Berkshire Hathaway, aliases: [berkshire, brkb], desc: "Berkshire Hathaway (NYSE: BRK.B), Warren Buffett's company"}
+  - {ticker: WMT, name: Walmart, desc: "Walmart (NYSE: WMT)"}
+  - {ticker: MCD, name: McDonald's, aliases: [mcdonalds, mcdonald s, maccas], desc: "McDonald's (NYSE: MCD)"}
+  - {ticker: KO, name: Coca-Cola, aliases: [coca cola, cocacola], desc: "Coca-Cola (NYSE: KO)"}
+  - {ticker: PEP, name: PepsiCo, ticker_is_word: true, aliases: [pepsi], desc: "PepsiCo (NASDAQ: PEP)"}
+  - {ticker: PG, name: Procter & Gamble, aliases: [procter and gamble, procter gamble], desc: "Procter & Gamble (NYSE: PG)"}
+  - {ticker: PM, name: Philip Morris, desc: "Philip Morris International (NYSE: PM)"}
+  - {ticker: HD, name: Home Depot, desc: "The Home Depot (NYSE: HD)"}
+  - {ticker: XOM, name: Exxon Mobil, aliases: [exxon, exxonmobil], desc: "Exxon Mobil (NYSE: XOM)"}
+  - {ticker: CVX, name: Chevron, desc: "Chevron (NYSE: CVX)"}
+  - {ticker: LLY, name: Eli Lilly, desc: "Eli Lilly (NYSE: LLY)"}
+  - {ticker: NVO, name: Novo Nordisk, aliases: [ozempic maker], desc: "Novo Nordisk (NYSE: NVO), Ozempic maker"}
+  - {ticker: PFE, name: Pfizer, desc: "Pfizer (NYSE: PFE)"}
+  - {ticker: JNJ, name: Johnson & Johnson, aliases: [johnson and johnson], desc: "Johnson & Johnson (NYSE: JNJ)"}
+  - {ticker: MRK, name: Merck, desc: "Merck & Co. (NYSE: MRK)"}
+  - {ticker: ABBV, name: AbbVie, desc: "AbbVie (NYSE: ABBV)"}
+  - {ticker: ABT, name: Abbott, desc: "Abbott Laboratories (NYSE: ABT)"}
+  - {ticker: AZN, name: AstraZeneca, desc: "AstraZeneca (NASDAQ: AZN)"}
+  - {ticker: UNH, name: UnitedHealth, aliases: [unitedhealth group], desc: "UnitedHealth Group (NYSE: UNH)"}
+  - {ticker: TMO, name: Thermo Fisher, desc: "Thermo Fisher Scientific (NYSE: TMO)"}
+  - {ticker: DHR, name: Danaher, desc: "Danaher (NYSE: DHR)"}
+  - {ticker: MDT, name: Medtronic, desc: "Medtronic (NYSE: MDT)"}
+  - {ticker: HON, name: Honeywell, ticker_is_word: true, desc: "Honeywell (NASDAQ: HON)"}
+  - {ticker: LIN, name: Linde, ticker_is_word: true, desc: "Linde (NASDAQ: LIN)"}
+  - {ticker: ACN, name: Accenture, desc: "Accenture (NYSE: ACN)"}
+  - {ticker: CMCSA, name: Comcast, desc: "Comcast (NASDAQ: CMCSA)"}
+  - {ticker: SPY, name: S&P 500 ETF, kind: etf, ticker_is_word: true, aliases: [s&p 500, s and p 500, sp500, spx500], desc: "SPDR S&P 500 ETF (SPY), the US large-cap index"}
+  - {ticker: QQQ, name: Nasdaq-100 ETF, kind: etf, aliases: [nasdaq 100, nasdaq], desc: "Invesco QQQ, the Nasdaq-100 index ETF"}
+  - {ticker: TQQQ, name: ProShares UltraPro QQQ, kind: etf, desc: "3x leveraged Nasdaq-100 ETF (TQQQ)"}
+  - {ticker: VTI, name: Vanguard Total Stock Market ETF, kind: etf, desc: "Vanguard Total Stock Market ETF (VTI)"}
+  - {ticker: GLD, name: SPDR Gold Shares, kind: etf, aliases: [gold etf], desc: "SPDR Gold Shares (GLD), gold ETF"}
+  - {ticker: TBLL, name: Treasury Bill ETF, kind: etf, aliases: [t bill etf], desc: "Short-term US Treasury bill ETF (TBLL)"}

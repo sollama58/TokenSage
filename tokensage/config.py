@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     max_age_mid_s: int = 3600  # 1 h .. 7 d
     max_age_old_s: int = 86400  # > 7 d
 
+    # --- copycats ---
+    # A coin is flagged as a copycat only when the coin it copies (same name, ticker or logo)
+    # launched within this many days before it; older namesakes are references, not copies.
+    copycat_window_days: int = 30
+
     # --- behaviour flags ---
     accept_non_pump: bool = True
     enable_clip: bool = False

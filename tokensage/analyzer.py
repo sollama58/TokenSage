@@ -16,7 +16,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage import fulldepth
+from tokensage import fulldepth, queue
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -208,11 +208,13 @@ async def _db_context(
             "select count(*) from token where creator=$1 and mint<>$2", r.creator, r.mint
         )
     # same-name tokens we already know, plus best-effort external searches
+    dbc.copycat_window_days = ctx.settings.copycat_window_days
     if ticker or name_compact:
+        # an empty name or ticker must not match every token whose name/ticker is empty
         rows = await conn.fetch(
             """select mint, name, symbol, created_at from token
-               where mint<>$1 and (upper(symbol)=$2 or regexp_replace(lower(coalesce(name,'')),
-                     '[^a-z0-9]', '', 'g') = $3)
+               where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
+                     regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
                order by created_at nulls last limit 50""",
             r.mint,
             (ticker or "").upper(),
@@ -261,17 +263,29 @@ async def _db_context(
             dbc.image_candidates.append(
                 image_stage.Candidate(f"known:{c.symbol}", c.logo_phash, known_coin=c.symbol)
             )
+    # Logos of tokens launched in the copycat window before this one: a logo shared with an
+    # older token is not a copy of a live coin (and scanning only recent logos keeps this
+    # query and the comparison small).
     this_key = m.image_content_key if m else None
     rows = await conn.fetch(
-        """select i.content_key, i.phash, tm.mint from image i
+        """select i.content_key, i.phash, tm.mint, t.created_at from image i
            join token_metadata tm on tm.image_content_key = i.content_key
+           join token t on t.mint = tm.mint
            where i.phash is not null and i.content_key <> coalesce($1, '')
-           order by i.analyzed_at desc nulls last limit 20000""",
+             and tm.mint <> $2
+             and t.created_at >= coalesce($3, now()) - make_interval(days => $4)
+             and t.created_at <= coalesce($3, now())
+           order by t.created_at desc limit 20000""",
         this_key,
+        r.mint,
+        r.created_at,
+        ctx.settings.copycat_window_days,
     )
     for row in rows:
         dbc.image_candidates.append(
-            image_stage.Candidate(row["content_key"], row["phash"], mint=row["mint"])
+            image_stage.Candidate(
+                row["content_key"], row["phash"], mint=row["mint"], created_at=row["created_at"]
+            )
         )
     return dbc
 
@@ -471,11 +485,23 @@ def build_document(
                 desc=agg.referent.desc,
                 source=agg.referent.source,
                 confidence=agg.referent.score,
+                supported_by=list(
+                    dict.fromkeys(
+                        ev.where
+                        for ev in out.evidence
+                        if ev.referent is not None and ev.referent.label == agg.referent.label
+                    )
+                ),
             )
         categories = [Category(label=lbl, confidence=s) for lbl, s in agg.categories]
         copy_of = [
             CopyOf(
-                ticker=c.get("ticker"), name=c.get("name"), mint=c.get("mint"), signals=c["signals"]
+                ticker=c.get("ticker"),
+                name=c.get("name"),
+                mint=c.get("mint"),
+                signals=c["signals"],
+                created_at=c.get("created_at"),
+                recent=c.get("recent"),
             )
             for c in out.copy_of
         ]
@@ -618,6 +644,7 @@ def _pair_out(p: pairing.PairAssessment | None) -> Pair | None:
         name=p.name,
         kind=p.kind,  # type: ignore[arg-type]
         source=p.source,
+        underlying=p.underlying,
         builds_on=p.builds_on,
         builds_on_detail=p.builds_on_detail,
         referent=ref,
@@ -902,6 +929,8 @@ async def analyze(
         ctx=dbc,
         pair=await pair_lookup.lookup(conn, ctx.rpc, r.quote_mint),
     )
+    inp.logo_features = cached_feats  # hashes from cache: still compared with other logos
+    await _queue_pair_analysis(conn, inp.pair)
     if depth == "full":
         tweet, profile = await fulldepth.x_content(conn, ctx.http, ctx.settings, x)
         inp.x_url_handle = x.ref.url_handle if x else None
@@ -909,7 +938,6 @@ async def analyze(
         inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
         inp.run_ocr = inp.ocr_lines is None and image_bytes is not None
         inp.trend_index = await fulldepth.trend_index(conn)
-        inp.logo_features = cached_feats
         inp.x_media = await fulldepth.media_hashes(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
         )
@@ -938,6 +966,20 @@ async def analyze(
     doc = build_document(r, m, depth, out, x, hint_use)
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
+
+
+async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput | None) -> None:
+    """A pair token we have never analysed but that is itself a pump.fun coin: analyse it in
+    the background (basic depth, lowest priority) so the next coin paired with it gets the
+    pair token's full meaning (its referent and categories) instead of a read of its name."""
+    if pair is None or pair.kind != "token" or pair.source not in ("db", "onchain", "none"):
+        return
+    if not pair.mint.endswith("pump") or pairing.xstock_ticker(pair.symbol, pair.name, pair.mint):
+        return
+    try:
+        await queue.enqueue(conn, "analyze", pair.mint, "basic", requested_by="pair_lookup")
+    except Exception as e:  # noqa: BLE001 - only a prefetch
+        log.info("pair.queue_failed", mint=pair.mint, error=str(e)[:120])
 
 
 async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:

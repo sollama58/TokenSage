@@ -16,7 +16,11 @@ from tokensage.engine.knowledge import Knowledge, load_knowledge
 _ZW = re.compile(r"[​‌‎‏⁠﻿­⁡-⁤]")
 _PUNCT_TO_SPACE = re.compile(r"[^\w$#@&'+.\-]+")
 _DOLLAR = re.compile(r"\$([A-Za-z][A-Za-z0-9]{1,12})\b")
-_CAMEL = re.compile(r"[A-Z]{2,}(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]{2,}|\d+(?:\.\d+)?")
+# An all-caps run ending in a lone lowercase "x" (TSLAx, NVDAx: tokenized-stock tickers) is
+# one word, not "TSL" + "Ax".
+_CAMEL = re.compile(
+    r"[A-Z]{2,}x(?![a-z])|[A-Z]{2,}(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]{2,}|\d+(?:\.\d+)?"
+)
 _REPEAT3 = re.compile(r"(.)\1{2,}")
 _LEET = str.maketrans(
     {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"}

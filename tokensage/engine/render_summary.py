@@ -17,6 +17,7 @@ _CATEGORY_PHRASE = {
     "crypto_native": "a crypto-culture in-joke coin",
     "derivative": "a derivative of an existing coin",
     "humor_crude_offensive": "a crude-humour coin",
+    "tradfi": "a stock-market / tradfi-themed coin",
 }
 
 
@@ -34,6 +35,7 @@ def summarize(
     ticker_explanation: str | None,
     extra_caveats: list[str],
     max_bullets: int = 5,
+    context: list[str] | None = None,
 ) -> tuple[str, list[str]]:
     head = f"{name or '(unnamed)'} (${ticker or '?'})"
     parts: list[str] = []
@@ -54,6 +56,8 @@ def summarize(
     subs = [(lbl, s) for lbl, s in agg.categories if "/" in lbl][:4]
     if subs:
         parts.append("Categories: " + ", ".join(f"{lbl} {s:.2f}" for lbl, s in subs) + ".")
+    if context:
+        parts.append("Context: " + "; ".join(context) + ".")
     if ticker_explanation:
         parts.append(ticker_explanation.rstrip(".") + ".")
     bullets = _why(agg.evidence, max_bullets)

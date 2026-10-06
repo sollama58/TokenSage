@@ -104,13 +104,15 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
         c = m.coin
         self_coin = is_self(m, n)
         derivative_markers = [mk for mk in n.markers if mk.kind]
-        sub = "copycat"
+        # an established coin's name/ticker is a reference; "copycat" is kept for copies
+        # of coins launched recently (see pipeline._same_name_evidence)
+        sub = "reference"
         if derivative_markers:
             kinds = {mk.kind for mk in derivative_markers}
             sub = (
                 "sequel"
                 if "sequel" in kinds
-                else ("template_family" if "template_family" in kinds else "copycat")
+                else ("template_family" if "template_family" in kinds else "reference")
             )
         if "homoglyph" in n.obfuscation:
             sub = "homoglyph_spoof"
@@ -124,7 +126,7 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
             else min(0.95, m.score + (0.1 if self_coin else 0.0)),
             categories=list(c.categories),
         )
-        verb = "matches" if self_coin else "copies"
+        verb = "matches" if self_coin else "builds on"
         detail = f"{verb} ${c.symbol} ({c.name}) via {', '.join(m.signals)}"
         if not self_coin:
             evs.append(

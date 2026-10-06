@@ -96,15 +96,15 @@ Every error has one shape:
 | `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `creator`, `quote_mint`, and `pair` (the token it trades against; see below) |
 | `raw` | Name, symbol, description and social links as found in the metadata (**untrusted text, escape before rendering**) |
 | `normalized` | Cleaned tokens, ticker base, version markers (`version:2`), emoji keywords, obfuscation flags |
-| `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`. May be `null` |
+| `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, and `supported_by` (the inputs pointing at it: name, symbol, description, image, x, trend, chain; several independent ones make it more trustworthy). May be `null` |
 | `categories[]` | Multi-label with confidences. Labels come from `GET /v1/meta`; expect new ones over time |
 | `ticker_explanation` | Plain-language explanation of the ticker |
-| `copy_of[]` | Coins this one copies or derives from, with the signals that say so |
+| `copy_of[]` | Coins this one copies or derives from, with the signals that say so, `created_at` and `recent`. **Copycat = copying a coin launched in the 30 days before this one** (same name/ticker, or a near-identical logo of an earlier token): `recent: true`, category `derivative/copycat`, flag `copycat`. Older namesakes are ignored. A well-known established coin (Bonk, Pepe, …) is a reference: `recent: false`, category `derivative/reference`, flag `references_known_coin` (info). The window is `COPYCAT_WINDOW_DAYS` (default 30) |
 | `image` | Hashes, OCR text, palette, near-duplicates, optional visual labels. `source_url` is the gateway URL. **Images are not screened for NSFW content; decide yourself whether to show them** |
 | `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author (handle, followers, verification type, join date, username changes), text, `relation` (`narrative_reference` = the coin is *about* someone else's earlier tweet; `launch_announcement`; `official_account`; `spoofed` = the URL's handle is not the tweet's real author; `search_only`), `status` (`ok`, `deleted`, `suspended`, `not_fetched`, `failed`), `match` (post vs token, see below), `reuse_count` (other tokens linking the same tweet/handle; a Community link has `status: "not_fetched"`, because no free source serves Community name, description or creation time: X's own API and twitterapi.io both charge for it), `quoted` when the linked tweet is a quote tweet and `replied_to` when it is a reply: that post's `id`, `url`, `status`, `author`, `text`, `created_at` and `predates_token_by_s` (a reply whose parent could not be fetched still names its author). A launch post that quotes or answers someone else's earlier post usually takes its meaning from that post, so its text feeds the analysis too, and a large or verified author of it raises `borrowed_narrative`. `accounts` lists everyone involved (`role`: `author`, `quoted_author`, `replied_to_author`, `mentioned`; `handle`, display `name`, `followers`, `verified_type`). Their names and handles are read like text, more weakly than the posts themselves (0.4× for the poster, 0.5× for quoted and replied-to authors, 0.3× for @mentions), so a reply to @elonmusk points at Elon Musk; that evidence says which account it came from |
 | `trend` | Trending-topic matches (Wikipedia spikes, news headlines) |
 | `flags[]` | `{code, severity, detail}`. Codes and descriptions are listed by `GET /v1/meta` |
-| `summary` | Template-generated plain-language summary |
+| `summary` | Template-generated plain-language summary. It includes a "Context:" sentence pulling the whole picture together: what it trades against, what its X post replies to or quotes, which recent coin it copies, and which trend it matches |
 | `evidence[]` | Why: `{kind, label, weight, detail, source, url, where}`; `where` is the input it came from (`name`, `symbol`, `description`, `image`, `x`, `trend`, `chain`, `db`) |
 | `caveats[]` | Automatic caveats (single weak source, ambiguous referent, deleted tweet, …) |
 | `depth`, `analyzed_at`, `versions` | What was run, when, and with which rule/lexicon versions. A cached analysis made by older rules (before a deploy) is re-run on the next request unless you pass `max_age` |
@@ -174,7 +174,8 @@ with BONK). That pairing feeds the analysis.
 
 | Field | Meaning |
 |---|---|
-| `kind` | `sol`, `stablecoin` (USDC, USDT, USD1) or `token`. Only `token` affects the analysis |
+| `kind` | `sol`, `stablecoin` (USDC, USDT, USD1, PYUSD), `lst` (JitoSOL, mSOL, bSOL, JupSOL), `major` (cbBTC, WBTC, WETH): reported only. `token` and `tokenized_stock` feed the analysis |
+| `underlying` | For `tokenized_stock`: the stock ticker (TSLA for TSLAx) |
 | `source` | How the pair token was identified: `neutral` (SOL/stablecoin), `analysis` (our stored analysis of it), `db`, `onchain` (its Metaplex / Token-2022 metadata, cached for a week), `none` (unidentified) |
 | `builds_on` | The coin's name or ticker builds on the pair token's: same ticker base, ticker contains it (`BBONK`), or the name contains its ticker or a distinctive word of its name |
 | `referent`, `categories` | What the pair token itself is about: from our stored analysis of it, else from reading its own name and ticker |
@@ -187,6 +188,20 @@ How it changes the analysis when `kind` is `token`:
   at 0.6× their confidence;
 - otherwise the pair token's categories count weakly (0.25×) and its referent is reported
   here only: the coin's own name, ticker and logo still decide what it refers to.
+
+**Tokenized stocks (xStocks).** A pair token whose symbol is a stock ticker plus `x` (TSLAx,
+NVDAx, SPYx) and whose name says "xStock" (or whose mint is one of Backed's `Xs…` addresses)
+is `kind: "tokenized_stock"`. The coin gets `tradfi/tokenized_stock` (it was launched for that
+stock's crowd) instead of `crypto_native/paired_ecosystem`. The company comes from
+`data/stocks.yaml` (64 large caps, meme stocks and index ETFs, e.g. Tesla → `celebrity/elon`,
+Nvidia → `ai_agent`). When the coin's name or ticker builds on the company or stock ticker
+("Tesla Moon", `$NVDAMOON`) the company becomes the referent; otherwise only its categories
+count, weakly. Company names and tickers are also understood in the coin itself ("Tesla",
+"$NVDA", "TSLAx"); common-word names and tickers (Apple, Meta, COIN, HOOD, SPY) only count in
+an unambiguous form ("apple inc", "metax").
+
+When the pair token is itself a pump.fun coin TokenSage has never analysed, a basic analysis of
+it is queued in the background, so later coins paired with it get its full meaning.
 
 `market.pair` is `null` when the quote mint is unknown, e.g. a coin analysed from hints
 before it is visible on-chain.

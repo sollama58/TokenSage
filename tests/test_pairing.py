@@ -180,3 +180,114 @@ async def test_sol_pair_is_reported_without_effect(
     assert a is not None and a.market.quote_mint == "SOL"
     assert a.market.pair is not None and a.market.pair.kind == "sol"
     assert not any(f.code == "non_sol_pair" for f in a.flags)
+
+
+# ----------------------------------------------------------------- tokenized stocks (xStocks)
+
+XS_MINT = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+
+
+def _xstock(symbol: str = "TSLAx", name: str = "Tesla xStock", mint: str = XS_MINT) -> PairInput:
+    return PairInput(mint=mint, symbol=symbol, name=name, source="onchain")
+
+
+def test_xstock_detection_needs_the_name_or_the_backed_mint() -> None:
+    from tokensage.engine.pairing import xstock_ticker
+
+    assert xstock_ticker("TSLAx", "Tesla xStock", "anything") == "TSLA"
+    assert xstock_ticker("NVDAx", "NVIDIA", XS_MINT) == "NVDA"
+    assert xstock_ticker("BRK.Bx", "Berkshire Hathaway xStock", "m") == "BRKB"
+    assert xstock_ticker("MAX", "Maximus", "m") is None  # shape alone is not enough
+    assert xstock_ticker("SEX", "Sex", XS_MINT[:2] + "z" * 41) is None  # uppercase X, no name
+    assert xstock_ticker(None, "Tesla xStock", "m") is None
+
+
+def test_coin_building_on_the_paired_stock_takes_the_company() -> None:
+    out = _run("Tesla Moon", "TMOON", _xstock())
+    p = out.pair
+    assert p is not None and p.kind == "tokenized_stock" and p.underlying == "TSLA" and p.builds_on
+    assert out.agg.referent is not None and out.agg.referent.label == "Tesla (TSLA)"
+    cats = dict(out.agg.categories)
+    assert cats["tradfi/tokenized_stock"] >= 0.5 and cats.get("celebrity/elon", 0) > 0.5
+    assert "crypto_native/paired_ecosystem" not in cats  # the stock label says it instead
+    flag = next(f for f in out.flags if f.code == "non_sol_pair")
+    assert "tokenized $TSLA stock" in flag.detail
+    assert "Context: trades against $TSLAx" in out.summary
+
+
+def test_ticker_building_on_the_stock_counts_too() -> None:
+    out = _run("Green Candles", "NVDAMOON", _xstock("NVDAx", "NVIDIA xStock"))
+    assert out.pair is not None and out.pair.builds_on
+    assert "contains the stock ticker $NVDA" in (out.pair.builds_on_detail or "")
+
+
+def test_unrelated_coin_on_a_stock_pair_keeps_its_own_meaning() -> None:
+    out = _run("Robotaxi", "TAXI", _xstock())
+    assert out.pair is not None and not out.pair.builds_on
+    assert out.agg.referent is None or "Tesla" not in out.agg.referent.label
+    assert "tradfi/tokenized_stock" in dict(out.agg.categories)
+
+
+def test_unknown_xstock_still_reads_as_a_stock() -> None:
+    out = _run("Moon", "MOON", _xstock("ZZZQx", "Zed Corp xStock"))
+    assert out.pair is not None and out.pair.kind == "tokenized_stock"
+    assert out.pair.underlying == "ZZZQ" and out.pair.referent is None
+
+
+@pytest.mark.parametrize(
+    "mint,kind",
+    [
+        ("J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn", "lst"),
+        ("cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij", "major"),
+        ("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "stablecoin"),
+    ],
+)
+def test_staked_sol_wrapped_majors_and_more_stables_are_neutral(mint: str, kind: str) -> None:
+    pair = neutral(mint)
+    assert pair is not None and pair.kind == kind
+    out = _run("Baby Bonk", "BBONK", pair)
+    assert out.pair is not None and not out.pair.evidence
+    assert not any(f.code == "non_sol_pair" for f in out.flags)
+
+
+def test_stock_names_and_tickers_are_understood_in_the_coin_itself() -> None:
+    for name, sym in (("Tesla Robot", "TROBOT"), ("Nvidia Gang", "NVDAG"), ("TSLAx Moon", "TXM")):
+        out = _run(name, sym, None)
+        assert any(e.source.startswith("entities:") and "(" in e.source for e in out.evidence), name
+    # common words that are also company names or tickers do not turn into stocks
+    for name, sym in (("Apple Pie", "PIE"), ("Coin Hood", "HOOD"), ("Max", "MAX")):
+        out = _run(name, sym, None)
+        assert "tradfi/stock" not in dict(out.agg.categories), name
+
+
+def test_short_names_are_not_read_from_compound_fragments() -> None:
+    out = _run("Robotaxi", "TAXI", None)  # segments as "robot a xi"; "xi" is not Xi Jinping
+    assert out.agg.referent is None or "Xi" not in out.agg.referent.label
+
+
+@needs_db
+async def test_unknown_pump_pair_token_is_queued_for_analysis(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    pump_pair = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM".replace("WWM", "ump")
+    pump_pair = pump_pair[:-4] + "pump"
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "Moon Frog", "MFROG", META_URI, quote=pump_pair)
+    chain.add_spl_token(pump_pair, "Zzqx", "ZZQX")
+    install_web(router, chain, meta=metadata_json(name="Moon Frog", symbol="MFROG", twitter=None))
+    async with make_client(migrated_db) as c:
+        r = await c.get(f"/v1/tokens/{T22_MINT}", params={"depth": "basic", "wait": 5})
+    assert r.status_code == 200, r.text
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a is not None and a.referent is None or a.referent.supported_by is not None
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        queued = await conn.fetchval(
+            "select count(*) from job where kind='analyze' and mint=$1 and depth='basic'",
+            pump_pair,
+        )
+    finally:
+        await conn.close()
+    assert queued == 1
