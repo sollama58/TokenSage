@@ -11,6 +11,7 @@ from tokensage.engine import image as im
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.engine.normalize import normalize, ticker_base
 from tokensage.engine.pipeline import DbContext, EngineInput, run_basic
+from tokensage.engine.ticker import explain
 
 
 def _logo(text_color=(250, 220, 40), size=256, rotate=0) -> bytes:  # type: ignore[no-untyped-def]
@@ -275,3 +276,51 @@ def test_description_only_referent_is_a_weak_guess() -> None:
     # the name itself naming the entity is unaffected
     named = _basic("Elon's Cat", "ECAT")
     assert named.agg.referent is not None and named.agg.referent.score >= 0.6
+
+
+# ---------------------------------------------------------------- CJK translation
+
+
+def test_han_names_are_translated_longest_match_first() -> None:
+    n = normalize("中国龙", "ZGL", None)
+    assert n.name_tokens == ["china", "dragon"]
+    assert n.cjk_gloss == [("中国", "china"), ("龙", "dragon")]
+    assert n.name_pinyin == ["zhong", "guo", "long"]
+    assert n.scripts == ["Han"]
+
+
+def test_untranslated_han_falls_back_to_pinyin_and_particles_drop() -> None:
+    n = normalize("中国的猫来", "X", None)
+    assert n.name_tokens[:2] == ["china", "cat"]  # 的 dropped
+    assert "lai" in n.name_tokens  # 来 has no entry: pinyin as before
+
+
+def test_traditional_forms_and_mixed_scripts_translate() -> None:
+    assert normalize("龍", "X", None).name_tokens == ["dragon"]
+    n = normalize("Super猫", "X", None)
+    assert n.name_tokens == ["super", "cat"]
+
+
+def test_latin_names_carry_no_gloss_or_pinyin() -> None:
+    n = normalize("Peanut", "PNUT", None)
+    assert n.cjk_gloss == [] and n.name_pinyin == []
+
+
+def test_ticker_explained_by_pinyin_of_translated_name() -> None:
+    k = load_knowledge()
+    assert explain(normalize("猫", "MAO", None), k).method == "equals_token"
+    assert explain(normalize("中国龙", "ZGL", None), k).method == "acronym"
+    assert explain(normalize("猫", "CAT", None), k).method == "equals_token"
+
+
+def test_han_description_is_translated() -> None:
+    n = normalize("Mao", "MAO", "一只猫")
+    assert "cat" in n.desc_tokens
+
+
+def test_cjk_word_list_keys_are_han_and_values_lowercase() -> None:
+    k = load_knowledge()
+    assert len(k.cjk) >= 300
+    for w, eng in k.cjk.items():
+        assert all(0x4E00 <= ord(c) <= 0x9FFF for c in w), w
+        assert eng == eng.lower().strip(), w
