@@ -6,19 +6,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from tokensage.engine import image as image_stage
 from tokensage.engine import (
+    gazetteer,
     known_coins,
     lexicon,
     ocr,
     pairing,
     ticker,
     trends,
+    wikilookup,
     xmatch,
     xsignals,
 )
+from tokensage.engine import image as image_stage
 from tokensage.engine.aggregate import Aggregated, aggregate
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
+from tokensage.engine.gazetteer import Gazetteer
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
 from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
@@ -52,6 +55,8 @@ class DbContext:
     image_candidates: list[image_stage.Candidate] = field(default_factory=list)
     extra_coins: list[KnownCoin] = field(default_factory=list)
     copycat_window_days: int = 30
+    # the Wikidata gazetteer; None = the packaged snapshot (the cron's table, when loaded)
+    gazetteer: Gazetteer | None = None
 
 
 @dataclass
@@ -76,6 +81,8 @@ class EngineInput:
     x_media: list[xmatch.MediaHash] | None = None  # hashed post images / profile avatar
     # the logo's hashes when they come from cache instead of image_bytes
     logo_features: image_stage.ImageFeatures | None = None
+    # Wikipedia articles found for names nothing in the gazetteer knows (full depth)
+    wiki_refs: list[wikilookup.WikiRef] | None = None
 
 
 @dataclass
@@ -152,7 +159,10 @@ Pass = tuple[str, str, float] | tuple[str, str, float, str]
 
 
 def _lexicon_evidence(
-    n: Normalized, k: Knowledge, extra_passes: list[Pass] | None = None
+    n: Normalized,
+    k: Knowledge,
+    extra_passes: list[Pass] | None = None,
+    gaz: Gazetteer | None = None,
 ) -> list[Ev]:
     evs: list[Ev] = []
     name_text = " ".join(n.name_tokens)
@@ -176,7 +186,10 @@ def _lexicon_evidence(
         if not text:
             continue
         first_new = len(evs)
-        for h in lexicon.find(text, k):
+        # the Wikidata gazetteer never reads a ticker: short punny tickers ($KIRK, $SPEED)
+        # would match surnames and stage names far more often than they mean them
+        g = gaz if where != "symbol" else None
+        for h in lexicon.find(text, k, g, name_pass=where == "name"):
             if where == "name" and len(h.surface) <= 2 and h.surface not in written:
                 continue
             if where == "name" and h.kind != "wordnet":
@@ -212,7 +225,7 @@ def _lexicon_evidence(
                     label=e.label,
                     kind=e.kind,
                     desc=e.desc,
-                    source=f"entities:{e.label}",
+                    source=e.evidence_source,
                     score=round(0.45 + 0.45 * e.popularity, 3),
                     categories=list(e.categories),
                     surface=h.surface,
@@ -224,7 +237,7 @@ def _lexicon_evidence(
                             label=cat,
                             weight=round((0.5 + 0.35 * e.popularity) * factor, 3),
                             detail=f"'{h.surface}' refers to {e.label} ({e.desc})",
-                            source=f"entities:{e.label}",
+                            source=e.evidence_source,
                             where=where,  # type: ignore[arg-type]
                             referent=ref,
                         )
@@ -235,7 +248,7 @@ def _lexicon_evidence(
                         label="referent",
                         weight=ref.score,
                         detail=f"{e.label}: {e.desc}",
-                        source=f"entities:{e.label}",
+                        source=e.evidence_source,
                         where=where,  # type: ignore[arg-type]
                         referent=ref,
                     )
@@ -589,7 +602,10 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 if related and related.text:
                     extra_passes.append(("x", related.text, 0.7))
             extra_passes += _account_passes(xa)
-    evidence += _lexicon_evidence(n, k, extra_passes)
+    gaz = inp.ctx.gazetteer if inp.ctx.gazetteer is not None else gazetteer.packaged()
+    evidence += _lexicon_evidence(n, k, extra_passes, gaz)
+    if depth == "full" and inp.wiki_refs:
+        evidence += wikilookup.evidence(inp.wiki_refs)
 
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
     is_famous = any(known_coins.is_self(m, n) for m in matches)
@@ -908,7 +924,7 @@ def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessme
                 description=None,
                 image_bytes=None,
                 created_at=None,
-                ctx=DbContext(extra_coins=inp.ctx.extra_coins),
+                ctx=DbContext(extra_coins=inp.ctx.extra_coins, gazetteer=inp.ctx.gazetteer),
             )
             pair_meaning = _run(pair_only, "basic").agg
     return pairing.assess(inp.pair, n, k, pair_meaning, coin)
@@ -938,7 +954,7 @@ def _x_match(
             description=text,
             image_bytes=None,
             created_at=inp.created_at,
-            ctx=DbContext(extra_coins=inp.ctx.extra_coins),
+            ctx=DbContext(extra_coins=inp.ctx.extra_coins, gazetteer=inp.ctx.gazetteer),
         )
         post_meaning = _run(post_only, "basic").agg
     token_meaning = _run(token_only, "basic").agg

@@ -1,6 +1,7 @@
-# Seed gazetteer of named entities memecoins attach to. Hand-curated starter set; the
-# knowledge cron extends it from Wikidata in Phase 4. Matching is case-insensitive on
-# label + aliases. kind: person|famous_animal|meme|event|place|concept|coin
+# Seed gazetteer of named entities memecoins attach to. Hand-curated, and it always wins:
+# the open-world Wikidata gazetteer (data/gazetteer_wikidata.json.gz, refreshed monthly
+# into the entity table by the knowledge cron) never claims a surface listed here.
+# Matching is case-insensitive on label + aliases. kind: person|famous_animal|meme|event|place|concept|coin
 entities:
   # --- Elon & co
   - {label: Elon Musk, kind: person, aliases: [elon, musk, elonmusk, elon musk, elons, elon's], categories: [celebrity/elon], desc: "Tesla/SpaceX/X owner; frequent memecoin trigger", popularity: 1.0}

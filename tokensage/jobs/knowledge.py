@@ -2,6 +2,7 @@
 
 - Wikipedia pageviews: top-1000 per day with spike ratios -> trend_term (guide §5.8)
 - CoinGecko meme categories -> known_coin, with logo pHash (weekly)
+- Wikidata people, animals, memes, AI bots, pop culture -> entity (monthly, guide §4.4)
 - prune old trend rows
 """
 
@@ -14,18 +15,20 @@ import asyncpg
 import httpx
 import structlog
 
+from tokensage import gazetteer_db
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.engine import image as image_stage
 from tokensage.logging import configure_logging
 from tokensage.net.safe_fetch import safe_get
-from tokensage.sources import coingecko, wikimedia
+from tokensage.sources import coingecko, wikidata, wikimedia
 
 log = structlog.get_logger("jobs.knowledge")
 
 TREND_DAYS = 8
 TREND_KEEP_DAYS = 45
 COINGECKO_EVERY = timedelta(days=6)
+GAZETTEER_EVERY = timedelta(days=28)
 LOGO_HASHES_PER_RUN = 150
 
 
@@ -129,6 +132,22 @@ async def refresh_known_coins(
     return {"upserted": upserted, "logos_hashed": hashed}
 
 
+async def refresh_gazetteer(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, force: bool = False
+) -> dict[str, int]:
+    """The Wikidata gazetteer, monthly. Takes several minutes (one SPARQL query at a time)."""
+    last = await conn.fetchval(
+        "select max(updated_at) from entity where source=$1", gazetteer_db.SOURCE
+    )
+    if last and not force and datetime.now(UTC) - last < GAZETTEER_EVERY:
+        return {"skipped": 1}
+    entities, failed = await wikidata.fetch_all(http)
+    if failed:
+        log.warning("gazetteer.groups_failed", groups=failed)
+    out = await gazetteer_db.store(conn, entities, complete=not failed)
+    return {**out, "groups_failed": len(failed)}
+
+
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -142,6 +161,8 @@ async def main() -> None:
                 log.info("knowledge.trends", **t)
                 c = await refresh_known_coins(conn, http, settings)
                 log.info("knowledge.known_coins", **c)
+                g = await refresh_gazetteer(conn, http)
+                log.info("knowledge.gazetteer", **g)
         finally:
             await pool.close()
 
