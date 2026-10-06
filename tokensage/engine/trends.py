@@ -37,10 +37,15 @@ class TrendIndex:
         self._auto = ahocorasick.Automaton()
         self._generic = {e.label.lower() for e in k.entities if e.popularity >= 0.95}
         n = 0
+        best: dict[str, TrendTerm] = {}
         for t in terms:
             for s in surfaces_for(t.term):
-                self._auto.add_word(" " + s + " ", (s, t))
-                n += 1
+                # two terms can share a surface: keep the stronger spike, not the last added
+                if s not in best or t.spike > best[s].spike:
+                    best[s] = t
+        for s, t in best.items():
+            self._auto.add_word(" " + s + " ", (s, t))
+            n += 1
         if n:
             self._auto.make_automaton()
         self._n = n

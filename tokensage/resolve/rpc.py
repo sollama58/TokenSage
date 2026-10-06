@@ -36,7 +36,12 @@ class SolanaRpc:
             raise RpcError(f"rpc http {r.status_code}")
         if r.status_code != 200:
             raise RpcError(f"rpc http {r.status_code}: {r.text[:200]}", retryable=False)
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError as e:  # e.g. an HTML error page from a proxy with status 200
+            raise RpcError(f"rpc returned non-JSON: {r.text[:120]!r}") from e
+        if not isinstance(data, dict):
+            raise RpcError(f"rpc returned unexpected JSON: {str(data)[:120]}")
         if "error" in data:
             err = data["error"] or {}
             code = err.get("code")

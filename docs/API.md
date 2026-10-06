@@ -187,13 +187,16 @@ Every field is optional. How hints are treated:
   an unsafe URL is simply not fetched.
 - **Still verified on-chain.** TokenSage still reads the mint and bonding curve. If the on-chain
   name or symbol differs from a hint, the on-chain value wins and a caveat says so.
-  `created_at` replaces the slow signature-history lookup when nothing better is stored.
+  `created_at` replaces the slow signature-history lookup when nothing better is known. It
+  never overrides a creation time from pump.fun or the chain, and is replaced once one is
+  available.
 - **Visible in the result.** `caveats` contains `hints: metadata supplied by caller`, and
   `evidence` has an entry with `kind: "provenance"` and `source: "hints:caller"` listing the
   fields used.
 - **Not on-chain yet.** The result is `partial`, with the caveat
   `partial: mint not yet visible on-chain; analysed from caller hints (market data missing)`.
-  `market` fields stay null. Request it again later for the on-chain view.
+  `market` fields stay null. A partial result is cached for only 60 seconds, so requesting
+  it again shortly afterwards re-analyses it with the on-chain view.
 - A cached analysis that is still fresh is returned as is; hints only matter when a new
   analysis runs. Hints are never cached as the coin's metadata.
 

@@ -68,13 +68,15 @@ def _read(data: bytes) -> tuple[list[OcrLine], str | None]:
         return [], _failed or "ocr unavailable"
     try:
         with Image.open(io.BytesIO(data)) as img:
+            from tokensage.engine.image import MAX_PIXELS, to_rgb
+
+            if img.size[0] * img.size[1] > MAX_PIXELS:
+                return [], "image too large"
             try:
                 img.seek(0)
             except Exception:  # noqa: BLE001
                 pass
-            rgb = img.convert("RGB")
-            rgb.thumbnail((MAX_SIDE, MAX_SIDE))
-            arr = np.asarray(rgb)
+            arr = np.asarray(to_rgb(img, MAX_SIDE))
         result, _elapsed = eng(arr)
     except Exception as e:  # noqa: BLE001
         return [], f"{type(e).__name__}: {e}"[:160]

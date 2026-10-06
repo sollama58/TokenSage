@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from tokensage.engine.context import Ev
 from tokensage.sources.x import ProfileData, TweetData
@@ -51,7 +51,12 @@ class QuotedAssessment:
 def _days(a: datetime | None, b: datetime | None) -> float | None:
     if a is None or b is None:
         return None
-    return (a - b).total_seconds() / 86400
+    return (_aware(a) - _aware(b)).total_seconds() / 86400
+
+
+def _aware(d: datetime) -> datetime:
+    """Treat a naive datetime (e.g. from an old cache row) as UTC instead of crashing."""
+    return d if d.tzinfo is not None else d.replace(tzinfo=UTC)
 
 
 def assess(

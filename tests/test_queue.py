@@ -85,6 +85,7 @@ async def test_complete_notifies_waiter(migrated_db: str, conn: asyncpg.Connecti
     await waiter.start()
     try:
         j = await queue.enqueue(conn, "analyze", MINT, "full")
+        assert await queue.claim(conn, lease_s=60)  # only a running job can be completed
         task = asyncio.create_task(waiter.wait(j.id, timeout_s=5))
         await asyncio.sleep(0.1)
         await queue.complete(conn, j.id, result_version=1)

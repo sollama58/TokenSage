@@ -51,10 +51,14 @@ def common_words(k: Knowledge) -> frozenset[str]:
     return _common
 
 
+# wordsegment is pure Python at ~2-3 ms per character; a token name needs no more
+MAX_SEGMENT_CHARS = 40
+
+
 def segment_compact(compact: str, k: Knowledge) -> list[str]:
     if not compact:
         return []
-    if not compact.isascii():
+    if not compact.isascii() or len(compact) > MAX_SEGMENT_CHARS:
         return [compact]
     _ensure_loaded(k)
     assert _segmenter is not None
@@ -98,9 +102,8 @@ def best_tokens(spaced: str, compact: str, k: Knowledge) -> list[str]:
     given = spaced.split()
     if not compact:
         return given
-    resegmented = segment_compact(compact, k)
     if not given:
-        return resegmented
+        return segment_compact(compact, k)
     if len(given) >= 2:
         # try re-segmenting each over-long given token individually
         improved: list[str] = []
@@ -112,4 +115,5 @@ def best_tokens(spaced: str, compact: str, k: Knowledge) -> list[str]:
                 improved.append(t)
         return improved
     # single token: compare
+    resegmented = segment_compact(compact, k)
     return resegmented if _score(resegmented, k) > _score(given, k) else given

@@ -159,22 +159,40 @@ def _deleet(token: str) -> str | None:
     return cand if cand.isalpha() and cand != token else None
 
 
+_KNOWN_SYMBOLS: dict[int, frozenset[str]] = {}
+
+
+def _known_symbols(k: Knowledge) -> frozenset[str]:
+    syms = _KNOWN_SYMBOLS.get(id(k))
+    if syms is None:
+        syms = frozenset(k.coin_by_symbol())
+        _KNOWN_SYMBOLS[id(k)] = syms
+    return syms
+
+
 def ticker_base(ticker: str, k: Knowledge) -> tuple[str, list[str]]:
     """Strip known affixes: BPNUT -> PNUT, PNUT2 -> PNUT, BABYDOGEINU -> DOGE."""
     t = ticker.upper()
     affixes: list[str] = []
+    known = _known_symbols(k)
     changed = True
-    while changed and len(t) > k.ticker_min_base:
+    # stop as soon as the ticker is itself a known coin's symbol: BONK is not B + ONK,
+    # and BBONK is B + BONK (not BB + ONK)
+    while changed and len(t) > k.ticker_min_base and t not in known:
         changed = False
-        for p in sorted(k.ticker_prefixes, key=len, reverse=True):
-            if t.startswith(p) and len(t) - len(p) >= k.ticker_min_base:
-                t, changed = t[len(p) :], True
-                affixes.append("prefix:" + p)
-                break
+        # one affix per step, suffix first (BRETT2 -> BRETT, not RETT2), re-checking for a
+        # known symbol after every strip
         for s in sorted(k.ticker_suffixes, key=len, reverse=True):
             if t.endswith(s) and len(t) - len(s) >= k.ticker_min_base:
                 t, changed = t[: -len(s)], True
                 affixes.append("suffix:" + s)
+                break
+        if changed:
+            continue
+        for p in sorted(k.ticker_prefixes, key=len, reverse=True):
+            if t.startswith(p) and len(t) - len(p) >= k.ticker_min_base:
+                t, changed = t[len(p) :], True
+                affixes.append("prefix:" + p)
                 break
     return t, affixes
 
@@ -187,10 +205,20 @@ def clean_ticker(symbol: str) -> str:
     return re.sub(r"\s+", "", s).upper()[:20]
 
 
-def normalize(name: str | None, symbol: str | None, description: str | None) -> Normalized:
+MAX_NAME_CHARS = 200
+
+
+def normalize(
+    name: str | None,
+    symbol: str | None,
+    description: str | None,
+    name_limit: int = MAX_NAME_CHARS,
+) -> Normalized:
     k = load_knowledge()
-    name = name or ""
-    symbol = symbol or ""
+    # names are short on pump.fun (32 chars); cap hostile ones so one request can't hold
+    # a worker thread (and the GIL) for minutes in segmentation
+    name = (name or "")[:name_limit]
+    symbol = (symbol or "")[:64]
     description = description or ""
     obf: list[str] = []
 

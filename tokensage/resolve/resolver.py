@@ -139,6 +139,8 @@ async def _created_from_frontend_api(
         j = r.json()
     except ValueError:
         return None, None
+    if not isinstance(j, dict):
+        return None, None
     ts = j.get("created_timestamp")
     created = (
         datetime.fromtimestamp(ts / 1000, tz=UTC)
@@ -169,7 +171,8 @@ async def _created_from_history(
         return None, None, None
     tx = await rpc.get_transaction(oldest["signature"])
     event = None
-    for line in (tx or {}).get("meta", {}).get("logMessages", []) or []:
+    meta = (tx or {}).get("meta") or {}  # "meta": null happens on some providers
+    for line in meta.get("logMessages") or []:
         if line.startswith("Program data: "):
             try:
                 ev = decode_create_event(line[len("Program data: ") :])
@@ -178,9 +181,11 @@ async def _created_from_history(
             if ev and ev.get("mint") == mint:
                 event = ev
                 break
-    if event:
-        return datetime.fromtimestamp(event["timestamp"], tz=UTC), event.get("creator"), event
     bt = (tx or {}).get("blockTime") or oldest.get("blockTime")
+    if event:
+        # early CreateEvent layouts have no timestamp field: fall back to the block time
+        ts = event.get("timestamp") or bt
+        return (datetime.fromtimestamp(ts, tz=UTC) if ts else None), event.get("creator"), event
     return (datetime.fromtimestamp(bt, tz=UTC) if bt else None), None, None
 
 
@@ -274,16 +279,21 @@ async def resolve(
     row = await conn.fetchrow(
         "select created_at, created_at_source, creator from token where mint=$1", mint
     )
-    if row and row["created_at"]:
-        created, created_src = row["created_at"], row["created_at_source"]
+    if row:
         creator = creator or row["creator"]
-    if created is None and created_hint is not None:
-        created, created_src = created_hint, "hints"
+    if row and row["created_at"] and row["created_at_source"] != "hints":
+        created, created_src = row["created_at"], row["created_at_source"]
     if created is None and is_pumpfun:
         c, cr = await _created_from_frontend_api(http, mint)
         if c:
             created, created_src = c, "frontend_api"
             creator = creator or cr
+    # A caller's hint (now or stored earlier) only stands in for the expensive signature
+    # history, and is replaced as soon as a real source answers (see persist()).
+    if created is None and created_hint is not None:
+        created, created_src = created_hint, "hints"
+    if created is None and row and row["created_at"]:
+        created, created_src = row["created_at"], row["created_at_source"]
     if created is None and is_pumpfun:
         try:
             c, cr, _ev = await _created_from_history(rpc, curve_addr, mint)
@@ -332,8 +342,16 @@ async def persist(conn: asyncpg.Connection, r: Resolved) -> None:
           quote_mint = coalesce(excluded.quote_mint, token.quote_mint),
           is_pumpfun = excluded.is_pumpfun,
           is_mayhem = coalesce(excluded.is_mayhem, token.is_mayhem),
-          created_at = coalesce(token.created_at, excluded.created_at),
-          created_at_source = coalesce(token.created_at_source, excluded.created_at_source),
+          created_at = case
+            when token.created_at is null
+              or (token.created_at_source = 'hints'
+                  and coalesce(excluded.created_at_source, 'hints') <> 'hints')
+            then excluded.created_at else token.created_at end,
+          created_at_source = case
+            when token.created_at is null
+              or (token.created_at_source = 'hints'
+                  and coalesce(excluded.created_at_source, 'hints') <> 'hints')
+            then excluded.created_at_source else token.created_at_source end,
           seen_by = case when 'request' = any(token.seen_by) then token.seen_by
                          else token.seen_by || '{request}' end
         """,

@@ -7,6 +7,7 @@ import io
 from dataclasses import dataclass, field
 
 import imagehash
+import numpy as np
 from PIL import Image, ImageFile
 
 MAX_PIXELS = 40_000_000
@@ -95,12 +96,30 @@ def _nearest_name(rgb: tuple[int, int, int]) -> str:
     return best
 
 
+def to_rgb(img: Image.Image, max_side: int = 512) -> Image.Image:
+    """RGB at most max_side on a side, decoding large images at reduced size where the
+    format allows it (JPEG draft), and mapping 16-bit/float greyscale to 8 bit first
+    (a plain convert("RGB") clips those to near-white, so all hash alike)."""
+    if img.format == "JPEG":
+        img.draft("RGB", (max_side, max_side))
+    if img.mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
+        arr = np.asarray(img, dtype=np.float64)
+        lo, hi = float(arr.min()), float(arr.max())
+        scaled = (arr - lo) * (255.0 / (hi - lo)) if hi > lo else np.zeros_like(arr)
+        img = Image.fromarray(scaled.astype(np.uint8))  # 2-D uint8 -> mode "L"
+    elif max(img.size) > 2 * max_side:
+        img = img.reduce(max(1, max(img.size) // (2 * max_side)))
+    out = img.convert("RGB")
+    out.thumbnail((max_side, max_side))
+    return out
+
+
 def _frame(img: Image.Image, index: int) -> Image.Image:
     try:
         img.seek(index)
     except EOFError:
         img.seek(0)
-    return img.convert("RGB")
+    return to_rgb(img)
 
 
 def features(data: bytes) -> ImageFeatures:
@@ -112,7 +131,6 @@ def features(data: bytes) -> ImageFeatures:
         animated = n_frames > 1
         fmt = img.format
         base = _frame(img, 0)
-        base.thumbnail((512, 512))
         ph = imagehash.phash(base)
         dh = imagehash.dhash(base)
         mirror = imagehash.phash(base.transpose(Image.Transpose.FLIP_LEFT_RIGHT))

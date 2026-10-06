@@ -85,7 +85,14 @@ _REFERENT_KINDS: dict[str, ReferentKind] = {
 _SEVERITIES: dict[str, Severity] = {"info": "info", "warn": "warn", "high": "high"}
 
 LEXICON_VERSION = load_knowledge().versions.get("lexicon", "unknown")
-__all__ = ["RULES_VERSION", "LEXICON_VERSION", "AnalyzeFailed", "Context", "analyze"]
+__all__ = [
+    "RULES_VERSION",
+    "LEXICON_VERSION",
+    "AnalyzeFailed",
+    "Context",
+    "RetryRescheduled",
+    "analyze",
+]
 
 
 class AnalyzeFailed(Exception):
@@ -536,7 +543,9 @@ def build_document(
         elif out.image.error and image.status == "ok":
             image.status = "failed"
 
-    partial = (m is None or m.status != "ok") and bool(r.uri)
+    # "partial" promises a better result later: only when the metadata may still resolve
+    # (invalid metadata is final and is reported via the metadata_unresolved flag instead)
+    partial = (m is None or m.status in ("unresolved", "pending")) and bool(r.uri)
     doc = Analysis(
         mint=r.mint,
         created_at=r.created_at,
@@ -592,6 +601,13 @@ def _normalized_view(out: EngineOutput | None) -> NormalizedOut:
 
 
 async def _store_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
+    async with conn.transaction():
+        # basic and full jobs for one mint can finish together: serialise max(version)+1
+        await conn.execute("select pg_advisory_xact_lock(hashtext('analysis:' || $1))", doc.mint)
+        return await _insert_analysis(conn, doc)
+
+
+async def _insert_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
     version = await conn.fetchval(
         """insert into analysis (mint, version, depth, doc, referent, categories, flags)
            values ($1, coalesce((select max(version) from analysis where mint=$1), 0) + 1,
@@ -631,14 +647,29 @@ async def _metadata_attempts(conn: asyncpg.Connection, mint: str) -> int:
     return await conn.fetchval("select attempts from token_metadata where mint=$1", mint) or 0
 
 
-async def _schedule_retry(conn: asyncpg.Connection, mint: str, depth: str) -> None:
+async def _schedule_retry(
+    conn: asyncpg.Connection, mint: str, depth: str, own_job_id: int | None = None
+) -> bool:
+    """Queue the next metadata retry at token_metadata.next_retry_at. Called from inside a
+    retry_metadata job (own_job_id), the job re-queues itself: inserting a new row would hit
+    the single-flight index on the very job that is running, and the chain would stop."""
     from tokensage import queue
 
     row = await conn.fetchrow(
         "select next_retry_at from token_metadata where mint=$1 and status='unresolved'", mint
     )
     if not row or row["next_retry_at"] is None:
-        return
+        return False
+    if own_job_id is not None:
+        await conn.execute(
+            """update job set status='pending', locked_until=null, run_after=$2,
+                 attempts = greatest(attempts - 1, 0)
+               where id=$1""",
+            own_job_id,
+            row["next_retry_at"],
+        )
+        log.info("metadata.retry_scheduled", mint=mint, run_after=str(row["next_retry_at"]))
+        return True
     job = await conn.fetchrow(
         """insert into job (kind, mint, depth, priority, run_after)
            values ('retry_metadata', $1, $2, $3, $4)
@@ -651,6 +682,7 @@ async def _schedule_retry(conn: asyncpg.Connection, mint: str, depth: str) -> No
     )
     if job:
         log.info("metadata.retry_scheduled", mint=mint, run_after=str(row["next_retry_at"]))
+    return job is not None
 
 
 # ----------------------------------------------------------------- entry points
@@ -760,6 +792,8 @@ async def analyze(
         await md.attach_image(ctx.http, m, ctx.settings)
         image_bytes = m.image_bytes
         if m.image_content_key:
+            # register the hinted logo so its hashes are cached and it can be matched
+            await md.persist_image_row(conn, m)
             cached_feats = await _cached_image_features(conn, m.image_content_key)
         assert hint_use is not None
         for f, chain_v in (("name", r.name), ("symbol", r.symbol)):
@@ -772,6 +806,9 @@ async def analyze(
                 setattr(m, f, chain_v)
     elif r.uri:
         m = cached
+        if m is not None and hint_use is not None:
+            # stored (fetched) metadata wins over hints; only a creation-time hint still counts
+            hint_use.fields = [f for f in hint_use.fields if f == "created_at"]
         if m is None:
             attempts = await _metadata_attempts(conn, r.mint)
             m = await md.fetch_metadata(ctx.http, r.uri, ctx.settings)
@@ -786,6 +823,18 @@ async def analyze(
                 # older row without hashes: fetch the image again (cached by CID upstream)
                 refetched = await md.fetch_metadata(ctx.http, r.uri, ctx.settings)
                 image_bytes = refetched.image_bytes
+                if (
+                    refetched.image_content_key
+                    and refetched.image_content_key != m.image_content_key
+                ):
+                    # the logo changed: keep hashes under the new image's own key
+                    await md.persist_image_row(conn, refetched)
+                    await conn.execute(
+                        "update token_metadata set image_content_key=$2 where mint=$1",
+                        r.mint,
+                        refetched.image_content_key,
+                    )
+                    m.image_content_key = refetched.image_content_key
 
     name = (m.name if m and m.status == "ok" and m.name else None) or r.name
     symbol = (m.symbol if m and m.status == "ok" and m.symbol else None) or r.symbol
@@ -861,10 +910,15 @@ async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput
             out.caveats.append(f"news check: no recent headlines found for '{h.term.term}'")
 
 
+class RetryRescheduled(Exception):
+    """The retry_metadata job put itself back in the queue for its next attempt."""
+
+
 async def retry_metadata(
-    conn: asyncpg.Connection, ctx: Context, mint: str, depth: str
+    conn: asyncpg.Connection, ctx: Context, mint: str, depth: str, job_id: int | None = None
 ) -> int | None:
-    """Background job: try the metadata again; on success re-run the analysis."""
+    """Background job: try the metadata again; on success re-run the analysis. If it is
+    still unresolved and more retries are due, raises RetryRescheduled (job re-queued)."""
     row = await conn.fetchrow("select uri from token where mint=$1", mint)
     if not row or not row["uri"]:
         return None
@@ -873,6 +927,6 @@ async def retry_metadata(
     await md.persist(conn, mint, m, attempts + (1 if m.status != "ok" else 0))
     if m.status == "ok":
         return await analyze(conn, ctx, mint, depth)
-    if m.status == "unresolved":
-        await _schedule_retry(conn, mint, depth)
+    if m.status == "unresolved" and await _schedule_retry(conn, mint, depth, own_job_id=job_id):
+        raise RetryRescheduled
     return None

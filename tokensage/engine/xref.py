@@ -46,8 +46,9 @@ RESERVED = {
     "status",
     "web",
 }
-HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
-ID = re.compile(r"^\d{1,20}$")
+# \Z, not $: "$" also matches before a trailing newline; [0-9], not \d: \d is any Unicode digit
+HANDLE = re.compile(r"\A[A-Za-z0-9_]{1,15}\Z")
+ID = re.compile(r"\A[0-9]{1,20}\Z")
 TWITTER_EPOCH_MS = 1288834974657
 
 

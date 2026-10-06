@@ -4,7 +4,7 @@ EngineInput, so golden tests run without a database or network."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from tokensage.engine import image as image_stage
 from tokensage.engine import known_coins, lexicon, ocr, ticker, trends, xmatch, xsignals
@@ -236,7 +236,7 @@ def _same_name_evidence(
         for t in inp.ctx.same_name
         if t.mint != inp.mint
         and t.created_at
-        and (inp.created_at - t.created_at).total_seconds() > 300
+        and (_aware(inp.created_at) - _aware(t.created_at)).total_seconds() > 300
     ]
     if not earlier:
         return evs, copies
@@ -251,7 +251,7 @@ def _same_name_evidence(
                 detail=(
                     f"{len(earlier)} earlier token(s) share this name/ticker; the earliest "
                     f"({first.symbol or '?'}, {first.source}) predates it by "
-                    f"{_dur((inp.created_at - first.created_at).total_seconds())}"  # type: ignore[operator]
+                    f"{_dur((_aware(inp.created_at) - _aware(first.created_at)).total_seconds())}"  # type: ignore[arg-type]
                 ),
                 source=f"same_name:{first.source}",
                 where="db",
@@ -347,7 +347,7 @@ def _flags(inp: EngineInput, n: Normalized, agg: Aggregated, is_famous: bool) ->
             for t in inp.ctx.same_name
             if t.mint != inp.mint
             and t.created_at
-            and (inp.created_at - t.created_at).total_seconds() > 300
+            and (_aware(inp.created_at) - _aware(t.created_at)).total_seconds() > 300
         ]
         if earlier and not is_famous:
             flags.append(
@@ -368,7 +368,7 @@ def _flags(inp: EngineInput, n: Normalized, agg: Aggregated, is_famous: bool) ->
     if inp.x_kind == "search":
         flags.append(FlagOut("search_link_only", "info", "the X link is a search, not an account"))
     if inp.x_kind == "community" and inp.x_object_time and inp.created_at:
-        gap = (inp.created_at - inp.x_object_time).total_seconds()
+        gap = (_aware(inp.created_at) - _aware(inp.x_object_time)).total_seconds()
         if 0 <= gap <= 3600:
             flags.append(
                 FlagOut(
@@ -625,6 +625,11 @@ def _x_match(
         post_meaning,
         k,
     )
+
+
+def _aware(d: datetime) -> datetime:
+    """Naive datetimes are UTC (old cache rows); never let a subtraction raise."""
+    return d if d.tzinfo is not None else d.replace(tzinfo=UTC)
 
 
 def run_basic(inp: EngineInput) -> EngineOutput:

@@ -12,6 +12,7 @@ from typing import Any
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from tokensage import __version__, queue
@@ -117,13 +118,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             use = await usage.all_today(conn)
         return JSONResponse(
-            {
-                "status": "ok",
-                "queue": {"pending": pending, "running": running, "failed_24h": failed_24h},
-                "sources": [dict(r) for r in health],
-                "usage_today": use,
-                "inline_analyzer": settings.inline_analyzer,
-            },
+            jsonable_encoder(
+                {
+                    "status": "ok",
+                    "queue": {"pending": pending, "running": running, "failed_24h": failed_24h},
+                    "sources": [dict(r) for r in health],
+                    "usage_today": use,
+                    "inline_analyzer": settings.inline_analyzer,
+                }
+            ),  # timestamptz values (e.g. source_health.open_until) need encoding
             headers={"Cache-Control": "no-store"},
         )
 
