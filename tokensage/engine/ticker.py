@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rapidfuzz import fuzz, utils
 
@@ -35,6 +35,20 @@ def _lev1(a: str, b: str) -> bool:
 
 
 def explain(n: Normalized, k: Knowledge) -> TickerExplanation:
+    out = _explain(n, k)
+    if out.method == "unrelated" and n.name_pinyin:
+        # a translated Chinese name keeps its pinyin for this: 猫 is "cat", but $MAO is mao
+        py = n.name_pinyin
+        alt = _explain(
+            replace(n, name_tokens=py, name_compact="".join(py), name_clean=" ".join(py)), k
+        )
+        if alt.method != "unrelated":
+            alt.text += " (the name's pinyin)"
+            return alt
+    return out
+
+
+def _explain(n: Normalized, k: Knowledge) -> TickerExplanation:
     t = n.ticker_base.lower()
     full = n.ticker.lower()
     tokens = [x for x in n.name_tokens if x.isalnum()]

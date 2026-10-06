@@ -1,0 +1,392 @@
+# Chinese word list for coin names (review recommendation 7). Hand-written for TokenSage and
+# released under CC0 1.0 (public domain); no entries are copied from CC-CEDICT or any other
+# dictionary.
+#
+# Han text in a name or description is translated with this list before it is folded to
+# ASCII: the longest entry wins at each position (中国龙 -> "china dragon"), and characters
+# with no entry fall back to pinyin as before. A value of "" drops the character (particles
+# such as 的 carry no meaning on their own). Translations are chosen to land on words the
+# slang lexicon, the entity seed and the WordNet classes already know.
+#
+# Simplified and traditional forms are both listed where they differ.
+words:
+  # ---------------------------------------------------------------- multi-character words
+  中国: china
+  中國: china
+  中华: china
+  中華: china
+  美国: america
+  美國: america
+  日本: japan
+  韩国: korea
+  韓國: korea
+  香港: hong kong
+  台湾: taiwan
+  台灣: taiwan
+  北京: beijing
+  上海: shanghai
+  深圳: shenzhen
+  新加坡: singapore
+  大哥: big bro
+  大佬: big shot
+  老板: boss
+  老闆: boss
+  兄弟: bro
+  宝宝: baby
+  寶寶: baby
+  宝贝: baby
+  寶貝: baby
+  老婆: wife
+  老公: husband
+  朋友: friend
+  美女: beauty
+  帅哥: handsome guy
+  帥哥: handsome guy
+  小姐姐: girl
+  女孩: girl
+  男孩: boy
+  孩子: kid
+  妈妈: mother
+  媽媽: mother
+  爸爸: father
+  爷爷: grandpa
+  爺爺: grandpa
+  奶奶: grandma
+  皇帝: emperor
+  女王: queen
+  国王: king
+  國王: king
+  公主: princess
+  王子: prince
+  总统: president
+  總統: president
+  主席: chairman
+  将军: general
+  將軍: general
+  英雄: hero
+  战士: warrior
+  戰士: warrior
+  忍者: ninja
+  武士: samurai
+  机器人: robot
+  機器人: robot
+  人工智能: ai
+  智能体: agent
+  智能體: agent
+  代理: agent
+  比特币: bitcoin
+  比特幣: bitcoin
+  以太坊: ethereum
+  狗狗币: dogecoin
+  狗狗幣: dogecoin
+  柴犬: shiba inu
+  索拉纳: solana
+  币安: binance
+  幣安: binance
+  币圈: crypto
+  幣圈: crypto
+  加密: crypto
+  区块链: blockchain
+  區塊鏈: blockchain
+  中本聪: satoshi nakamoto
+  中本聰: satoshi nakamoto
+  马斯克: elon musk
+  馬斯克: elon musk
+  特朗普: trump
+  川普: trump
+  拜登: biden
+  牛市: bull market
+  熊市: bear market
+  梭哈: all in
+  起飞: moon
+  起飛: moon
+  登月: moon
+  暴富: get rich
+  发财: get rich
+  發財: get rich
+  财富: wealth
+  財富: wealth
+  财神: god of wealth
+  財神: god of wealth
+  韭菜: bagholder
+  割韭菜: rug pull
+  跑路: rug pull
+  钻石手: diamond hands
+  鑽石手: diamond hands
+  纸手: paper hands
+  紙手: paper hands
+  社区: community
+  社區: community
+  人生: life
+  模因: meme
+  熊猫: panda
+  熊貓: panda
+  老虎: tiger
+  狮子: lion
+  獅子: lion
+  兔子: rabbit
+  猴子: monkey
+  老鼠: mouse
+  青蛙: frog
+  乌龟: turtle
+  烏龜: turtle
+  企鹅: penguin
+  企鵝: penguin
+  鹦鹉: parrot
+  鸚鵡: parrot
+  孔雀: peacock
+  狐狸: fox
+  松鼠: squirrel
+  河马: hippo
+  河馬: hippo
+  大象: elephant
+  鲸鱼: whale
+  鯨魚: whale
+  鲨鱼: shark
+  鯊魚: shark
+  蝴蝶: butterfly
+  凤凰: phoenix
+  鳳凰: phoenix
+  麒麟: unicorn
+  独角兽: unicorn
+  獨角獸: unicorn
+  哈基米: cat
+  小猫: kitten
+  小貓: kitten
+  小狗: puppy
+  猫咪: cat
+  貓咪: cat
+  狗狗: dog
+  黑马: dark horse
+  黑馬: dark horse
+  火箭: rocket
+  月亮: moon
+  太阳: sun
+  太陽: sun
+  星星: star
+  地球: earth
+  宇宙: universe
+  火星: mars
+  黄金: gold
+  黃金: gold
+  钻石: diamond
+  鑽石: diamond
+  红包: red envelope
+  紅包: red envelope
+  春节: chinese new year
+  春節: chinese new year
+  新年: new year
+  功夫: kung fu
+  修仙: cultivation
+  佛祖: buddha
+  菩萨: bodhisattva
+  菩薩: bodhisattva
+  饺子: dumpling
+  餃子: dumpling
+  包子: bun
+  面条: noodle
+  麵條: noodle
+  火锅: hot pot
+  火鍋: hot pot
+  米饭: rice
+  米飯: rice
+  奶茶: milk tea
+  啤酒: beer
+  可乐: cola
+  可樂: cola
+  汽车: car
+  汽車: car
+  飞机: airplane
+  飛機: airplane
+  游戏: game
+  遊戲: game
+  音乐: music
+  音樂: music
+  电影: movie
+  電影: movie
+  动漫: anime
+  動漫: anime
+  哈哈: haha
+  牛逼: awesome
+  加油: lets go
+  冲冲冲: lets go
+  衝衝衝: lets go
+  未来: future
+  未來: future
+  自由: freedom
+  和平: peace
+  爱情: love
+  愛情: love
+  快乐: happy
+  快樂: happy
+  开心: happy
+  開心: happy
+  幸运: lucky
+  幸運: lucky
+  好运: good luck
+  好運: good luck
+  # ---------------------------------------------------------------- animals (zodiac first)
+  鼠: rat
+  牛: ox
+  虎: tiger
+  兔: rabbit
+  龙: dragon
+  龍: dragon
+  蛇: snake
+  马: horse
+  馬: horse
+  羊: goat
+  猴: monkey
+  鸡: chicken
+  雞: chicken
+  狗: dog
+  犬: dog
+  猪: pig
+  豬: pig
+  猫: cat
+  貓: cat
+  熊: bear
+  狼: wolf
+  狐: fox
+  鹿: deer
+  象: elephant
+  狮: lion
+  獅: lion
+  豹: leopard
+  鸟: bird
+  鳥: bird
+  鹰: eagle
+  鷹: eagle
+  鸭: duck
+  鴨: duck
+  鹅: goose
+  鵝: goose
+  鱼: fish
+  魚: fish
+  龟: turtle
+  龜: turtle
+  蛙: frog
+  虾: shrimp
+  蝦: shrimp
+  蟹: crab
+  蜂: bee
+  蚁: ant
+  蟻: ant
+  鲸: whale
+  鯨: whale
+  鲨: shark
+  鯊: shark
+  凤: phoenix
+  鳳: phoenix
+  # ---------------------------------------------------------------- crypto and money
+  币: coin
+  幣: coin
+  钱: money
+  錢: money
+  金: gold
+  银: silver
+  銀: silver
+  财: wealth
+  財: wealth
+  富: rich
+  宝: treasure
+  寶: treasure
+  链: chain
+  鏈: chain
+  涨: pump
+  漲: pump
+  跌: dump
+  冲: send it
+  衝: send it
+  # ---------------------------------------------------------------- people and titles
+  人: person
+  王: king
+  帝: emperor
+  皇: emperor
+  神: god
+  佛: buddha
+  仙: immortal
+  鬼: ghost
+  魔: demon
+  侠: hero
+  俠: hero
+  哥: bro
+  姐: sister
+  妹: sister
+  弟: brother
+  爸: father
+  妈: mother
+  媽: mother
+  爷: grandpa
+  爺: grandpa
+  娃: baby
+  # ---------------------------------------------------------------- nature and things
+  天: sky
+  地: earth
+  日: sun
+  月: moon
+  星: star
+  火: fire
+  水: water
+  山: mountain
+  海: sea
+  风: wind
+  風: wind
+  雨: rain
+  雪: snow
+  雷: thunder
+  花: flower
+  树: tree
+  樹: tree
+  心: heart
+  眼: eye
+  手: hand
+  茶: tea
+  酒: wine
+  饭: rice
+  飯: rice
+  麵: noodle
+  # 后 (after) and 面 (face) are left out: in simplified text they rarely mean queen or noodle
+  # ---------------------------------------------------------------- qualities
+  大: big
+  小: little
+  老: old
+  新: new
+  好: good
+  坏: bad
+  壞: bad
+  红: red
+  紅: red
+  黑: black
+  白: white
+  黄: yellow
+  黃: yellow
+  绿: green
+  綠: green
+  蓝: blue
+  藍: blue
+  紫: purple
+  福: fortune
+  喜: joy
+  爱: love
+  愛: love
+  笑: laugh
+  哭: cry
+  怒: anger
+  乐: happy
+  樂: happy
+  强: strong
+  強: strong
+  美: beauty
+  帅: handsome
+  帥: handsome
+  萌: cute
+  # ---------------------------------------------------------------- particles (dropped)
+  的: ""
+  之: ""
+  了: ""
+  啊: ""
+  吧: ""
+  呢: ""
+  吗: ""
+  嗎: ""

@@ -262,7 +262,14 @@ cases:
     flags_include: [regional_script]
   - name: 猫
     symbol: MAO
-    categories_include: [regional_language]
+    categories_include: [regional_language, animal/cat]
+    tokens: [cat]
+    ticker_method: equals_token  # $MAO is the pinyin of 猫
+  - name: 中国龙
+    symbol: ZGL
+    categories_include: [regional_language, animal]
+    tokens: [china, dragon]
+    ticker_method: acronym  # zhong guo long
   - name: Путин
     symbol: PUTIN
     categories_include: [regional_language]
