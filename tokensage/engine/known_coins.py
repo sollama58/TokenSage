@@ -85,12 +85,15 @@ def match_known(
 
 
 def is_self(match: CopyMatch, n: Normalized) -> bool:
-    """The token *is* the famous coin (same ticker and same name), not a copy of it."""
+    """The token *is* the famous coin (same ticker and same name), not a copy of it.
+    Markers that are part of the coin's own name ("inu" in Shiba Inu) don't count."""
+    surfaces = {_compact(s) for s in match.coin.surfaces}
+    own = " ".join(match.coin.surfaces).casefold()
+    foreign_markers = [m for m in n.markers if m.text.casefold().strip() not in own]
     return (
         n.ticker.upper() == match.coin.symbol.upper()
-        and _compact(n.name_clean) in {_compact(s) for s in match.coin.surfaces}
-        and not n.markers
-        and not n.ticker_affixes
+        and _compact(n.name_clean) in surfaces
+        and not foreign_markers
         and "homoglyph" not in n.obfuscation
     )
 

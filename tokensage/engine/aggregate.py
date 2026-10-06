@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 
 from tokensage.engine.context import Ev, ReferentCandidate
@@ -119,8 +120,8 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
         )
         if len(ranked) > 1:
             s2, l2 = ranked[1]
-            runner = rc[l2]
-            runner.score = round(s2, 3)
+            # a copy: rc[l2] is the candidate object shared with the evidence entries
+            runner = dataclasses.replace(rc[l2], score=round(s2, 3))
             if top_s - s2 < k.scoring.get("referent_ambiguity_gap", 0.1) and s2 >= 0.3:
                 caveats.append(
                     f"referent is ambiguous: '{top_l}' ({top_s:.2f}) vs '{l2}' ({s2:.2f})"

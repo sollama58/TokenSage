@@ -97,7 +97,7 @@ def explain(n: Normalized, k: Knowledge) -> TickerExplanation:
             )
     # 6. baby talk
     for a, b in _BABY_TALK:
-        if a in t and t.replace(a, b) in compact.replace("".join(_BABY_TALK[0]), ""):
+        if a in t and t.replace(a, b) in compact:
             return TickerExplanation(
                 "baby_talk", f"${n.ticker}: baby-talk spelling ({a}->{b})", 0.6
             )

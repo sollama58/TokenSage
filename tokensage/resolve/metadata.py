@@ -73,12 +73,31 @@ def _sniff_image(body: bytes) -> str | None:
     return None
 
 
+def _safe_text(s: str) -> str:
+    """Postgres text/jsonb reject NUL, and lone surrogates cannot be UTF-8 encoded: drop
+    NUL and replace surrogates, so one hostile field cannot make a token unanalysable."""
+    return s.replace("\x00", "").encode("utf-8", "replace").decode("utf-8")
+
+
+def _scrub(v: Any, depth: int = 0) -> Any:
+    """A JSON-safe copy of untrusted metadata for storage (strings cleaned, depth capped)."""
+    if depth > 20:
+        return None
+    if isinstance(v, str):
+        return _safe_text(v)
+    if isinstance(v, dict):
+        return {_safe_text(str(k)): _scrub(x, depth + 1) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_scrub(x, depth + 1) for x in v]
+    return v
+
+
 def _clean_str(v: Any, limit: int) -> str | None:
     if v is None or isinstance(v, bool):
         return None
     if not isinstance(v, str):
         v = str(v)
-    v = v.replace("\x00", "").strip()
+    v = _safe_text(v).strip()
     return v[:limit] if v else None
 
 
@@ -134,11 +153,13 @@ def parse_metadata_json(body: bytes) -> dict[str, Any]:
 def build(uri: str, body: bytes) -> Metadata:
     try:
         data = parse_metadata_json(body)
-    except (ValueError, json.JSONDecodeError) as e:
+    except (ValueError, RecursionError) as e:  # JSONDecodeError is a ValueError
         return Metadata(
-            status="invalid", error=f"bad json: {e}", content_key=content_key_for(uri, body)
+            status="invalid",
+            error=f"bad json: {type(e).__name__}: {e}"[:300],
+            content_key=content_key_for(uri, body),
         )
-    m = Metadata(status="ok", content_key=content_key_for(uri, body), raw=data)
+    m = Metadata(status="ok", content_key=content_key_for(uri, body), raw=_scrub(data))
     m.name = _clean_str(data.get("name"), 256)
     m.symbol = _clean_str(data.get("symbol"), 64)
     m.description = _clean_str(data.get("description"), 4000)
@@ -197,6 +218,8 @@ async def fetch_metadata(client: httpx.AsyncClient, uri: str, settings: Settings
         return Metadata(status="invalid", error=f"unsafe uri: {e}")
     except FetchError as e:
         return Metadata(status="unresolved" if e.retryable else "invalid", error=str(e))
+    except Exception as e:  # noqa: BLE001 - "never raises": a bad uri must not fail the job
+        return Metadata(status="invalid", error=f"{type(e).__name__}: {e}"[:300])
     m = build(uri, f.body)
     if m.status != "ok" or not m.image_url:
         return m
@@ -216,7 +239,7 @@ def from_hints(hints: dict[str, Any]) -> Metadata:
     m = Metadata(
         status="ok",
         content_key="hints:" + hashlib.sha256(body).hexdigest(),
-        raw={k: v for k, v in data.items() if v is not None},
+        raw=_scrub({k: v for k, v in data.items() if v is not None}),
         origin="hints",
     )
     m.name = _clean_str(data.get("name"), 256)
@@ -249,6 +272,8 @@ async def attach_image(client: httpx.AsyncClient, m: Metadata, settings: Setting
         m.image_error = f"unsafe image url: {e}"
     except FetchError as e:
         m.image_error = str(e)
+    except Exception as e:  # noqa: BLE001 - never fail the analysis over the logo
+        m.image_error = f"{type(e).__name__}: {e}"[:300]
 
 
 async def load_cached(conn: asyncpg.Connection, mint: str) -> Metadata | None:
@@ -305,20 +330,24 @@ async def persist(conn: asyncpg.Connection, mint: str, m: Metadata, attempts: in
         next_retry,
         m.image_content_key,
     )
-    if m.image_content_key:
-        await conn.execute(
-            """insert into image (content_key, sha256, mime, bytes)
-               values ($1, $2, $3, $4) on conflict (content_key) do nothing""",
-            m.image_content_key,
-            m.image_content_key.split(":", 1)[1]
-            if m.image_content_key.startswith("sha256:")
-            else None,
-            m.image_mime,
-            m.image_size,
-        )
+    await persist_image_row(conn, m)
     if m.status == "ok" and (m.name or m.symbol):
         await conn.execute(
             """update token set launcher = coalesce(launcher, $2) where mint=$1""",
             mint,
             m.created_on or (urlsplit(m.image_url or "").hostname if m.image_url else None),
         )
+
+
+async def persist_image_row(conn: asyncpg.Connection, m: Metadata) -> None:
+    """Register the logo under its content key so its hashes can be cached and matched."""
+    if not m.image_content_key:
+        return
+    await conn.execute(
+        """insert into image (content_key, sha256, mime, bytes)
+           values ($1, $2, $3, $4) on conflict (content_key) do nothing""",
+        m.image_content_key,
+        m.image_content_key.split(":", 1)[1] if m.image_content_key.startswith("sha256:") else None,
+        m.image_mime,
+        m.image_size,
+    )

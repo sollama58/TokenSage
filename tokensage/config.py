@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     enable_corpus: bool = False
     enable_paid_x: bool = False
     paid_x_daily_usd_cap: float = 1.0
+    paid_x_usd_per_call: float = 0.00015  # twitterapi.io: about $0.15 per 1,000 tweets
 
     # DEV ONLY: lets the SSRF guard accept http:// / private hosts (local fake chain server).
     dev_allow_insecure_fetch: bool = False
@@ -74,6 +75,9 @@ class Settings(BaseSettings):
     # Concurrent claim/process loops in the analyzer worker. Cold analyses wait mostly on
     # IPFS/X/RPC, so several in flight multiply throughput. Each loop holds one DB connection.
     worker_concurrency: int = 8
+    # On SIGTERM, in-flight jobs get this long to finish before they are handed back to the
+    # queue (Render waits maxShutdownDelaySeconds=60 before killing the process).
+    worker_shutdown_grace_s: float = 45.0
     # Loops when the analyzer runs inside the API process (INLINE_ANALYZER=true).
     inline_worker_concurrency: int = 2
     # OCR is CPU and memory heavy (RapidOCR ~250 MB); at most this many run at once.

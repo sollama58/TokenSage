@@ -18,7 +18,7 @@ from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.engine import image as image_stage
 from tokensage.logging import configure_logging
-from tokensage.net.safe_fetch import FetchError, UnsafeUrl, safe_get
+from tokensage.net.safe_fetch import safe_get
 from tokensage.sources import coingecko, wikimedia
 
 log = structlog.get_logger("jobs.knowledge")
@@ -109,7 +109,9 @@ async def refresh_known_coins(
     # logo hashes for coins that don't have one yet
     hashed = 0
     rows = await conn.fetch(
-        "select id from known_coin where source='coingecko' and logo_phash is null limit $1",
+        # random order: coins whose logo never fetches must not fill every batch forever
+        """select id from known_coin where source='coingecko' and logo_phash is null
+           order by random() limit $1""",
         LOGO_HASHES_PER_RUN,
     )
     by_id = {f"coingecko:{c.id}": c for c in seen.values()}
@@ -120,7 +122,7 @@ async def refresh_known_coins(
         try:
             f = await safe_get(http, gc.image, max_bytes=2_000_000, timeout=10.0, accept="image/*")
             feats = image_stage.features(f.body)
-        except (FetchError, UnsafeUrl, ValueError, OSError):
+        except Exception:  # noqa: BLE001 - incl. PIL DecompressionBombError; skip this logo
             continue
         await conn.execute("update known_coin set logo_phash=$2 where id=$1", r["id"], feats.phash)
         hashed += 1

@@ -24,11 +24,18 @@ class CircuitBreaker:
         st = self.states.get(source)
         return not st or st.open_until <= time.monotonic()
 
+    MAX_SOURCES = 2000
+
     def success(self, source: str) -> None:
-        self.states[source] = _State()
+        # closed == absent: healthy hosts (attacker-chosen ones included) leave no entry
+        self.states.pop(source, None)
 
     def failure(self, source: str) -> bool:
         """Record a failure; True if the breaker just opened."""
+        if source not in self.states and len(self.states) >= self.MAX_SOURCES:
+            now = time.monotonic()
+            for k in [k for k, v in self.states.items() if v.open_until <= now]:
+                del self.states[k]
         st = self.states.setdefault(source, _State())
         st.failures += 1
         if st.failures >= self.threshold and st.open_until <= time.monotonic():

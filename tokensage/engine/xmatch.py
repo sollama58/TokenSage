@@ -109,16 +109,33 @@ def post_text(tweet: TweetData | None, profile: ProfileData | None) -> str | Non
 # ----------------------------------------------------------------- name
 
 
+def _runs_of_tokens(tokens: list[str], target: str) -> bool:
+    """Is target exactly a run of consecutive post words joined ("dog wif crown" for
+    "dogwifcrown")? Unlike a substring test it never starts or ends mid-word."""
+    for i in range(len(tokens)):
+        acc = ""
+        for t in tokens[i:]:
+            acc += t
+            if acc == target:
+                return True
+            if len(acc) >= len(target) or not target.startswith(acc):
+                break
+    return False
+
+
 def match_name(n: Normalized, text: str | None) -> FieldMatch:
     if not text:
         return FieldMatch(0.0, "none", "no post text to compare")
     if not n.name_compact:
         return FieldMatch(0.0, "none", "token has no readable name")
     raw_name = " ".join(n.name_raw.split()).casefold()
-    if len(raw_name) >= 3 and raw_name in " ".join(text.split()).casefold():
+    flat = " ".join(text.split()).casefold()
+    # whole words only: "Cat" must not match "education", nor "Dog" match "hotdog"
+    if len(raw_name) >= 3 and re.search(rf"(?<!\w){re.escape(raw_name)}(?!\w)", flat):
         return FieldMatch(1.0, "exact", f"the post contains the name '{n.name_raw.strip()}'")
-    pn = normalize(text, None, None)  # same folding as names: homoglyphs, leet, emoji, camel
-    if len(n.name_compact) >= 4 and n.name_compact in pn.name_compact:
+    # same folding as names: homoglyphs, leet, emoji, camelCase
+    pn = normalize(text, None, None, name_limit=MAX_POST_CHARS)
+    if len(n.name_compact) >= 4 and _runs_of_tokens(pn.name_tokens, n.name_compact):
         return FieldMatch(
             0.9, "normalized", f"'{n.name_compact}' appears in the post once normalised"
         )

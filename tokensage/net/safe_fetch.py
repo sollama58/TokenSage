@@ -69,11 +69,25 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_reserved
         or ip.is_unspecified
         or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)
+        # anything else not globally routable, e.g. 100.64.0.0/10 carrier-grade NAT, which
+        # holds cloud metadata endpoints such as 100.100.100.200
+        or not ip.is_global
     )
 
 
 async def check_url(url: str, resolver: Resolver | None = None) -> str:
-    """Validate scheme/host and resolve DNS; return the normalised URL or raise UnsafeUrl."""
+    """Validate scheme/host and resolve DNS; return the normalised URL or raise UnsafeUrl.
+    Malformed URLs (bad port, invalid IDNA label, ...) are UnsafeUrl too, never a bare
+    ValueError/UnicodeError escaping to the caller."""
+    try:
+        return await _check_url(url, resolver)
+    except (UnsafeUrl, FetchError):
+        raise
+    except (ValueError, UnicodeError) as e:
+        raise UnsafeUrl(f"malformed url: {type(e).__name__}: {e}"[:200]) from e
+
+
+async def _check_url(url: str, resolver: Resolver | None) -> str:
     parts = urlsplit(url)
     if _dev_insecure():
         return url  # DEV ONLY (see Settings.dev_allow_insecure_fetch)
@@ -84,6 +98,7 @@ async def check_url(url: str, resolver: Resolver | None = None) -> str:
         raise UnsafeUrl(f"host not allowed: {host or 'empty'}")
     if parts.username or parts.password:
         raise UnsafeUrl("credentials in URL")
+    port = parts.port  # raises ValueError for out-of-range / non-numeric ports
     try:
         literal = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
@@ -95,7 +110,7 @@ async def check_url(url: str, resolver: Resolver | None = None) -> str:
     loop = asyncio.get_running_loop()
     try:
         fn: Resolver = resolver or DEFAULT_RESOLVER or loop.getaddrinfo
-        infos = await fn(host, parts.port or 443, type=socket.SOCK_STREAM)
+        infos = await fn(host, port or 443, type=socket.SOCK_STREAM)
     except (socket.gaierror, OSError) as e:
         raise FetchError(f"dns failure for {host}: {e}") from e
     if not infos:
@@ -116,7 +131,23 @@ async def safe_get(
     accept: str = "*/*",
     resolver: Resolver | None = None,
 ) -> Fetched:
-    """GET with the guard applied to the URL and every redirect hop."""
+    """GET with the guard applied to the URL and every redirect hop. `timeout` bounds the
+    whole fetch (all hops, headers and body), not just each socket read."""
+    try:
+        async with asyncio.timeout(timeout):
+            return await _safe_get(client, url, max_bytes, timeout, accept, resolver)
+    except TimeoutError as e:
+        raise FetchError(f"timeout: no complete response within {timeout:.0f}s") from e
+
+
+async def _safe_get(
+    client: httpx.AsyncClient,
+    url: str,
+    max_bytes: int,
+    timeout: float,
+    accept: str,
+    resolver: Resolver | None,
+) -> Fetched:
     current = url
     for _hop in range(MAX_REDIRECTS + 1):
         await check_url(current, resolver=resolver)
@@ -124,7 +155,9 @@ async def safe_get(
             async with client.stream(
                 "GET",
                 current,
-                headers={"Accept": accept},
+                # identity: the byte cap applies to what we hold in memory; a compressed
+                # body could otherwise inflate far past it within one chunk
+                headers={"Accept": accept, "Accept-Encoding": "identity"},
                 timeout=timeout,
                 follow_redirects=False,
             ) as r:

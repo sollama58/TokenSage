@@ -15,6 +15,8 @@ from tokensage.config import Settings
 DEPTH_RANK = {"basic": 0, "full": 1}
 # A request that misses the cache while an identical job is committing reuses that job.
 REUSE_DONE_WITHIN_S = 30.0
+# A partial result (metadata pending, mint not yet on-chain) is re-analysed this soon.
+PARTIAL_MAX_AGE_S = 60
 # analyzer error_code -> (http status, api code)
 DEFINITIVE_CODES = {
     "token_not_found": (404, "token_not_found"),
@@ -63,9 +65,12 @@ def _status_for(doc: dict[str, Any]) -> str:
 
 
 async def _enforce_quotas(conn: asyncpg.Connection, key: ApiKey, depth: str, refresh: bool) -> None:
-    """Cache hits are free; a new full analysis or a forced refresh counts against the key."""
+    """Cache hits are free; a new full analysis or a forced refresh counts against the key.
+    Runs inside the enqueue transaction; the per-key lock makes check-and-charge atomic, so
+    concurrent requests for different coins cannot overspend the quota."""
     from tokensage.api import errors, usage
 
+    await conn.execute("select pg_advisory_xact_lock(hashtext('quota:' || $1))", key.name)
     u = await usage.today(conn, key.name)
     if refresh and u.refreshes >= key.refresh_per_day:
         raise errors.quota_exceeded("refresh", usage.seconds_until_utc_midnight())
@@ -110,6 +115,8 @@ async def get_or_enqueue(
         cached = await latest_analysis(conn, mint, depth)
         if cached and not refresh:
             doc, _ = cached
+            if max_age_s is None and _status_for(doc) == "partial":
+                max_age = min(max_age, PARTIAL_MAX_AGE_S)
             fr = _freshness(doc, max_age, from_cache=True)
             if fr.age_s is not None and fr.age_s <= max_age:
                 return TokenResponse(
@@ -120,15 +127,18 @@ async def get_or_enqueue(
                     freshness=fr,
                     request_id=request_id,
                 )
-        if await queue.pending_count(conn) >= settings.max_queue_depth:
-            from tokensage.api import errors
-
-            raise errors.overloaded()
 
         async def charge(j: queue.Job) -> None:
-            # Only a newly created job costs quota. Joining an open job (the documented
-            # 202 -> retry loop) or reusing one that just finished is free.
-            if key is not None and j.inserted:
+            # Only a newly created job costs quota or counts against the queue limit.
+            # Joining an open job (the documented 202 -> retry loop) or reusing one that
+            # just finished is always allowed. Raising here rolls the new job back.
+            if not j.inserted:
+                return
+            if await queue.pending_count(conn) > settings.max_queue_depth:
+                from tokensage.api import errors
+
+                raise errors.overloaded()
+            if key is not None:
                 await _enforce_quotas(conn, key, depth, refresh)
 
         job = await queue.enqueue(

@@ -21,6 +21,7 @@ from tokensage.sources.x import ProfileData, TweetData, fetch_profile, fetch_twe
 log = structlog.get_logger("fulldepth")
 
 PROFILE_TTL = timedelta(hours=12)
+TWEET_RECHECK = timedelta(hours=6)
 DELETED_RETRY = timedelta(hours=1)
 NEWS_TTL = timedelta(hours=1)
 TREND_INDEX_TTL_S = 600
@@ -30,45 +31,73 @@ MAX_NEWS_LOOKUPS = 2
 # ----------------------------------------------------------------- X content with caching
 
 
+PAID_X_USAGE_KEY = "_paid_x"  # api_usage row counting paid X calls per UTC day
+
+
+async def _paid_x_allowed(conn: asyncpg.Connection, settings: Settings) -> bool:
+    """ENABLE_PAID_X, and today's estimated spend still under PAID_X_DAILY_USD_CAP."""
+    if not (settings.enable_paid_x and settings.twitterapi_io_key):
+        return False
+    from tokensage.api import usage
+
+    used = (await usage.today(conn, PAID_X_USAGE_KEY)).requests
+    return used * settings.paid_x_usd_per_call < settings.paid_x_daily_usd_cap
+
+
 async def tweet_cached(
     conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, tweet_id: str
 ) -> TweetData:
+    """The tweet, cached. The first good copy is the record (tweets are immutable apart from
+    edits), but it is re-checked every TWEET_RECHECK so a deletion is noticed, and a sparse
+    oEmbed copy is upgraded when a richer source answers."""
     row = await conn.fetchrow(
         "select first_snapshot, latest, status, source, fetched_at from x_tweet where tweet_id=$1",
         tweet_id,
     )
+    record: TweetData | None = None
     if row:
+        age = datetime.now(UTC) - row["fetched_at"] if row["fetched_at"] else None
         if row["status"] == "ok" and row["first_snapshot"]:
-            # tweets are immutable apart from edits: the first-seen copy is the record
-            return TweetData.from_json(row["first_snapshot"])
-        if (
-            row["status"] in ("deleted", "failed")
-            and row["fetched_at"]
-            and datetime.now(UTC) - row["fetched_at"] < DELETED_RETRY
-        ):
+            record = TweetData.from_json(row["first_snapshot"])
+            if age is not None and age < TWEET_RECHECK and row["source"] != "oembed":
+                return record
+        elif row["status"] in ("deleted", "failed") and age is not None and age < DELETED_RETRY:
             return TweetData(id=tweet_id, status=row["status"], source=row["source"])
-    t = await fetch_tweet(
-        http,
-        tweet_id,
-        paid_key=settings.twitterapi_io_key,
-        allow_paid=settings.enable_paid_x,
-    )
+    paid_ok = await _paid_x_allowed(conn, settings)
+    t = await fetch_tweet(http, tweet_id, paid_key=settings.twitterapi_io_key, allow_paid=paid_ok)
+    if t.source == "twitterapi_io":
+        from tokensage.api import usage
+
+        await usage.bump(conn, PAID_X_USAGE_KEY, requests=1)
     snap = t.to_json()
     await conn.execute(
         """insert into x_tweet (tweet_id, first_snapshot, latest, status, source, fetched_at)
            values ($1, $2, $2, $3, $4, now())
            on conflict (tweet_id) do update set
-             latest = excluded.latest,
-             first_snapshot = case when x_tweet.status = 'ok' then x_tweet.first_snapshot
-                                   else excluded.first_snapshot end,
-             status = case when x_tweet.status = 'ok' and excluded.status <> 'ok'
-                           then 'deleted' else excluded.status end,
-             source = excluded.source, fetched_at = now()""",
+             latest = case when excluded.status = 'failed' then x_tweet.latest
+                           else excluded.latest end,
+             first_snapshot = case
+               when x_tweet.status <> 'ok' then excluded.first_snapshot
+               when x_tweet.source = 'oembed' and excluded.status = 'ok'
+                    and excluded.source <> 'oembed' then excluded.first_snapshot
+               else x_tweet.first_snapshot end,
+             -- a failed re-check (mirrors down) changes nothing; 'deleted' is a real verdict
+             status = case when excluded.status = 'failed' and x_tweet.status = 'ok'
+                           then x_tweet.status else excluded.status end,
+             source = case when excluded.status = 'failed' and x_tweet.status = 'ok'
+                           then x_tweet.source else excluded.source end,
+             fetched_at = now()""",
         tweet_id,
         snap,
         t.status,
         t.source,
     )
+    if record is not None:
+        if t.status == "deleted":
+            return t
+        if t.status == "ok" and row is not None and row["source"] == "oembed":
+            return t  # the richer copy replaces the sparse oEmbed record
+        return record
     return t
 
 
@@ -90,6 +119,18 @@ async def profile_cached(
         return p
     key = p.user_id or f"handle:{handle.lower()}"
     prev = await conn.fetchrow("select handle, snapshot from x_profile where user_id=$1", key)
+    # Work out renames before saving, so the stored snapshot (served from cache for 12 h)
+    # carries the same count as this response. A count from the source already includes
+    # the change; only our own observation is added when the source gave none.
+    prev_changes = (prev["snapshot"] or {}).get("username_changes") if prev else None
+    renamed = bool(
+        prev and prev["handle"] and p.handle and prev["handle"].lower() != p.handle.lower()
+    )
+    if p.username_changes is None:
+        base = prev_changes if isinstance(prev_changes, int) else 0
+        p.username_changes = base + (1 if renamed else 0) or None
+    if renamed:
+        log.info("x.profile.renamed", user_id=key, old=prev["handle"], new=p.handle)
     await conn.execute(
         """insert into x_profile (user_id, handle, snapshot, status, source, fetched_at)
            values ($1, $2, $3, $4, $5, now())
@@ -107,9 +148,6 @@ async def profile_cached(
         p.handle,
         p.followers,
     )
-    if prev and prev["handle"] and p.handle and prev["handle"].lower() != p.handle.lower():
-        p.username_changes = (p.username_changes or 0) + 1
-        log.info("x.profile.renamed", user_id=key, old=prev["handle"], new=p.handle)
     return p
 
 
@@ -174,10 +212,15 @@ async def trend_index(conn: asyncpg.Connection) -> trends.TrendIndex:
     if _trend_cache and now - _trend_cache[0] < TREND_INDEX_TTL_S:
         return _trend_cache[1]
     rows = await conn.fetch(
-        """with latest as (select max(day) d from trend_term where source='wikipedia')
-           select term, spike, views from trend_term, latest
-           where source='wikipedia' and day >= latest.d - 2
-             and (spike >= 2 or views >= 150000)
+        """with latest as (select max(day) d from trend_term where source='wikipedia'),
+           best as (
+             -- one row per term (its strongest day): duplicates across days would otherwise
+             -- overwrite each other in the index, last (weakest) wins
+             select distinct on (term) term, spike, views from trend_term, latest
+             where source='wikipedia' and day >= latest.d - 2
+               and (spike >= 2 or views >= 150000)
+             order by term, spike desc nulls last)
+           select term, spike, views from best
            order by spike desc nulls last limit 1500"""
     )
     terms = [

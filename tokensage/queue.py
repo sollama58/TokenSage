@@ -187,7 +187,7 @@ async def complete(conn: asyncpg.Connection, job_id: int, result_version: int | 
             )
         await conn.execute(
             """update job set status='done', finished_at=now(), locked_until=null,
-               result_version=$2, last_error=null where id=$1""",
+               result_version=$2, last_error=null where id=$1 and status='running'""",
             job_id,
             result_version,
         )
@@ -215,7 +215,7 @@ async def fail(
           last_error = left($2, 2000),
           error_code = $5,
           finished_at = case when attempts >= $3 or $5::text is not null then now() else null end
-        where id = $1
+        where id = $1 and status = 'running'
         returning status
         """,
         job_id,
@@ -226,7 +226,9 @@ async def fail(
     )
     if status == "failed":
         await _release_callbacks(conn, job_id)
-    await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
+        # only a final failure is "done" for waiters; a retry leaves the job pending, and
+        # waking requests then would just hand them an early 202
+        await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
 
 
 async def _release_callbacks(conn: asyncpg.Connection, target_job_id: int) -> None:
@@ -250,10 +252,21 @@ async def defer(conn: asyncpg.Connection, job_id: int, seconds: float) -> None:
         """update job set status='pending', locked_until=null,
              attempts = greatest(attempts - 1, 0),
              run_after = now() + make_interval(secs => $2)
-           where id=$1""",
+           where id=$1 and status='running'""",
         job_id,
         float(seconds),
     )
+
+
+async def renew_lease(conn: asyncpg.Connection, job_id: int, lease_s: int) -> bool:
+    """Extend a running job's lease (worker heartbeat). False if the job is no longer ours."""
+    r = await conn.execute(
+        """update job set locked_until = now() + make_interval(secs => $2)
+           where id=$1 and status='running'""",
+        job_id,
+        lease_s,
+    )
+    return r.endswith(" 1")
 
 
 async def release(conn: asyncpg.Connection, job_id: int) -> None:
@@ -273,6 +286,9 @@ async def requeue_expired(conn: asyncpg.Connection) -> int:
            where status='running' and locked_until < now()"""
     )
     return int(res.split()[-1])
+
+
+POLL_S = 1.5
 
 
 class DoneWaiter:
@@ -311,16 +327,24 @@ class DoneWaiter:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[None] = loop.create_future()
         self._waiters.setdefault(job_id, set()).add(fut)
+        deadline = loop.time() + timeout_s
         try:
-            # Guard against a notify that fired before we subscribed.
-            async with self._pool.acquire() as c:
-                st = await c.fetchval("select status from job where id=$1", job_id)
-            if st in ("done", "failed"):
-                return True
-            await asyncio.wait_for(fut, timeout=timeout_s)
-            return True
-        except TimeoutError:
-            return False
+            # Check now (a notify may have fired before we subscribed), then wait for the
+            # notify with a status poll every POLL_S: a dropped LISTEN connection degrades to
+            # polling instead of every request waiting out its full timeout.
+            while True:
+                async with self._pool.acquire() as c:
+                    st = await c.fetchval("select status from job where id=$1", job_id)
+                if st in ("done", "failed", None):
+                    return st is not None
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return False
+                try:
+                    await asyncio.wait_for(asyncio.shield(fut), timeout=min(POLL_S, remaining))
+                    return True
+                except TimeoutError:
+                    continue
         finally:
             s = self._waiters.get(job_id)
             if s is not None:

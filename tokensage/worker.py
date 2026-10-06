@@ -14,7 +14,13 @@ import asyncpg
 import structlog
 
 from tokensage import queue
-from tokensage.analyzer import AnalyzeFailed, Context, analyze, retry_metadata
+from tokensage.analyzer import (
+    AnalyzeFailed,
+    Context,
+    RetryRescheduled,
+    analyze,
+    retry_metadata,
+)
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.engine import ocr
@@ -47,18 +53,40 @@ class Worker:
         try:
             # N independent claim/process loops: one slow IPFS/X fetch no longer holds up
             # every other coin. Each loop takes its own pool connection per job.
-            await asyncio.gather(*(self._loop(slot) for slot in range(self.concurrency)))
+            loops = [asyncio.create_task(self._loop(slot)) for slot in range(self.concurrency)]
+            watchdog = asyncio.create_task(self._shutdown_watchdog(loops))
+            try:
+                await asyncio.gather(*loops, return_exceptions=True)
+            finally:
+                watchdog.cancel()
         finally:
             await self._stop_listener()
             await self.ctx.close()
             log.info("worker.stop")
 
+    async def _shutdown_watchdog(self, loops: list[asyncio.Task[None]]) -> None:
+        """After a stop request, give in-flight jobs a grace period, then cancel them; each
+        cancelled job is handed back to the queue (see _tick) instead of staying 'running'
+        until its lease expires."""
+        await self.stop.wait()
+        await asyncio.sleep(self.settings.worker_shutdown_grace_s)
+        for t in loops:
+            t.cancel()
+
     async def _loop(self, slot: int) -> None:
         while not self.stop.is_set():
-            did_work = await self._tick()
+            # clear before claiming: a notify arriving during the claim must not be lost
+            self._wake.clear()
+            try:
+                did_work = await self._tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - a DB blip must not stop every slot
+                log.error("worker.slot_error", slot=slot, error=f"{type(e).__name__}: {e}")
+                await asyncio.sleep(min(5.0, self.settings.worker_poll_interval_s))
+                continue
             if did_work:
                 continue
-            self._wake.clear()
             try:
                 await asyncio.wait_for(
                     self._wait_for_wake(), timeout=self.settings.worker_poll_interval_s
@@ -102,11 +130,36 @@ class Worker:
             if job is None:
                 return False
             self.active_jobs.add(job.id)
+            heartbeat = asyncio.create_task(self._heartbeat(job.id))
             try:
                 await self._process(conn, job)
+            except asyncio.CancelledError:
+                await self._release_quietly(job.id)
+                raise
             finally:
+                heartbeat.cancel()
                 self.active_jobs.discard(job.id)
             return True
+
+    async def _heartbeat(self, job_id: int) -> None:
+        """Keep the lease alive while a (possibly slow, OCR-queued) job runs, so no other
+        slot or the maintenance job re-claims it and analyses the coin twice."""
+        every = max(1.0, self.settings.job_lease_s / 3)
+        while True:
+            await asyncio.sleep(every)
+            try:
+                async with self.pool.acquire() as c:
+                    await queue.renew_lease(c, job_id, self.settings.job_lease_s)
+            except Exception as e:  # noqa: BLE001
+                log.warning("worker.heartbeat_failed", job_id=job_id, error=str(e)[:120])
+
+    async def _release_quietly(self, job_id: int) -> None:
+        try:
+            async with self.pool.acquire() as c:
+                await queue.release(c, job_id)
+            log.info("worker.job_released", job_id=job_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("worker.release_failed", job_id=job_id, error=str(e)[:120])
 
     async def _callback(self, conn: asyncpg.Connection, job: queue.Job) -> None:
         from tokensage import callbacks
@@ -121,6 +174,14 @@ class Worker:
             # Not finished yet: wait for it without spending a delivery attempt. Finishing
             # the target releases this job straight away.
             await queue.defer(conn, job.id, callbacks.CALLBACK_WAIT_S)
+            # the target may have finished between our read and the defer: if so, run again
+            # now instead of waiting out CALLBACK_WAIT_S
+            again = await queue.get(conn, target.id)
+            if again is not None and again.status in ("done", "failed"):
+                await conn.execute(
+                    "update job set run_after = now() where id=$1 and status='pending'", job.id
+                )
+                await conn.execute("select pg_notify($1, '0')", queue.CHANNEL_NEW)
             raise _Deferred
         result = None
         if target.status == "done" and target.mint and target.depth:
@@ -170,7 +231,11 @@ class Worker:
                 bound.info("job.callback.done")
             elif job.kind == "retry_metadata":
                 assert job.mint and job.depth
-                rv = await retry_metadata(conn, self.ctx, job.mint, job.depth)
+                try:
+                    rv = await retry_metadata(conn, self.ctx, job.mint, job.depth, job_id=job.id)
+                except RetryRescheduled:
+                    bound.info("job.retry_metadata.rescheduled")
+                    return
                 await queue.complete(conn, job.id, rv)
                 bound.info("job.retry_metadata.done", version=rv)
             else:

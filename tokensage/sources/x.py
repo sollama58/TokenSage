@@ -70,7 +70,7 @@ class TweetData:
         d = dict(d)
         for k in ("created_at", "author_joined"):
             if d.get(k):
-                d[k] = datetime.fromisoformat(d[k])
+                d[k] = _utc(datetime.fromisoformat(d[k]))
         q = d.get("quoted")
         d["quoted"] = cls.from_json(q) if isinstance(q, dict) else None
         d.setdefault("raw", {})
@@ -105,7 +105,7 @@ class ProfileData:
     def from_json(cls, d: dict[str, Any]) -> ProfileData:
         d = dict(d)
         if d.get("joined"):
-            d["joined"] = datetime.fromisoformat(d["joined"])
+            d["joined"] = _utc(datetime.fromisoformat(d["joined"]))
         d.setdefault("raw", {})
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
@@ -116,18 +116,28 @@ class ProfileData:
 def _dt(v: Any) -> datetime | None:
     if v is None:
         return None
+    if isinstance(v, bool):
+        return None
     if isinstance(v, int | float):
-        return datetime.fromtimestamp(v if v < 1e11 else v / 1000, tz=UTC)
+        try:
+            return datetime.fromtimestamp(v if v < 1e11 else v / 1000, tz=UTC)
+        except (OverflowError, OSError, ValueError):  # absurd or NaN timestamps
+            return None
     s = str(v).strip()
     for fmt in ("%a %b %d %H:%M:%S %z %Y", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
         try:
-            return datetime.strptime(s, fmt).astimezone(UTC)
+            return _utc(datetime.strptime(s, fmt))
         except ValueError:
             pass
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(UTC)
+        return _utc(datetime.fromisoformat(s.replace("Z", "+00:00")))
     except ValueError:
         return None
+
+
+def _utc(d: datetime) -> datetime:
+    """A literal 'Z' parses as naive: that is UTC, not the server's local time."""
+    return d.replace(tzinfo=UTC) if d.tzinfo is None else d.astimezone(UTC)
 
 
 def _int(v: Any) -> int | None:
@@ -424,9 +434,17 @@ async def paid_tweet(http: httpx.AsyncClient, tweet_id: str, api_key: str) -> Tw
         j = r.json()
     except ValueError:
         return None
-    tweets = j.get("tweets") or []
+    if not isinstance(j, dict):
+        return None
+    tweets = j.get("tweets")
     if not tweets:
-        return TweetData(id=tweet_id, status="deleted", source="twitterapi_io")
+        # only a successful lookup with no tweet means deleted; an error body (credits,
+        # auth, ...) must not be cached as a deleted post
+        if j.get("status") == "success" and isinstance(tweets, list):
+            return TweetData(id=tweet_id, status="deleted", source="twitterapi_io")
+        return None
+    if not isinstance(tweets, list) or not isinstance(tweets[0], dict):
+        return None
     out = _paid_status(tweets[0], tweet_id)
     q = tweets[0].get("quoted_tweet")
     if isinstance(q, dict) and q.get("text"):
@@ -475,7 +493,11 @@ async def fetch_tweet(
             deleted = t
             continue
     if allow_paid and paid_key:
-        t = await paid_tweet(http, tweet_id, paid_key)
+        try:
+            t = await paid_tweet(http, tweet_id, paid_key)
+        except Exception as e:  # noqa: BLE001 - the paid fallback must not fail the analysis
+            log.info("x.fetch_tweet.error", fn="paid_tweet", error=str(e)[:120])
+            t = None
         if t is not None:
             return t
     return deleted if deleted is not None else TweetData(id=tweet_id, status="failed")
@@ -525,8 +547,9 @@ async def fx_profile(http: httpx.AsyncClient, handle: str) -> ProfileData | None
         if r2 is not None and r2.status_code == 200:
             try:
                 a = r2.json()
-                acc = a.get("about_account") or a.get("about") or a
-                p.username_changes = _int(((acc or {}).get("username_changes") or {}).get("count"))
+                acc = (a.get("about_account") or a.get("about") or a) if isinstance(a, dict) else {}
+                uc = acc.get("username_changes") if isinstance(acc, dict) else None
+                p.username_changes = _int(uc.get("count")) if isinstance(uc, dict) else None
             except ValueError:
                 pass
     return p
@@ -564,6 +587,7 @@ async def vx_profile(http: httpx.AsyncClient, handle: str) -> ProfileData | None
 
 
 async def fetch_profile(http: httpx.AsyncClient, handle: str) -> ProfileData:
+    missing: ProfileData | None = None
     for fn in (fx_profile, vx_profile):
         try:
             p = await fn(http, handle)
@@ -572,4 +596,8 @@ async def fetch_profile(http: httpx.AsyncClient, handle: str) -> ProfileData:
             p = None
         if p is not None and p.status in ("ok", "suspended"):
             return p
+        if p is not None and p.status == "not_found":
+            missing = p
+    if missing is not None:
+        return missing  # no mirror found the account and at least one says it does not exist
     return ProfileData(handle=handle, status="failed")
