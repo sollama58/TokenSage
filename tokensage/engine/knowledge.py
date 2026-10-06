@@ -51,10 +51,16 @@ class Entity:
     categories: tuple[str, ...]
     desc: str
     popularity: float
+    source: str = "seed"  # seed | wikidata
+    ref_id: str | None = None  # the Wikidata Q-id of a gazetteer entity
 
     @property
     def surfaces(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys([self.label.lower(), *(a.lower() for a in self.aliases)]))
+
+    @property
+    def evidence_source(self) -> str:
+        return f"wikidata:{self.ref_id}" if self.ref_id else f"entities:{self.label}"
 
 
 @dataclass(frozen=True)

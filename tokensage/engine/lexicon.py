@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import ahocorasick
 
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm
+
+if TYPE_CHECKING:
+    from tokensage.engine.gazetteer import Gazetteer
 
 _lock = threading.Lock()
 _auto: ahocorasick.Automaton | None = None
@@ -24,6 +28,7 @@ class Hit:
     payload: SlangTerm | KnownCoin | Entity | str  # wordnet: the class label
     start: int
     end: int
+    name_only: bool = False  # a gazetteer surface that only counts in the coin's name
 
 
 # WordNet words whose everyday sense in coin names is not the animal/food/vehicle one.
@@ -136,8 +141,12 @@ def automaton(k: Knowledge) -> ahocorasick.Automaton:
     return _auto
 
 
-def find(text: str, k: Knowledge) -> list[Hit]:
-    """Word-bounded matches in a lowercased, space-separated text."""
+def find(
+    text: str, k: Knowledge, gaz: Gazetteer | None = None, name_pass: bool = True
+) -> list[Hit]:
+    """Word-bounded matches in a lowercased, space-separated text. With a gazetteer, its
+    Wikidata entities compete with the curated surfaces: the longest match wins a span.
+    Outside the coin's name (name_pass=False) name-only gazetteer surfaces are skipped."""
     if not text:
         return []
     padded = " " + " ".join(text.lower().split()) + " "
@@ -147,6 +156,11 @@ def find(text: str, k: Knowledge) -> list[Hit]:
         start = end - len(surface) - 1 + 1
         for kind, payload in payloads:
             hits.append(Hit(surface, kind, payload, start, end))
+    if gaz is not None:
+        for g in gaz.find(padded):
+            if g.name_only and not name_pass:
+                continue
+            hits.append(Hit(g.surface, "entity", g.entity, g.start, g.end, g.name_only))
     # prefer longer surfaces when they overlap (e.g. "just a chill guy" over "chill guy")
     hits.sort(key=lambda h: (h.start, -(h.end - h.start)))
     kept: list[Hit] = []

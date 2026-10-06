@@ -16,7 +16,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage import fulldepth, queue
+from tokensage import fulldepth, gazetteer_db, queue
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -56,7 +56,7 @@ from tokensage.api.schemas import (
 )
 from tokensage.config import Settings
 from tokensage.engine import image as image_stage
-from tokensage.engine import pairing, xmatch, xsignals
+from tokensage.engine import pairing, wikilookup, xmatch, xsignals
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.pipeline import (
     RULES_VERSION,
@@ -235,6 +235,7 @@ async def _db_context(
             dbc.same_name += [t for t in found if t.mint not in known]
         except Exception as e:  # noqa: BLE001 - lookups are optional
             log.info("lookups.failed", error=str(e)[:120])
+    dbc.gazetteer = await gazetteer_db.current(conn)
     # known coins from the database (seed lives in data/, cron adds more)
     rows = await conn.fetch(
         """select id, symbol, name, aliases, lore, categories, mint, logo_phash, source
@@ -941,6 +942,7 @@ async def analyze(
         inp.x_media = await fulldepth.media_hashes(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
         )
+        inp.wiki_refs = await _wiki_refs(conn, ctx, inp)
         # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
         # worker's other concurrent jobs keep making network progress meanwhile.
         out = await asyncio.to_thread(run_full, inp)
@@ -980,6 +982,48 @@ async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput
         await queue.enqueue(conn, "analyze", pair.mint, "basic", requested_by="pair_lookup")
     except Exception as e:  # noqa: BLE001 - only a prefetch
         log.info("pair.queue_failed", mint=pair.mint, error=str(e)[:120])
+
+
+async def _wiki_refs(
+    conn: asyncpg.Connection, ctx: Context, inp: EngineInput
+) -> list[wikilookup.WikiRef]:
+    """Look up on Wikipedia the names in the coin's name and post that the gazetteer does
+    not know (cached; at most wikilookup.MAX_LOOKUPS searches)."""
+    from tokensage.engine.normalize import normalize
+
+    texts: list[str] = []
+    t = inp.tweet
+    if t is not None and t.status == "ok":
+        texts.append(t.text or "")
+        for other in (t.quoted, t.replied_to):
+            if other is not None and other.status == "ok":
+                texts.append(other.text or "")
+    try:
+        n = normalize(inp.name, inp.symbol, None)
+        spans = await asyncio.to_thread(
+            wikilookup.spans, n, texts, load_knowledge(), inp.ctx.gazetteer
+        )
+    except Exception as e:  # noqa: BLE001 - an optional enrichment
+        log.info("wiki.spans_failed", error=str(e)[:120])
+        return []
+    refs: list[wikilookup.WikiRef] = []
+    titles: set[str] = set()
+    found_in_name: set[str] = set()
+    for span in spans:
+        if any(span.text in f for f in found_in_name):
+            continue  # "sydney sweeney" found: its sub-spans need no lookup
+        try:
+            pages = await fulldepth.wiki_search(conn, ctx.http, span.text)
+        except Exception as e:  # noqa: BLE001 - an optional enrichment
+            log.info("wiki.search_failed", error=str(e)[:120])
+            continue
+        ref = wikilookup.pick(span, pages or [])
+        if ref is None or ref.title in titles:
+            continue
+        titles.add(ref.title)
+        refs.append(ref)
+        found_in_name.add(span.text)
+    return refs
 
 
 async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:

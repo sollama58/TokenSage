@@ -55,6 +55,8 @@ categories:
     description: Streamer, influencer or crypto KOL.
   - label: celebrity/other
     description: Another public figure.
+  - label: pop_culture
+    description: A film, TV series, video game, fictional character or online platform.
   - label: news_event
     description: Tied to a recent news story or viral event.
   - label: food_object_abstract

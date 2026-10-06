@@ -15,7 +15,7 @@ from tokensage.api.schemas import XInfo
 from tokensage.config import Settings
 from tokensage.engine import ocr, trends
 from tokensage.engine.knowledge import load_knowledge
-from tokensage.sources import gnews
+from tokensage.sources import gnews, wikipedia
 from tokensage.sources.x import ProfileData, TweetData, fetch_profile, fetch_tweet
 
 log = structlog.get_logger("fulldepth")
@@ -24,6 +24,8 @@ PROFILE_TTL = timedelta(hours=12)
 TWEET_RECHECK = timedelta(hours=6)
 DELETED_RETRY = timedelta(hours=1)
 NEWS_TTL = timedelta(hours=1)
+WIKI_TTL = timedelta(days=7)  # articles and their descriptions change slowly
+WIKI_EMPTY_TTL = timedelta(days=1)  # a name with no article may get one tomorrow
 TREND_INDEX_TTL_S = 600
 MAX_NEWS_LOOKUPS = 2
 
@@ -275,6 +277,33 @@ async def news_for(
         value,
     )
     return value
+
+
+# ----------------------------------------------------------------- Wikipedia lookups
+
+
+async def wiki_search(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, query: str
+) -> list[wikipedia.WikiPage] | None:
+    """Wikipedia's top articles for a name, cached in lookup_cache (a week; a day when
+    nothing was found). A stale copy beats nothing when Wikipedia is down."""
+    key = f"wiki:{query.lower()}"
+    row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
+    if row is not None:
+        cached = [wikipedia.WikiPage.from_json(d) for d in row["value"] or []]
+        ttl = WIKI_TTL if cached else WIKI_EMPTY_TTL
+        if datetime.now(UTC) - row["fetched_at"] < ttl:
+            return cached
+    pages = await wikipedia.search(http, query)
+    if pages is None:
+        return [wikipedia.WikiPage.from_json(d) for d in row["value"] or []] if row else None
+    await conn.execute(
+        """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
+           on conflict (key) do update set value=excluded.value, fetched_at=now()""",
+        key,
+        [p.to_json() for p in pages],
+    )
+    return pages
 
 
 # ----------------------------------------------------------------- X media hashes
