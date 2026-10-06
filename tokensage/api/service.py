@@ -102,6 +102,7 @@ async def get_or_enqueue(
     priority: int = queue.PRIORITY_API,
     key: ApiKey | None = None,
     callback_url: str | None = None,
+    hints: dict[str, Any] | None = None,
 ) -> TokenResponse:
     async with pool.acquire() as conn:
         created = await token_created_at(conn, mint)
@@ -140,6 +141,7 @@ async def get_or_enqueue(
             # a refresh always re-analyses; otherwise reuse a job that just finished
             reuse_done_within_s=0 if refresh else REUSE_DONE_WITHIN_S,
             before_commit=charge,
+            payload={"hints": hints} if hints else None,
         )
         if callback_url and key is not None:
             from tokensage import callbacks

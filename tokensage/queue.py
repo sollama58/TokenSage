@@ -65,6 +65,7 @@ async def enqueue(
     requested_by: str | None = None,
     reuse_done_within_s: float = 0,
     before_commit: Callable[[Job], Awaitable[None]] | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> Job:
     """Insert a job, or return the open one for (kind, mint, depth). Raises the priority
     of an existing job if the new request is more urgent.
@@ -80,7 +81,7 @@ async def enqueue(
         # still open (and joins it) or finished (and reuses it), never the commit in between.
         await conn.execute("select pg_advisory_xact_lock($1)", _job_lock_key(kind, mint, depth))
         row = await _enqueue_row(
-            conn, kind, mint, depth, priority, requested_by, reuse_done_within_s
+            conn, kind, mint, depth, priority, requested_by, reuse_done_within_s, payload
         )
         job = Job.from_record(row)
         if before_commit is not None:
@@ -103,6 +104,7 @@ async def _enqueue_row(
     priority: int,
     requested_by: str | None,
     reuse_done_within_s: float,
+    payload: dict[str, Any] | None = None,
 ) -> asyncpg.Record:
     row = await conn.fetchrow(
         """
@@ -114,11 +116,13 @@ async def _enqueue_row(
           order by finished_at desc
           limit 1
         ), ins as (
-          insert into job (kind, mint, depth, priority, requested_by)
-          select $1, $2, $3, $4, $5
+          insert into job (kind, mint, depth, priority, requested_by, payload)
+          select $1, $2, $3, $4, $5, $7::jsonb
           where not exists (select 1 from recent)
           on conflict (kind, mint, depth) where status in ('pending','running')
-          do update set priority = least(job.priority, excluded.priority)
+          do update set priority = least(job.priority, excluded.priority),
+                        -- a later caller's hints help a job that has none yet
+                        payload = coalesce(job.payload, excluded.payload)
           returning *, (xmax = 0) as inserted
         )
         select * from ins
@@ -132,6 +136,7 @@ async def _enqueue_row(
         priority,
         requested_by,
         float(reuse_done_within_s),
+        payload,
     )
     assert row is not None
     return row

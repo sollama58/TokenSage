@@ -15,6 +15,7 @@ from tokensage.api.schemas import (
     Analysis,
     BatchItem,
     BatchRequest,
+    BatchRequestItem,
     BatchResponse,
     Depth,
     FlagEntry,
@@ -22,6 +23,8 @@ from tokensage.api.schemas import (
     MetaResponse,
     RawFields,
     TaxonomyEntry,
+    TokenHints,
+    TokenRequest,
     TokenResponse,
     Versions,
 )
@@ -44,18 +47,25 @@ def _ca(raw: str) -> str:
         raise errors.invalid_ca(str(e)) from None
 
 
+INCLUDE_DOC = (
+    "comma list of optional parts to keep: evidence, raw. Omit to get everything; "
+    "a part left out of the list is dropped (evidence -> [], raw -> empty)"
+)
+TOKEN_RESPONSES: dict[int | str, dict] = {
+    202: {"model": TokenResponse, "description": "Analysis pending; poll again."},
+    400: {"description": "invalid_ca"},
+    401: {"description": "unauthorized"},
+    404: {"description": "token_not_found (never when hints with metadata were given)"},
+    422: {"description": "not_a_token_mint | not_pumpfun"},
+    429: {"description": "rate_limited | quota_exceeded"},
+    503: {"description": "overloaded"},
+}
+
+
 @router.get(
     "/tokens/{ca}",
     response_model=TokenResponse,
-    responses={
-        202: {"model": TokenResponse, "description": "Analysis pending; poll again."},
-        400: {"description": "invalid_ca"},
-        401: {"description": "unauthorized"},
-        404: {"description": "token_not_found"},
-        422: {"description": "not_a_token_mint | not_pumpfun"},
-        429: {"description": "rate_limited"},
-        503: {"description": "overloaded"},
-    },
+    responses=TOKEN_RESPONSES,
     summary="Analyze a pump.fun token by contract address",
 )
 async def get_token(
@@ -67,15 +77,60 @@ async def get_token(
     wait: Annotated[int | None, Query(ge=0, le=25)] = None,
     max_age: Annotated[int | None, Query(ge=0, le=7 * 86400)] = None,
     refresh: bool = False,
-    include: Annotated[
-        str | None,
-        Query(
-            description=(
-                "comma list of optional parts to keep: evidence, raw. Omit to get everything; "
-                "a part left out of the list is dropped (evidence -> [], raw -> empty)"
-            )
-        ),
-    ] = None,
+    include: Annotated[str | None, Query(description=INCLUDE_DOC)] = None,
+) -> TokenResponse:
+    return await _token(
+        request, response, ca, key, depth, wait, max_age, refresh, include, hints=None
+    )
+
+
+@router.post(
+    "/tokens/{ca}",
+    response_model=TokenResponse,
+    responses=TOKEN_RESPONSES,
+    summary="Analyze a token, passing metadata hints you already have",
+    description=(
+        "Same as GET /v1/tokens/{ca} (same query parameters and responses), with an optional "
+        "JSON body carrying `hints`. With hints the metadata fetch is skipped, and a mint not "
+        "yet visible on-chain is analysed from the hints instead of returning 404."
+    ),
+)
+async def post_token(
+    request: Request,
+    response: Response,
+    ca: str,
+    key: Annotated[ApiKey, Depends(require_api_key)],
+    body: TokenRequest | None = None,
+    depth: Depth | None = None,
+    wait: Annotated[int | None, Query(ge=0, le=25)] = None,
+    max_age: Annotated[int | None, Query(ge=0, le=7 * 86400)] = None,
+    refresh: bool = False,
+    include: Annotated[str | None, Query(description=INCLUDE_DOC)] = None,
+) -> TokenResponse:
+    hints = body.hints if body else None
+    return await _token(
+        request, response, ca, key, depth, wait, max_age, refresh, include, hints=hints
+    )
+
+
+def _hints_dict(h: TokenHints | None) -> dict | None:
+    if h is None:
+        return None
+    d = {k: v for k, v in h.model_dump(mode="json").items() if v not in (None, "")}
+    return d or None
+
+
+async def _token(
+    request: Request,
+    response: Response,
+    ca: str,
+    key: ApiKey,
+    depth: Depth | None,
+    wait: int | None,
+    max_age: int | None,
+    refresh: bool,
+    include: str | None,
+    hints: TokenHints | None,
 ) -> TokenResponse:
     settings = request.app.state.settings
     mint = _ca(ca)
@@ -93,6 +148,7 @@ async def get_token(
         requested_by=key.name,
         request_id=request.state.request_id,
         key=key,
+        hints=_hints_dict(hints),
     )
     if res.status == "pending":
         response.status_code = 202
@@ -123,7 +179,10 @@ async def batch(
     key: Annotated[ApiKey, Depends(require_api_key)],
 ) -> BatchResponse:
     settings = request.app.state.settings
-    if len(body.cas) > settings.batch_max:
+    entries = [BatchRequestItem(ca=c) for c in body.cas] + list(body.items)
+    if not entries:
+        raise errors.validation("give at least one CA in `cas` or `items`")
+    if len(entries) > settings.batch_max:
         raise errors.validation(f"at most {settings.batch_max} CAs per batch")
     cb: str | None = None
     if body.callback_url:
@@ -135,7 +194,8 @@ async def batch(
         except (UnsafeUrl, FetchError) as e:
             raise errors.ApiError(400, "invalid_callback_url", str(e)) from None
     items: list[BatchItem] = []
-    for raw in body.cas:
+    for entry in entries:
+        raw = entry.ca
         try:
             mint = parse_ca(raw)
         except ValueError as e:
@@ -156,6 +216,7 @@ async def batch(
                 priority=queue.PRIORITY_BATCH,
                 key=key,
                 callback_url=cb,
+                hints=_hints_dict(entry.hints),
             )
         except errors.ApiError as e:
             if e.code not in ("quota_exceeded", "overloaded"):

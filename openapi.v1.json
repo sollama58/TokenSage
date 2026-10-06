@@ -264,11 +264,12 @@
             "title": "Callback Url"
           },
           "cas": {
+            "default": [],
+            "description": "CAs to prefetch. Use `items` instead to pass hints; both may be combined (at most 50 in total, at least one)",
             "items": {
               "type": "string"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Cas",
             "type": "array"
           },
@@ -280,12 +281,42 @@
             ],
             "title": "Depth",
             "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BatchRequestItem"
+            },
+            "maxItems": 50,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "BatchRequest",
+        "type": "object"
+      },
+      "BatchRequestItem": {
+        "additionalProperties": false,
+        "properties": {
+          "ca": {
+            "title": "Ca",
+            "type": "string"
+          },
+          "hints": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenHints"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "cas"
+          "ca"
         ],
-        "title": "BatchRequest",
+        "title": "BatchRequestItem",
         "type": "object"
       },
       "BatchResponse": {
@@ -1136,6 +1167,129 @@
           "description"
         ],
         "title": "TaxonomyEntry",
+        "type": "object"
+      },
+      "TokenHints": {
+        "additionalProperties": false,
+        "description": "Metadata the caller already holds (e.g. from pump.fun). Untrusted: cleaned and\nURL-checked exactly like fetched metadata. When present, the IPFS metadata fetch is\nskipped, and a mint not yet visible on-chain is analysed instead of returning 404.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token creation time; skips the on-chain history lookup",
+            "title": "Created At"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "telegram": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram"
+          },
+          "twitter": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Twitter"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "title": "TokenHints",
+        "type": "object"
+      },
+      "TokenRequest": {
+        "additionalProperties": false,
+        "description": "Optional body of POST /v1/tokens/{ca} (the query parameters are those of GET).",
+        "properties": {
+          "hints": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenHints"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "TokenRequest",
         "type": "object"
       },
       "TokenResponse": {
@@ -1991,13 +2145,13 @@
             "description": "unauthorized"
           },
           "404": {
-            "description": "token_not_found"
+            "description": "token_not_found (never when hints with metadata were given)"
           },
           "422": {
             "description": "not_a_token_mint | not_pumpfun"
           },
           "429": {
-            "description": "rate_limited"
+            "description": "rate_limited | quota_exceeded"
           },
           "503": {
             "description": "overloaded"
@@ -2009,6 +2163,171 @@
           }
         ],
         "summary": "Analyze a pump.fun token by contract address",
+        "tags": [
+          "v1"
+        ]
+      },
+      "post": {
+        "description": "Same as GET /v1/tokens/{ca} (same query parameters and responses), with an optional JSON body carrying `hints`. With hints the metadata fetch is skipped, and a mint not yet visible on-chain is analysed from the hints instead of returning 404.",
+        "operationId": "post_token_v1_tokens__ca__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ca",
+            "required": true,
+            "schema": {
+              "title": "Ca",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "basic",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            }
+          },
+          {
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 25,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Wait"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_age",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 604800,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Age"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "comma list of optional parts to keep: evidence, raw. Omit to get everything; a part left out of the list is dropped (evidence -> [], raw -> empty)",
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "comma list of optional parts to keep: evidence, raw. Omit to get everything; a part left out of the list is dropped (evidence -> [], raw -> empty)",
+              "title": "Include"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TokenRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Analysis pending; poll again."
+          },
+          "400": {
+            "description": "invalid_ca"
+          },
+          "401": {
+            "description": "unauthorized"
+          },
+          "404": {
+            "description": "token_not_found (never when hints with metadata were given)"
+          },
+          "422": {
+            "description": "not_a_token_mint | not_pumpfun"
+          },
+          "429": {
+            "description": "rate_limited | quota_exceeded"
+          },
+          "503": {
+            "description": "overloaded"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Analyze a token, passing metadata hints you already have",
         "tags": [
           "v1"
         ]

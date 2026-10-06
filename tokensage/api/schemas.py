@@ -271,8 +271,42 @@ class JobResponse(_Model):
     request_id: str
 
 
+class TokenHints(_Model):
+    """Metadata the caller already holds (e.g. from pump.fun). Untrusted: cleaned and
+    URL-checked exactly like fetched metadata. When present, the IPFS metadata fetch is
+    skipped, and a mint not yet visible on-chain is analysed instead of returning 404."""
+
+    name: str | None = Field(default=None, max_length=256)
+    symbol: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=4000)
+    image_url: str | None = Field(default=None, max_length=2048)
+    twitter: str | None = Field(default=None, max_length=2048)
+    telegram: str | None = Field(default=None, max_length=2048)
+    website: str | None = Field(default=None, max_length=2048)
+    created_at: datetime | None = Field(
+        default=None, description="Token creation time; skips the on-chain history lookup"
+    )
+
+
+class BatchRequestItem(_Model):
+    ca: str
+    hints: TokenHints | None = None
+
+
+class TokenRequest(_Model):
+    """Optional body of POST /v1/tokens/{ca} (the query parameters are those of GET)."""
+
+    hints: TokenHints | None = None
+
+
 class BatchRequest(_Model):
-    cas: list[str] = Field(min_length=1, max_length=50)
+    cas: list[str] = Field(
+        default=[],
+        max_length=50,
+        description="CAs to prefetch. Use `items` instead to pass hints; both may be combined "
+        "(at most 50 in total, at least one)",
+    )
+    items: list[BatchRequestItem] = Field(default=[], max_length=50)
     depth: Depth = "basic"
     callback_url: str | None = Field(
         default=None,

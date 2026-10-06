@@ -193,7 +193,10 @@ async def resolve(
     http: httpx.AsyncClient,
     settings: Settings,
     raw_ca: str,
+    created_hint: datetime | None = None,
 ) -> Resolved:
+    """created_hint: a creation time the API caller supplied. Used instead of the frontend
+    API and the (RPC-expensive) signature-history lookup when nothing better is stored."""
     mint = parse_ca(raw_ca)
 
     # 1. mint account
@@ -274,6 +277,8 @@ async def resolve(
     if row and row["created_at"]:
         created, created_src = row["created_at"], row["created_at_source"]
         creator = creator or row["creator"]
+    if created is None and created_hint is not None:
+        created, created_src = created_hint, "hints"
     if created is None and is_pumpfun:
         c, cr = await _created_from_frontend_api(http, mint)
         if c:
