@@ -112,6 +112,8 @@ class Knowledge:
     versions: dict[str, str] = field(default_factory=dict)
     stocks: dict[str, Stock] = field(default_factory=dict)  # by compact ticker
     meta: dict[str, Any] = field(default_factory=dict)  # data/meta.yaml
+    # WordNet words that are also given names / surnames: their dictionary sense is weak
+    name_words: frozenset[str] = frozenset()
     cjk: dict[str, str] = field(default_factory=dict)  # Han word -> English (data/cjk_words.yaml)
 
     # -- derived indexes
@@ -254,6 +256,7 @@ def load_knowledge() -> Knowledge:
         wordnet=_wordnet(set(str(w).lower() for w in t.get("wordnet_ignore") or [])),
         emoji=_json("cldr_emoji_en.json"),
         meta=_yaml("meta.yaml"),
+        name_words=frozenset(str(w).lower() for w in t.get("wordnet_name_words") or []),
         cjk={str(w): str(v or "").lower() for w, v in _yaml("cjk_words.yaml")["words"].items()},
-        versions={"lexicon": "2026-10-06.3", "known_coins": "seed-2026-10-06"},
+        versions={"lexicon": "2026-10-06.4", "known_coins": "seed-2026-10-06"},
     )

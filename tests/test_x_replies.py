@@ -292,3 +292,44 @@ async def test_cached_tweet_from_before_reply_support_is_rechecked(
         assert t.replying_to_id == TID and t.replying_to_handle == "elonmusk"
     finally:
         await conn.close()
+
+
+def test_account_names_only_count_when_the_account_is_the_entity() -> None:
+    """ "American Eagle" is a bird in WordNet and "american" an alias of America; neither says
+    anything about a coin launched on the brand's tweet. @elonmusk, by contrast, does."""
+    from tokensage.engine.pipeline import DbContext
+
+    def run(name: str, symbol: str, post: xs.TweetData) -> object:
+        return run_full(
+            EngineInput(
+                mint=T22_MINT,
+                name=name,
+                symbol=symbol,
+                description=None,
+                image_bytes=None,
+                created_at=TOKEN_T,
+                x_kind="tweet",
+                x_url_handle=post.author_handle,
+                tweet=post,
+                x_object_time=post.created_at,
+                ctx=DbContext(),
+            )
+        )
+
+    brand = _tweet(
+        text="great jeans",
+        author_handle="AmericanEagle",
+        author_name="American Eagle",
+        followers=500_000,
+        created_at=TOKEN_T - timedelta(hours=3),
+    )
+    out = run("great jeans", "JEANS", brand)
+    account_rows = [e for e in out.evidence if "the posting account" in e.detail]  # type: ignore[attr-defined]
+    assert account_rows == []
+    assert "animal/bird" not in dict(out.agg.categories)  # type: ignore[attr-defined]
+    assert not (out.agg.referent and out.agg.referent.label == "America")  # type: ignore[attr-defined]
+
+    out2 = run("did nothing wrong", "WRONG", _elon_post())
+    account_rows = [e for e in out2.evidence if "the posting account @elonmusk" in e.detail]  # type: ignore[attr-defined]
+    assert account_rows and all(e.kind == "entity" for e in account_rows)
+    assert dict(out2.agg.categories).get("celebrity/elon", 0) > 0  # type: ignore[attr-defined]

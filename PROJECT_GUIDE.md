@@ -380,6 +380,15 @@ TokenContext(raw on-chain + metadata + optional enrichment)
 - Use one **Aho-Corasick automaton** (`pyahocorasick`) over all gazetteer surface forms and aliases: entities, known coins, slang, WordNet classes and countries/demonyms. Build it at startup from Postgres and packaged files, and rebuild it when versions change.
 - Detect script with the Unicode script property. A CJK, Cyrillic or other non-Latin name is a regional/language-meta signal.
 - **Watch the context-sensitive terms.** `wif` is a *template* marker (the X-wif-hat family), **not** a dog keyword. The research prototype mislabelled "Trump wif Hat" as dog because of this.
+- **Dictionary senses never outrank names** (built 2026-10-06 after the meaning-derivation review):
+  - A WordNet hit inside a named match ("hawk" in Hawk Tuah) is dropped, and a ticker that repeats a name word adds no second dictionary vote.
+  - WordNet words that are also given names or surnames (`templates.yaml: wordnet_name_words`: ani, drake, kirk…) count at `scoring.name_word_factor` (0.5).
+  - A label supported only by dictionary evidence (WordNet, emoji) is capped at `scoring.wordnet_only_cap` (0.6) in S9, so "Grok Companion Ani" is an AI coin with a weak bird label, not a bird coin.
+  - The "a cat coin tied to X" framing in S10 needs the head word's class to score at least `scoring.framing_min_confidence`.
+  - Account-name passes (the posting, quoted, replied-to and mentioned accounts) keep only entity hits that name the account itself (`@elonmusk`, a multi-word name). "American Eagle" is neither a bird nor "America".
+  - The `baby`/`lil`/`mini` marker is a derivative only when the rest of the name is a known coin or a named entity ("Baby PNUT", "Baby Trump"); "Baby Shark" is a song.
+  - A known-coin match by ticker alone, when the name resolves to a different entity ("Department of Government Efficiency $DOGE"), keeps the `derivative/reference` evidence but does not inherit the coin's subject categories (the dog).
+  - A referent found only in the description while the name's head word is unresolved ("Gork", described as "elons dumb ai") is demoted below 0.45 and reported as a weak guess with a caveat.
 
 ### 5.4 S4 Ticker ↔ name explanation
 Compute these features and pick the explanation that fits, in this priority order:
@@ -482,6 +491,7 @@ Tweet text is fed back through S1–S5 and S8. **The tweet is often the "meaning
   | visual label | 0.2–0.5 |
   | known-coin copy | 0.9 |
 
+- **Recall (built 2026-10-06):** the production number the golden set cannot give. Every analysis logs `analysis.referent` with a status (`resolved` ≥ 0.6, `weak` ≥ 0.45, `guess`, `none`) and stores `analysis.referent_score`; the hourly maintenance job logs `recall.daily`, the last day's shares per depth (`tokensage/recall.py`). Sample the `none` and `guess` rows for the Phase 6 labelling set.
 - **Calibration (Phase 6):**
   - Hand-label 300–500 real tokens with a small internal labelling page (part of the debug pages, admin key only).
   - Fit per-rule weights by logistic regression (scikit-learn, still classical).

@@ -16,7 +16,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage import fulldepth, gazetteer_db, queue
+from tokensage import fulldepth, gazetteer_db, queue, recall
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -755,14 +755,16 @@ async def _store_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
 
 async def _insert_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
     version = await conn.fetchval(
-        """insert into analysis (mint, version, depth, doc, referent, categories, flags)
+        """insert into analysis (mint, version, depth, doc, referent, referent_score,
+                                 categories, flags)
            values ($1, coalesce((select max(version) from analysis where mint=$1), 0) + 1,
-                   $2, $3, $4, $5, $6)
+                   $2, $3, $4, $5, $6, $7)
            returning version""",
         doc.mint,
         doc.depth,
         doc.model_dump(mode="json"),
         doc.referent.label if doc.referent else None,
+        doc.referent.confidence if doc.referent else None,
         [c.label for c in doc.categories],
         [f.code for f in doc.flags],
     )
@@ -1048,6 +1050,15 @@ async def analyze(
         await _persist_image(conn, m.image_content_key, out)
 
     doc = build_document(r, m, depth, out, x, hint_use)
+    score = doc.referent.confidence if doc.referent else None
+    log.info(
+        "analysis.referent",
+        mint=r.mint,
+        depth=depth,
+        status=recall.status(score),
+        score=score,
+        label=doc.referent.label if doc.referent else None,
+    )
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
 

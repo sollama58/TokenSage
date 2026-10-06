@@ -28,7 +28,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.11.0-full"
+RULES_VERSION = "0.12.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -157,9 +157,10 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
     return evs
 
 
-# An extra lexicon pass: (where, text, factor) or (where, text, factor, note). A note marks
-# a pass over account names: its details say so and its referents are scaled by the factor.
-Pass = tuple[str, str, float] | tuple[str, str, float, str]
+# An extra lexicon pass: (where, text, factor) or (where, text, factor, note, parts). A note
+# marks a pass over an account's names: its details say so, its referents are scaled by the
+# factor, and `parts` ("elon musk|elonmusk") are the display name and handle as words.
+Pass = tuple[str, str, float] | tuple[str, str, float, str, str]
 
 
 def _lexicon_evidence(
@@ -186,23 +187,33 @@ def _lexicon_evidence(
     named_words: set[str] = set()  # words of entity/slang matches in the name
     head = _head_word(n)
     head_named = False  # an entity in the name covers its head word
-    for where, text, factor, *note in passes:
+    for where, text, factor, *rest in passes:
         if not text:
             continue
+        note = rest[0] if rest else None
+        parts = rest[1] if len(rest) > 1 else text
         first_new = len(evs)
         # the Wikidata gazetteer never reads a ticker: short punny tickers ($KIRK, $SPEED)
         # would match surnames and stage names far more often than they mean them
         g = gaz if where != "symbol" else None
-        for h in lexicon.find(text, k, g, name_pass=where == "name"):
+        hits = lexicon.find(text, k, g, name_pass=where == "name")
+        if note:
+            # An account's name is evidence only when the account *is* a known entity
+            # (@elonmusk, "Donald Trump Jr"). Dictionary words and short aliases inside a
+            # brand name ("American Eagle": a bird, "America") say nothing about the coin.
+            hits = [h for h in hits if h.kind == "entity" and _names_account(h.surface, parts)]
+        for h in hits:
             if where == "name" and len(h.surface) <= 2 and h.surface not in written:
                 continue
             if where == "name" and h.kind != "wordnet":
                 named_words.update(h.surface.split())
                 if head and h.kind == "entity" and head in h.surface.replace(" ", ""):
                     head_named = True
-            if where == "symbol" and h.kind == "wordnet" and h.surface in named_words:
-                continue  # the ticker repeats a word of a named match ("HAWK" of Hawk Tuah)
-            if where == "symbol" and h.kind == "entity" and head_named:
+            if h.kind == "wordnet" and set(h.surface.split()) <= named_words:
+                continue  # a dictionary word inside a named match ("HAWK" of Hawk Tuah)
+            if where == "symbol" and h.kind == "wordnet" and h.surface in n.name_tokens:
+                continue  # the ticker repeats a name word: the same dictionary sense twice
+            if where == "symbol" and h.kind in ("entity", "slang") and head_named:
                 continue  # the name says what it is; a punning ticker ($DOGE) is secondary
             hk = (where, h.surface, h.kind)
             if hk in seen_hits:
@@ -262,12 +273,18 @@ def _lexicon_evidence(
                 assert isinstance(cls, str)
                 label = _WORDNET_LABEL.get(cls, cls)
                 w = _WORDNET_WEIGHT.get(cls, 0.55 if cls != "animal/other" else 0.4)
+                what = cls.replace("animal/", "").replace("_", " ")
+                detail = f"'{h.surface}' is a {what}"
+                if h.surface in k.name_words:
+                    # "Ani", "Drake", "Kirk": more often someone's name than the animal
+                    w *= k.scoring.get("name_word_factor", 0.5)
+                    detail += " (or, as often, a given name)"
                 evs.append(
                     Ev(
                         kind="wordnet",
                         label=label,
-                        weight=w * factor,
-                        detail=f"'{h.surface}' is a {cls.replace('animal/', '').replace('_', ' ')}",
+                        weight=round(w * factor, 3),
+                        detail=detail,
                         source=f"wordnet:{cls}",
                         where=where,  # type: ignore[arg-type]
                     )
@@ -276,7 +293,7 @@ def _lexicon_evidence(
         if note:
             scaled: set[int] = set()  # one entity's evidence rows share one candidate
             for ev in evs[first_new:]:
-                ev.detail = f"{note[0]}: {ev.detail}"
+                ev.detail = f"{note}: {ev.detail}"
                 if ev.referent is not None and id(ev.referent) not in scaled:
                     scaled.add(id(ev.referent))
                     ev.referent.score = round(ev.referent.score * factor, 3)
@@ -632,6 +649,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             if parent in self_symbols:
                 continue
         evidence.append(ev)
+    evidence = _prune_baby_markers(evidence, n, matches, k)
+    evidence = _prune_ticker_only_inherit(evidence, matches, n)
     head = _head_word(n)
     _weight_by_position(evidence, head)
 
@@ -705,6 +724,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 c["signals"].append(f"copycat_rank:{mt.rank.rank}/{mt.rank.of}")
 
     agg = aggregate(evidence, k)
+    _demote_description_only_referent(agg, head)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     if pair is not None and pair.meaningful:
         flags.append(
@@ -799,6 +819,101 @@ def account_text(name: str | None, handle: str | None) -> str:
     return " ".join(dict.fromkeys(parts))
 
 
+def account_parts(name: str | None, handle: str | None) -> str:
+    """The display name and the handle as words, separately: "elon musk|elonmusk"."""
+    return "|".join(
+        " ".join(normalize(raw, None, None).name_tokens) for raw in (name, handle) if raw
+    )
+
+
+def _names_account(surface: str, account_words: str) -> bool:
+    """An entity hit names the account when it covers the account's display name or handle
+    ("elon musk" in "Elon Musk elon musk") or is itself a multi-word name ("donald trump"
+    in "Donald Trump Jr"). A one-word alias inside a longer brand ("american" in
+    "American Eagle") does not."""
+    s = surface.replace(" ", "")
+    if " " in surface.strip():
+        return True
+    for part in account_words.split("|"):
+        if part and part.replace(" ", "") == s:
+            return True
+    return False
+
+
+# Marker sources that say "Baby X" is a derivative of X. They only mean that when there is
+# an X: a known coin or a named entity the rest of the name refers to. "Baby Shark" is a
+# song, not a derivative of a shark coin.
+_BABY_SOURCES = ("templates:marker:baby", "templates:baby_x", "slang:baby", "slang:lil",
+                 "slang:mini", "slang:smol")  # fmt: skip
+
+
+def _prune_baby_markers(
+    evidence: list[Ev], n: Normalized, matches: list[known_coins.CopyMatch], k: Knowledge
+) -> list[Ev]:
+    if not any(m.code == "marker:baby" for m in n.markers):
+        return evidence
+    marker_words = {w for m in n.markers if m.code == "marker:baby" for w in m.text.lower().split()}
+    parents = [m for m in matches if not known_coins.is_self(m, n)]
+    # an entity in the name whose surface is not the marker itself and does not swallow it
+    # ("Baby Shark" the song covers the whole name: nothing is derived from anything)
+    named = any(
+        ev.referent is not None
+        and ev.where == "name"
+        and ev.kind == "entity"
+        and ev.referent.surface
+        and not (set(ev.referent.surface.split()) & marker_words)
+        for ev in evidence
+    )
+    if parents or named:
+        return evidence
+    return [
+        ev
+        for ev in evidence
+        if not (ev.label.startswith("derivative/") and ev.source in _BABY_SOURCES)
+    ]
+
+
+def _prune_ticker_only_inherit(
+    evidence: list[Ev], matches: list[known_coins.CopyMatch], n: Normalized
+) -> list[Ev]:
+    """A coin whose only tie to a famous coin is its ticker, while its name names something
+    else ("Department of Government Efficiency $DOGE"), is a pun on that coin, not about its
+    subject: keep the reference, drop the inherited categories (the dog)."""
+    name_refs = {
+        ev.referent.label
+        for ev in evidence
+        if ev.referent is not None and ev.where == "name" and ev.kind == "entity"
+    }
+    if not name_refs:
+        return evidence
+    drop: set[str] = set()
+    for m in matches:
+        if known_coins.is_self(m, n):
+            continue
+        if set(m.signals) <= {"ticker", "ticker_base"} and m.coin.referent_label not in name_refs:
+            drop.add(f"known_coins:{m.coin.symbol}")
+    if not drop:
+        return evidence
+    return [ev for ev in evidence if not (ev.kind == "known_coin_inherit" and ev.source in drop)]
+
+
+def _demote_description_only_referent(agg: Aggregated, head: str | None) -> None:
+    """A referent seen only in the description, while the name's own subject is unresolved
+    ("Gork", described as "elons dumb ai"), is a theme, not what the coin is: report it as
+    a weak guess rather than "may refer to Elon Musk"."""
+    r = agg.referent
+    if r is None or not head or r.score < 0.45:
+        return
+    wheres = {
+        ev.where for ev in agg.evidence if ev.referent is not None and ev.referent.label == r.label
+    }
+    if wheres and wheres <= {"description"} and not _covers(r, head):
+        r.score = round(min(r.score, 0.44), 3)
+        agg.caveats.append(
+            f"'{r.label}' appears only in the description; the name itself is unresolved"
+        )
+
+
 def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
     """The names of the accounts involved are evidence too: a reply to @elonmusk, a quote of
     a famous dog's account, a launch post from an account named like the coin."""
@@ -807,7 +922,15 @@ def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
         text = account_text(acc.name, acc.handle)
         if text:
             who = f"@{acc.handle}" if acc.handle else (acc.name or "?")
-            out.append(("x", text, _ACCOUNT_FACTOR[acc.role], f"{_ACCOUNT_ROLE[acc.role]} {who}"))
+            out.append(
+                (
+                    "x",
+                    text,
+                    _ACCOUNT_FACTOR[acc.role],
+                    f"{_ACCOUNT_ROLE[acc.role]} {who}",
+                    account_parts(acc.name, acc.handle),
+                )
+            )
     return out
 
 
@@ -869,9 +992,13 @@ def _framing(n: Normalized, head: str | None, agg: Aggregated, k: Knowledge) -> 
     r = agg.referent
     if not head or r is None or r.surface is None or _covers(r, head):
         return None
+    scores = dict(agg.categories)
+    floor = k.scoring.get("framing_min_confidence", 0.5)
     for cls in lexicon.wordnet_classes_for(head, k):
         phrase = _HEAD_PHRASE.get(cls)
-        if phrase:
+        # the head word's class must have held up in scoring: "Ani" halved to a weak bird
+        # does not make "Grok Companion Ani" a bird coin
+        if phrase and scores.get(_WORDNET_LABEL.get(cls, cls), 0.0) >= floor:
             return phrase
     return None
 
