@@ -13,7 +13,7 @@ load test exercises the engine. Never deploy this.
 from __future__ import annotations
 
 import argparse
-import json
+import asyncio
 import random
 import sys
 from pathlib import Path
@@ -89,7 +89,18 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=9999)
     ap.add_argument("--tokens", type=int, default=200)
     ap.add_argument("--write-cas", default="load_cas.txt")
+    ap.add_argument(
+        "--ipfs-latency", default="0-0", help="seconds, min-max per IPFS response (e.g. 1-4)"
+    )
+    ap.add_argument("--rpc-latency", default="0-0", help="seconds, min-max per RPC response")
     args = ap.parse_args()
+    ipfs_lat = tuple(float(x) for x in args.ipfs_latency.split("-"))
+    rpc_lat = tuple(float(x) for x in args.rpc_latency.split("-"))
+
+    async def delay(lat: tuple[float, ...]) -> None:
+        if lat[-1] > 0:
+            await asyncio.sleep(random.uniform(lat[0], lat[-1]))
+
     chain, metas, mints = build(args.tokens)
     Path(args.write_cas).write_text("\n".join(mints) + "\n")
     print(f"wrote {len(mints)} CAs to {args.write_cas}")
@@ -98,11 +109,13 @@ def main() -> None:
 
     @app.post("/")
     async def rpc(req: Request) -> Response:
+        await delay(rpc_lat)
         r = chain.handle(httpx.Request("POST", "http://x/", content=await req.body()))
         return Response(content=r.content, media_type="application/json")
 
     @app.get("/ipfs/{cid}")
     async def ipfs(cid: str) -> Response:
+        await delay(ipfs_lat)
         if cid == CID_IMG:
             return Response(content=PNG, media_type="image/png")
         if cid in metas:
@@ -113,7 +126,6 @@ def main() -> None:
     async def health() -> dict[str, int]:
         return {"tokens": len(mints)}
 
-    json.dumps({"ok": True})
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 

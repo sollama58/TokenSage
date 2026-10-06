@@ -71,6 +71,13 @@ class Settings(BaseSettings):
 
     # --- worker ---
     worker_poll_interval_s: float = 2.0
+    # Concurrent claim/process loops in the analyzer worker. Cold analyses wait mostly on
+    # IPFS/X/RPC, so several in flight multiply throughput. Each loop holds one DB connection.
+    worker_concurrency: int = 8
+    # Loops when the analyzer runs inside the API process (INLINE_ANALYZER=true).
+    inline_worker_concurrency: int = 2
+    # OCR is CPU and memory heavy (RapidOCR ~250 MB); at most this many run at once.
+    ocr_concurrency: int = 1
     job_lease_s: int = 120
     job_max_attempts: int = 3
 

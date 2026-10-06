@@ -186,6 +186,7 @@ async def complete(conn: asyncpg.Connection, job_id: int, result_version: int | 
             job_id,
             result_version,
         )
+        await _release_callbacks(conn, job_id)
     await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
 
 
@@ -199,7 +200,7 @@ async def fail(
 ) -> None:
     """Retry with a delay until max_attempts, then mark failed. An error_code marks a
     definitive failure: no retry, and the API maps the code to a status."""
-    await conn.execute(
+    status = await conn.fetchval(
         """
         update job set
           status = case when attempts >= $3 or $5::text is not null
@@ -210,6 +211,7 @@ async def fail(
           error_code = $5,
           finished_at = case when attempts >= $3 or $5::text is not null then now() else null end
         where id = $1
+        returning status
         """,
         job_id,
         error,
@@ -217,7 +219,36 @@ async def fail(
         retry_in_s,
         error_code,
     )
+    if status == "failed":
+        await _release_callbacks(conn, job_id)
     await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
+
+
+async def _release_callbacks(conn: asyncpg.Connection, target_job_id: int) -> None:
+    """Webhook jobs wait for their target; make them runnable now that it has finished."""
+    n = await conn.fetchval(
+        """with r as (
+             update job set run_after = now()
+             where kind = 'callback' and status = 'pending'
+               and payload->>'target_job_id' = $1::text
+             returning 1)
+           select count(*) from r""",
+        str(target_job_id),
+    )
+    if n:
+        await conn.execute("select pg_notify($1, '0')", CHANNEL_NEW)
+
+
+async def defer(conn: asyncpg.Connection, job_id: int, seconds: float) -> None:
+    """Put a claimed job back for later without spending one of its attempts."""
+    await conn.execute(
+        """update job set status='pending', locked_until=null,
+             attempts = greatest(attempts - 1, 0),
+             run_after = now() + make_interval(secs => $2)
+           where id=$1""",
+        job_id,
+        float(seconds),
+    )
 
 
 async def release(conn: asyncpg.Connection, job_id: int) -> None:

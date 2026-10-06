@@ -47,8 +47,22 @@ def _get_engine():  # noqa: ANN202
     return _engine
 
 
+_slots = threading.BoundedSemaphore(1)
+
+
+def set_concurrency(n: int) -> None:
+    """How many OCR reads may run at once (engine runs happen on worker threads)."""
+    global _slots
+    _slots = threading.BoundedSemaphore(max(1, n))
+
+
 def read(data: bytes) -> tuple[list[OcrLine], str | None]:
     """Return (lines, error). Lines are confidence-filtered and de-duplicated."""
+    with _slots:
+        return _read(data)
+
+
+def _read(data: bytes) -> tuple[list[OcrLine], str | None]:
     eng = _get_engine()
     if eng is None:
         return [], _failed or "ocr unavailable"
