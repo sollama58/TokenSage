@@ -61,3 +61,5 @@ class Normalized:
     desc_tokens: list[str]
     dollar_mentions: list[str]  # $TICKER mentions in the description
     leet_decoded: str | None = None
+    cjk_gloss: list[tuple[str, str]] = field(default_factory=list)  # (Han word, English)
+    name_pinyin: list[str] = field(default_factory=list)  # set only when Han was translated

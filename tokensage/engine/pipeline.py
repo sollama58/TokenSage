@@ -149,7 +149,8 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
                 kind="script",
                 label="regional_language",
                 weight=0.6,
-                detail=f"name uses the {', '.join(n.scripts)} script",
+                detail=f"name uses the {', '.join(n.scripts)} script"
+                + "".join(f"; {h} means '{e}'" for h, e in n.cjk_gloss[:4]),
                 source="unicode",
             )
         )
