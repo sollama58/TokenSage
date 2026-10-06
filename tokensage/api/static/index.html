@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TokenSage Console</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #e3e6ea;
+    --accent: #2f6fed; --ok: #1f8f4e; --warn: #b7791f; --high: #c53030; --info: #4a5568;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --panel: #171b21; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
+      --accent: #6b9bff; --ok: #4cc38a; --warn: #e0a84a; --high: #f26d6d; --info: #a0aec0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+           display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input, select, button, textarea { font: inherit; color: inherit; }
+  input, select, textarea { background: transparent; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 0; }
+  input.ca { width: 100%; font-family: var(--mono); font-size: 14px; }
+  input.key { font-family: var(--mono); width: 100%; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 7px; padding: 9px 14px; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .grow { flex: 1 1 320px; }
+  .timeline { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; color: var(--muted);
+              max-height: 160px; overflow: auto; margin: 0; }
+  .timeline b { color: var(--ink); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+  h3 { margin: 0 0 6px; font-size: 20px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .mono { font-family: var(--mono); font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); margin: 2px 4px 2px 0; }
+  .badge.status-complete { border-color: var(--ok); color: var(--ok); }
+  .badge.status-partial { border-color: var(--warn); color: var(--warn); }
+  .badge.status-pending { border-color: var(--accent); color: var(--accent); }
+  .badge.status-failed, .badge.sev-high { border-color: var(--high); color: var(--high); }
+  .badge.sev-warn { border-color: var(--warn); color: var(--warn); }
+  .badge.sev-info { border-color: var(--info); color: var(--info); }
+  .meter { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .meter > div { height: 100%; background: var(--accent); }
+  .img { display: grid; gap: 8px; }
+  .img img { max-width: 220px; max-height: 220px; border-radius: 8px; border: 1px solid var(--line); }
+  details > summary { cursor: pointer; color: var(--accent); }
+  pre.json { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; max-height: 520px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .error { color: var(--high); }
+  ul.plain { margin: 4px 0; padding-left: 18px; }
+  .recent button { padding: 4px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
+  .summary { font-size: 15px; margin: 6px 0 10px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TokenSage Console</h1>
+  <span class="sub">test harness for the <code>/v1</code> API · not a product surface</span>
+  <span class="sub" id="svc"></span>
+</header>
+<main>
+  <section class="panel">
+    <div class="row">
+      <label class="grow">API key (Bearer; stored only in this browser)
+        <input class="key" id="key" type="password" placeholder="paste the key from API_KEYS" autocomplete="off">
+      </label>
+      <label>Admin key (optional, for /readyz)
+        <input class="key" id="admin" type="password" placeholder="ADMIN_KEY" autocomplete="off" style="width:220px">
+      </label>
+      <button class="secondary" id="btnMeta" type="button">GET /v1/meta</button>
+      <button class="secondary" id="btnReady" type="button">GET /readyz</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <form id="form" class="row">
+      <label class="grow" style="flex-basis:520px">Contract address (CA) or pump.fun URL
+        <input class="ca" id="ca" placeholder="3arUrpH3nzaRJbbpVgY42dcqSq9A5BFgUxKozZ4npump" required>
+      </label>
+      <label>depth
+        <select id="depth"><option value="full">full</option><option value="basic">basic</option></select>
+      </label>
+      <label>wait (s)
+        <input id="wait" type="number" min="0" max="25" value="10" style="width:80px">
+      </label>
+      <label>max_age (s)
+        <input id="maxage" type="number" min="0" placeholder="default" style="width:100px">
+      </label>
+      <label style="flex-direction:row;align-items:center;gap:6px">
+        <input id="refresh" type="checkbox"> refresh
+      </label>
+      <button id="go" type="submit">Analyze</button>
+      <button class="secondary" id="stop" type="button" disabled>Stop</button>
+    </form>
+    <div class="recent" id="recent"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Request timeline</h2>
+    <pre class="timeline" id="log">idle</pre>
+  </section>
+
+  <section id="result" class="hidden">
+    <div class="grid">
+      <div class="panel" id="cardToken"></div>
+      <div class="panel" id="cardMarket"></div>
+      <div class="panel" id="cardX"></div>
+      <div class="panel" id="cardImage"></div>
+    </div>
+    <div class="panel" style="margin-top:14px" id="cardMeaning"></div>
+    <div class="panel" style="margin-top:14px" id="cardEvidence"></div>
+    <div class="panel" style="margin-top:14px">
+      <details><summary>Raw response JSON</summary><pre class="json" id="raw"></pre></details>
+    </div>
+  </section>
+
+  <section class="panel" id="aux" class="hidden"><pre class="json" id="auxOut"></pre></section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const fmt = (o) => JSON.stringify(o, null, 2);
+  const LS = { key: "ts.key", admin: "ts.admin", recent: "ts.recent", depth: "ts.depth" };
+
+  // ---- persisted inputs
+  $("key").value = localStorage.getItem(LS.key) || "";
+  $("admin").value = localStorage.getItem(LS.admin) || "";
+  $("depth").value = localStorage.getItem(LS.depth) || "full";
+  $("key").addEventListener("change", () => localStorage.setItem(LS.key, $("key").value.trim()));
+  $("admin").addEventListener("change", () => localStorage.setItem(LS.admin, $("admin").value.trim()));
+  $("depth").addEventListener("change", () => localStorage.setItem(LS.depth, $("depth").value));
+
+  const recent = () => { try { return JSON.parse(localStorage.getItem(LS.recent) || "[]"); } catch { return []; } };
+  const remember = (ca) => {
+    const r = [ca, ...recent().filter(x => x !== ca)].slice(0, 12);
+    localStorage.setItem(LS.recent, JSON.stringify(r)); renderRecent();
+  };
+  const renderRecent = () => {
+    const r = recent();
+    $("recent").innerHTML = r.length ? '<span class="muted" style="font-size:12px">recent:</span> ' +
+      r.map(ca => `<button type="button" class="secondary" data-ca="${esc(ca)}">${esc(ca.slice(0, 6))}…${esc(ca.slice(-6))}</button>`).join("") : "";
+  };
+  $("recent").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-ca]"); if (!b) return;
+    $("ca").value = b.dataset.ca; $("form").requestSubmit();
+  });
+  renderRecent();
+
+  // ---- logging
+  let t0 = 0;
+  const log = (msg, bold = false) => {
+    const t = ((performance.now() - t0) / 1000).toFixed(2).padStart(6);
+    const line = `[${t}s] ${esc(msg)}`;
+    $("log").innerHTML += (($("log").textContent === "idle") ? "" : "\n") + (bold ? `<b>${line}</b>` : line);
+    if ($("log").textContent.startsWith("idle")) $("log").innerHTML = $("log").innerHTML.replace(/^idle\n?/, "");
+    $("log").scrollTop = $("log").scrollHeight;
+  };
+  const resetLog = () => { $("log").innerHTML = ""; t0 = performance.now(); };
+
+  const headers = (admin = false) => {
+    const k = (admin ? $("admin").value : $("key").value).trim();
+    return k ? { "Authorization": "Bearer " + k } : {};
+  };
+
+  // ---- main flow
+  let abort = null;
+  const sleep = (ms, signal) => new Promise((res, rej) => {
+    const t = setTimeout(res, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); rej(new DOMException("aborted", "AbortError")); });
+  });
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const raw = $("ca").value.trim(); if (!raw) return;
+    const ca = raw.split("?")[0].replace(/\/+$/, "").split("/").pop();
+    resetLog(); $("result").classList.add("hidden"); $("aux").classList.add("hidden");
+    abort = new AbortController(); $("go").disabled = true; $("stop").disabled = false;
+    const params = new URLSearchParams({ depth: $("depth").value, wait: $("wait").value || "10" });
+    if ($("maxage").value) params.set("max_age", $("maxage").value);
+    if ($("refresh").checked) params.set("refresh", "true");
+    const url = `/v1/tokens/${encodeURIComponent(ca)}?${params}`;
+    try {
+      let first = true, attempts = 0, body = null, resp = null;
+      while (attempts++ < 30) {
+        const u = first ? url : `/v1/tokens/${encodeURIComponent(ca)}?${new URLSearchParams({ depth: $("depth").value, wait: "10" })}`;
+        log(`GET ${u}`);
+        const started = performance.now();
+        resp = await fetch(u, { headers: headers(), signal: abort.signal });
+        const ms = Math.round(performance.now() - started);
+        const rid = resp.headers.get("x-request-id") || "";
+        try { body = await resp.json(); } catch { body = null; }
+        log(`→ HTTP ${resp.status} in ${ms} ms  request_id=${rid}`, true);
+        if (resp.status === 202) {
+          const ra = parseInt(resp.headers.get("retry-after") || "3", 10);
+          log(`pending job_id=${body?.job_id}${body?.stale_analysis ? " (stale analysis available)" : ""}; retrying in ${ra}s`);
+          if (body?.stale_analysis) render(ca, body, true);
+          first = false;
+          await sleep(ra * 1000, abort.signal);
+          continue;
+        }
+        if (resp.status === 429 || resp.status === 503) {
+          const ra = parseInt(resp.headers.get("retry-after") || "5", 10);
+          log(`${body?.error?.code || resp.status}: ${body?.error?.message || ""}; backing off ${ra}s`);
+          first = false;
+          await sleep(ra * 1000, abort.signal);
+          continue;
+        }
+        break;
+      }
+      if (resp.ok) {
+        remember(ca);
+        log(`status=${body.status} depth=${body.depth} from_cache=${body.freshness?.from_cache} age=${body.freshness?.age_s}s`);
+        render(ca, body, false);
+      } else {
+        log(`error: ${body?.error?.code} — ${body?.error?.message}`, true);
+        $("raw").textContent = fmt(body); $("result").classList.remove("hidden");
+        setCards(false);
+        $("cardToken").innerHTML = `<h2>Error</h2><p class="error">${esc(body?.error?.code)}: ${esc(body?.error?.message)}</p>`;
+      }
+    } catch (err) {
+      log(err.name === "AbortError" ? "stopped" : `fetch failed: ${err.message}`, true);
+    } finally {
+      $("go").disabled = false; $("stop").disabled = true; abort = null;
+    }
+  });
+  $("stop").addEventListener("click", () => abort?.abort());
+
+  // ---- rendering
+  const pct = (v) => (v == null ? "—" : Math.round(v * 100) + "%");
+  const dt = (s) => (s ? new Date(s).toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z") : "—");
+  const ago = (s) => {
+    if (!s) return ""; const d = (Date.now() - new Date(s)) / 1000;
+    if (d < 3600) return `(${Math.round(d / 60)} min ago)`; if (d < 86400) return `(${(d / 3600).toFixed(1)} h ago)`;
+    return `(${Math.round(d / 86400)} d ago)`;
+  };
+  const badge = (txt, cls = "") => `<span class="badge ${cls}">${esc(txt)}</span>`;
+  const linkOrText = (u) => u && /^https:\/\//.test(u)
+    ? `<a href="${esc(u)}" target="_blank" rel="noopener nofollow noreferrer ugc">${esc(u)}</a>` : esc(u ?? "—");
+
+  const setCards = (full) => ["cardMarket","cardX","cardImage","cardMeaning","cardEvidence"]
+    .forEach(id => $(id).classList.toggle("hidden", !full));
+
+  function render(ca, body, stale) {
+    const a = body.analysis || body.stale_analysis; if (!a) return;
+    $("result").classList.remove("hidden"); setCards(true);
+    $("raw").textContent = fmt(body);
+    const r = a.raw || {}, m = a.market || {}, x = a.x, img = a.image || {};
+    const statusBadge = badge(stale ? "stale (pending refresh)" : body.status, "status-" + (stale ? "pending" : body.status));
+
+    $("cardToken").innerHTML = `
+      <h2>Token ${statusBadge} ${badge(a.launchpad)} ${badge("depth " + a.depth)}</h2>
+      <h3>${esc(r.name || "(no name)")} <span class="muted">$${esc(r.symbol || "?")}</span></h3>
+      <dl class="kv">
+        <dt>CA</dt><dd class="mono">${esc(a.mint)} <a href="https://pump.fun/coin/${esc(a.mint)}" target="_blank" rel="noopener noreferrer">pump.fun</a> · <a href="https://solscan.io/token/${esc(a.mint)}" target="_blank" rel="noopener noreferrer">solscan</a></dd>
+        <dt>created</dt><dd>${dt(a.created_at)} ${ago(a.created_at)}</dd>
+        <dt>description</dt><dd>${esc(r.description || "—")}</dd>
+        <dt>website</dt><dd>${linkOrText(r.website)}</dd>
+        <dt>telegram</dt><dd>${linkOrText(r.telegram)}</dd>
+        <dt>twitter</dt><dd>${linkOrText(r.twitter)}</dd>
+        <dt>analyzed</dt><dd>${dt(a.analyzed_at)} · rules ${esc(a.versions?.rules)} · lexicon ${esc(a.versions?.lexicon)}</dd>
+      </dl>`;
+
+    $("cardMarket").innerHTML = `
+      <h2>Bonding curve</h2>
+      <dl class="kv">
+        <dt>graduated</dt><dd>${m.complete == null ? "—" : (m.complete ? "yes" : "no")}</dd>
+        <dt>progress</dt><dd>${pct(m.curve_progress)}<div class="meter"><div style="width:${Math.round((m.curve_progress || 0) * 100)}%"></div></div></dd>
+        <dt>creator</dt><dd class="mono">${m.creator ? `<a href="https://solscan.io/account/${esc(m.creator)}" target="_blank" rel="noopener noreferrer">${esc(m.creator)}</a>` : "—"}</dd>
+        <dt>quote</dt><dd>${esc(m.quote_mint || "—")}</dd>
+        <dt>mayhem</dt><dd>${m.is_mayhem_mode == null ? "—" : m.is_mayhem_mode}</dd>
+      </dl>`;
+
+    if (x) {
+      const ref = x.ref || {}, au = x.author;
+      const pre = x.predates_token_by_s;
+      const rel = pre == null ? "—" : (pre > 0 ? `tweet is ${fmtDur(pre)} OLDER than the token (narrative source?)` : `tweet is ${fmtDur(-pre)} newer than the token`);
+      $("cardX").innerHTML = `
+        <h2>X / Twitter ${badge(ref.kind)} ${badge("fetch: " + x.status)}</h2>
+        <dl class="kv">
+          ${ref.tweet_id ? `<dt>tweet</dt><dd class="mono"><a href="https://x.com/i/web/status/${esc(ref.tweet_id)}" target="_blank" rel="noopener noreferrer nofollow">${esc(ref.tweet_id)}</a></dd>` : ""}
+          ${ref.url_handle ? `<dt>handle in URL</dt><dd>@${esc(ref.url_handle)} <span class="muted">(not trusted)</span></dd>` : ""}
+          ${ref.handle ? `<dt>profile</dt><dd>@${esc(ref.handle)}</dd>` : ""}
+          ${ref.community_id ? `<dt>community</dt><dd class="mono">${esc(ref.community_id)}</dd>` : ""}
+          ${ref.query ? `<dt>search</dt><dd>${esc(ref.query)}</dd>` : ""}
+          <dt>object time</dt><dd>${dt(x.object_time)}</dd>
+          <dt>timing</dt><dd>${esc(rel)}</dd>
+          ${au ? `<dt>author</dt><dd>@${esc(au.handle)} · ${esc(au.followers ?? "?")} followers · ${esc(au.verified_type || "unverified")}</dd>` : ""}
+          ${x.text ? `<dt>text</dt><dd>${esc(x.text)}</dd>` : ""}
+          <dt>relation</dt><dd>${esc(x.relation || "—")}</dd>
+          <dt>reused by</dt><dd>${esc(x.reuse_count)} other token(s)</dd>
+        </dl>`;
+    } else {
+      $("cardX").innerHTML = `<h2>X / Twitter</h2><p class="muted">no X link in metadata</p>`;
+    }
+
+    const showImg = img.source_url ? `<details><summary>show image (unscreened)</summary><div class="img"><img alt="" loading="lazy" referrerpolicy="no-referrer" src="${esc(img.source_url)}"></div></details>` : "";
+    $("cardImage").innerHTML = `
+      <h2>Image ${badge(img.status)}</h2>
+      <dl class="kv">
+        <dt>url</dt><dd>${linkOrText(img.source_url)}</dd>
+        <dt>phash</dt><dd class="mono">${esc(img.phash || "—")}</dd>
+        <dt>ocr</dt><dd>${(img.ocr || []).map(t => badge(t)).join("") || "—"}</dd>
+        <dt>palette</dt><dd>${(img.palette || []).map(c => `<span class="badge" style="border-color:${esc(c)}">${esc(c)}</span>`).join("") || "—"}</dd>
+        <dt>near dupes</dt><dd>${(img.near_duplicates || []).length}</dd>
+        <dt>labels</dt><dd>${(img.labels || []).map(l => badge(`${l.label} ${l.score.toFixed(2)}`)).join("") || "—"}</dd>
+      </dl>${showImg}`;
+
+    const ref = a.referent;
+    $("cardMeaning").innerHTML = `
+      <h2>Meaning</h2>
+      <p class="summary">${esc(a.summary)}</p>
+      <dl class="kv">
+        <dt>referent</dt><dd>${ref ? `<b>${esc(ref.label)}</b> <span class="muted">(${esc(ref.kind)}, ${pct(ref.confidence)})</span> — ${esc(ref.desc || "")}` : "<span class='muted'>none yet</span>"}</dd>
+        <dt>categories</dt><dd>${(a.categories || []).map(c => badge(`${c.label} ${pct(c.confidence)}`)).join("") || "<span class='muted'>none yet</span>"}</dd>
+        <dt>ticker</dt><dd>${esc(a.ticker_explanation || "—")}</dd>
+        <dt>copy of</dt><dd>${(a.copy_of || []).map(c => badge(`$${c.ticker || "?"} (${(c.signals || []).join(", ")})`)).join("") || "—"}</dd>
+        <dt>trend</dt><dd>${a.trend?.matched ? (a.trend.terms || []).map(t => badge(`${t.term} ×${t.spike ?? "?"}`)).join("") : "no match"}</dd>
+        <dt>flags</dt><dd>${(a.flags || []).map(f => badge(`${f.code}: ${f.detail}`, "sev-" + f.severity)).join("") || "—"}</dd>
+        <dt>caveats</dt><dd>${(a.caveats || []).length ? `<ul class="plain">${a.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : "—"}</dd>
+        <dt>upstream errors</dt><dd>${(body.errors || []).map(e => badge(`${e.source}: ${e.code}`, "sev-warn")).join("") || "—"}</dd>
+      </dl>`;
+
+    const ev = a.evidence || [];
+    $("cardEvidence").innerHTML = `<h2>Evidence (${ev.length})</h2>` + (ev.length ? `
+      <table><thead><tr><th>kind</th><th>label</th><th>weight</th><th>detail</th><th>source</th></tr></thead><tbody>
+      ${ev.map(e => `<tr><td>${esc(e.kind)}</td><td>${esc(e.label)}</td><td>${e.weight.toFixed(2)}</td><td>${esc(e.detail)}</td><td class="mono">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(e.source)}</a>` : esc(e.source)}</td></tr>`).join("")}
+      </tbody></table>` : `<p class="muted">none</p>`);
+  }
+  function fmtDur(s) {
+    if (s < 120) return `${s} s`; if (s < 7200) return `${Math.round(s / 60)} min`;
+    if (s < 172800) return `${(s / 3600).toFixed(1)} h`; return `${Math.round(s / 86400)} d`;
+  }
+
+  // ---- aux calls
+  async function aux(path, admin) {
+    resetLog(); $("aux").classList.remove("hidden"); $("auxOut").textContent = "…";
+    log(`GET ${path}`);
+    try {
+      const r = await fetch(path, { headers: headers(admin) });
+      const b = await r.json().catch(() => null);
+      log(`→ HTTP ${r.status}`, true);
+      $("auxOut").textContent = fmt(b);
+    } catch (e) { log(`fetch failed: ${e.message}`, true); }
+  }
+  $("btnMeta").addEventListener("click", () => aux("/v1/meta", false));
+  $("btnReady").addEventListener("click", () => aux("/readyz", true));
+
+  fetch("/healthz").then(r => r.json()).then(j => { $("svc").textContent = `service v${j.version} · ${location.host}`; }).catch(() => {});
+})();
+</script>
+</body>
+</html>

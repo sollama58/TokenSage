@@ -166,3 +166,10 @@ def test_analysis_schema_forbids_unknown_fields() -> None:
     doc["bogus"] = 1
     with pytest.raises(ValidationError):
         Analysis.model_validate(doc)
+
+
+async def test_console_served_without_auth(client: httpx.AsyncClient) -> None:
+    r = await client.get("/", headers={"Authorization": ""})
+    assert r.status_code == 200 and "TokenSage Console" in r.text
+    assert r.headers["content-type"].startswith("text/html")
+    assert (await client.get("/console", headers={"Authorization": ""})).status_code == 200

@@ -6,11 +6,12 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from tokensage import __version__, queue
 from tokensage.api import errors
@@ -106,6 +107,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(v1)
+
+    # Test console: a single static page that drives /v1 from the browser. It carries no
+    # secrets; the user pastes an API key, which stays in their browser's localStorage.
+    console = Path(__file__).resolve().parent / "static" / "index.html"
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/console", include_in_schema=False)
+    async def console_page() -> FileResponse:
+        return FileResponse(console, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        return Response(status_code=204)
+
     return app
 
 

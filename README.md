@@ -8,6 +8,13 @@ An HTTP API that takes a Solana pump.fun token's **Contract Address (CA)** and e
 - [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md): full design; [`FABLE_BRIEF.md`](FABLE_BRIEF.md): kickoff brief
 - `docs/research/`: research reports with sources; `docs/reference/`: the original tested reference code (now ported into `tokensage/`)
 
+## Test console
+
+The API serves a single-page test console at `/` (also `/console`), e.g. `https://tokensage-api.onrender.com/`.
+Paste an API key (kept only in your browser's localStorage), enter a CA or pump.fun URL, and it runs the
+real request flow, including `202` polling, and renders the result as cards plus the raw JSON. It is a
+developer tool, not a product surface, and it carries no secrets.
+
 ## Run locally
 
 ```bash

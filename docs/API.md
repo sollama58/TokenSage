@@ -10,6 +10,11 @@ client from it.
 > `trend`, fetched X content, OCR) are still empty until Phases 3–4; `versions.rules` tells
 > you which build produced a document. Nothing in the shape changes.
 
+## Try it in a browser
+
+`GET /` on the service serves a test console: paste your API key, enter a CA, and see the request
+flow and the rendered result. Useful for checking what a given CA returns before wiring code.
+
 ## Base URL and auth
 
 - Base URL: `https://<tokensage-api host>` (Render: `https://tokensage-api.onrender.com`).
