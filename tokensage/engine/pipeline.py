@@ -7,14 +7,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from tokensage.engine import image as image_stage
-from tokensage.engine import known_coins, lexicon, ticker
+from tokensage.engine import known_coins, lexicon, ocr, ticker, trends, xsignals
 from tokensage.engine.aggregate import Aggregated, aggregate
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
 from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
+from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.3.0-basic"
+RULES_VERSION = "0.4.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -54,6 +55,13 @@ class EngineInput:
     x_kind: str | None = None  # from XRef.kind
     x_object_time: datetime | None = None
     ctx: DbContext = field(default_factory=DbContext)
+    # full depth only
+    x_url_handle: str | None = None
+    tweet: TweetData | None = None
+    profile: ProfileData | None = None
+    ocr_lines: list[ocr.OcrLine] | None = None  # pre-computed (cached) OCR; None = run it
+    run_ocr: bool = False
+    trend_index: trends.TrendIndex | None = None
 
 
 @dataclass
@@ -74,6 +82,11 @@ class EngineOutput:
     summary: str
     caveats: list[str]
     evidence: list[Ev]
+    depth: str = "basic"
+    ocr_lines: list[ocr.OcrLine] = field(default_factory=list)
+    ocr_error: str | None = None
+    x: xsignals.XAssessment | None = None
+    trend_hits: list[trends.TrendHit] = field(default_factory=list)
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -117,7 +130,9 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
     return evs
 
 
-def _lexicon_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
+def _lexicon_evidence(
+    n: Normalized, k: Knowledge, extra_passes: list[tuple[str, str, float]] | None = None
+) -> list[Ev]:
     evs: list[Ev] = []
     name_text = " ".join(n.name_tokens)
     # The compact form catches brand names the camelCase split breaks apart ("DeepSeek")
@@ -127,6 +142,7 @@ def _lexicon_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
         ("name", n.name_compact if n.name_compact != name_text else "", 1.0),
         ("symbol", n.ticker.lower() if len(n.ticker) >= 3 else "", 0.8),
         ("description", n.desc_clean, 1.0),
+        *(extra_passes or []),
     ]
     seen_hits: set[tuple[str, str, str]] = set()
     for where, text, factor in passes:
@@ -371,12 +387,105 @@ def _flags(inp: EngineInput, n: Normalized, agg: Aggregated, is_famous: bool) ->
 # ----------------------------------------------------------------- entry point
 
 
-def run_basic(inp: EngineInput) -> EngineOutput:
+def _ocr_pass(
+    inp: EngineInput, n: Normalized, k: Knowledge
+) -> tuple[list[ocr.OcrLine], str | None, list[Ev], str]:
+    """Run (or reuse) OCR; return lines, error, evidence and the cleaned OCR text."""
+    lines: list[ocr.OcrLine] = []
+    err: str | None = None
+    if inp.ocr_lines is not None:
+        lines = inp.ocr_lines
+    elif inp.run_ocr and inp.image_bytes:
+        lines, err = ocr.read(inp.image_bytes)
+    if not lines:
+        return lines, err, [], ""
+    from tokensage.engine.normalize import normalize as _norm
+
+    text = " ".join(line.text for line in lines)
+    ocr_n = _norm(text, "", None)
+    ocr_text = " ".join(ocr_n.name_tokens)
+    evs: list[Ev] = []
+    compact = ocr_n.name_compact
+    t = n.ticker_base.lower()
+    if t and (t in compact or n.ticker.lower() in compact):
+        evs.append(
+            Ev(
+                "ocr",
+                "crypto_native/pumpfun_meta",
+                0.15,
+                f"the logo text reads '{text[:60]}', matching the ticker",
+                "ocr",
+                "image",
+            )
+        )
+    elif n.name_compact and n.name_compact in compact:
+        evs.append(
+            Ev(
+                "ocr",
+                "crypto_native/pumpfun_meta",
+                0.1,
+                f"the logo text reads '{text[:60]}', matching the name",
+                "ocr",
+                "image",
+            )
+        )
+    # a *different* known ticker written on the logo is a strong copycat tell
+    by_sym = k.coin_by_symbol()
+    for tok in ocr_n.name_tokens:
+        up = tok.upper().lstrip("$")
+        if len(up) >= 3 and up in by_sym and up != n.ticker_base.upper() and up != n.ticker.upper():
+            c = by_sym[up][0]
+            evs.append(
+                Ev(
+                    "ocr_other_ticker",
+                    "derivative/logo_reuse",
+                    0.6,
+                    f"the logo text says '${up}' ({c.name}) but the token is ${n.ticker}",
+                    f"known_coins:{c.symbol}",
+                    "image",
+                    referent=ReferentCandidate(
+                        c.referent_label,
+                        c.referent_kind,
+                        c.referent_desc,
+                        f"ocr:{c.symbol}",
+                        0.5,
+                        list(c.categories),
+                    ),
+                )
+            )
+    return lines, err, evs, ocr_text
+
+
+def _run(inp: EngineInput, depth: str) -> EngineOutput:
     k = load_knowledge()
     n = normalize(inp.name, inp.symbol, inp.description)
     evidence: list[Ev] = []
     evidence += _normalization_evidence(n, k)
-    evidence += _lexicon_evidence(n, k)
+
+    extra_passes: list[tuple[str, str, float]] = []
+    ocr_lines: list[ocr.OcrLine] = []
+    ocr_err: str | None = None
+    xa: xsignals.XAssessment | None = None
+    if depth == "full":
+        ocr_lines, ocr_err, ocr_evs, ocr_text = _ocr_pass(inp, n, k)
+        evidence += ocr_evs
+        if ocr_text:
+            extra_passes.append(("image", ocr_text, k.scoring.get("ocr_factor", 0.7)))
+        if inp.x_kind in ("tweet", "profile", "community", "search"):
+            xa = xsignals.assess(
+                inp.x_kind,
+                inp.x_url_handle,
+                inp.tweet,
+                inp.profile,
+                inp.created_at,
+                n.ticker or None,
+                inp.mint,
+                n.name_tokens,
+            )
+            evidence += xa.evidence
+            if xa.text:
+                extra_passes.append(("x", xa.text, 0.8))
+    evidence += _lexicon_evidence(n, k, extra_passes)
 
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
     is_famous = any(known_coins.is_self(m, n) for m in matches)
@@ -405,8 +514,24 @@ def run_basic(inp: EngineInput) -> EngineOutput:
             },
         )
 
+    trend_hits: list[trends.TrendHit] = []
+    if depth == "full" and inp.trend_index is not None:
+        texts = [("name", " ".join(n.name_tokens)), ("description", n.desc_clean)]
+        if xa and xa.text:
+            texts.append(("x", xa.text))
+        seen_terms: set[str] = set()
+        for where, text in texts:
+            for h in inp.trend_index.match(text, where):
+                if h.term.term not in seen_terms:
+                    seen_terms.add(h.term.term)
+                    trend_hits.append(h)
+        evidence += trends.evidence(trend_hits, inp.trend_index)
+
     agg = aggregate(evidence, k)
     flags = _flags(inp, n, agg, is_famous)
+    if xa:
+        for code, sev, detail in xa.flags:
+            flags.append(FlagOut(code, sev, detail))
     extra_caveats: list[str] = []
     if img.error and inp.image_bytes:
         extra_caveats.append(f"image could not be analysed: {img.error}")
@@ -414,6 +539,12 @@ def run_basic(inp: EngineInput) -> EngineOutput:
         extra_caveats.append("name is empty or has no readable text")
     if len(agg.evidence) <= 1:
         extra_caveats.append("very little evidence; the token name is generic or unknown")
+    if xa and xa.status == "failed":
+        extra_caveats.append("the linked X content could not be fetched")
+    if xa and xa.status == "deleted":
+        extra_caveats.append("the linked tweet or account no longer exists")
+    if depth == "full" and ocr_err and inp.image_bytes:
+        extra_caveats.append(f"OCR unavailable: {ocr_err}")
     summary, caveats = summarize(inp.name, n.ticker or inp.symbol, agg, tk.text, extra_caveats)
     return EngineOutput(
         normalized=n,
@@ -425,4 +556,17 @@ def run_basic(inp: EngineInput) -> EngineOutput:
         summary=summary,
         caveats=caveats,
         evidence=agg.evidence,
+        depth=depth,
+        ocr_lines=ocr_lines,
+        ocr_error=ocr_err,
+        x=xa,
+        trend_hits=trend_hits,
     )
+
+
+def run_basic(inp: EngineInput) -> EngineOutput:
+    return _run(inp, "basic")
+
+
+def run_full(inp: EngineInput) -> EngineOutput:
+    return _run(inp, "full")

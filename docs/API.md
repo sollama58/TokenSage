@@ -4,12 +4,13 @@ For the developer of the application that calls TokenSage. The machine-readable 
 `openapi.v1.json` in the repo root, also served live at `GET /openapi.json`; generate a typed
 client from it.
 
-> **Status:** the contract is final for v1. As of Phase 3 the service returns on-chain and
-> metadata facts plus the basic-depth meaning analysis: `referent`, `categories`, `ticker_explanation`,
-> `copy_of`, `normalized`, `image` hashes and near-duplicates, `flags`, a templated `summary`
-> and `evidence`. Still empty until Phase 4: fetched X content (`x.author`, `x.text`, `x.relation`
-> beyond `search_only`), `trend`, `image.ocr` and `image.labels`. `versions.rules` tells you which
-> build produced a document. Nothing in the shape changes.
+> **Status:** the contract is final for v1 and every field is now populated. `depth=basic`
+> gives on-chain/metadata facts plus the meaning analysis (`referent`, `categories`,
+> `ticker_explanation`, `copy_of`, `normalized`, `image` hashes/near-duplicates, `flags`,
+> `summary`, `evidence`). `depth=full` additionally fills `x.author`/`x.text`/`x.relation` from
+> the fetched tweet or profile, `image.ocr`, `trend`, and the X account-quality flags. Only
+> `image.labels` (optional local CLIP, Phase 8) stays empty. `versions.rules` tells you which
+> build produced a document.
 
 ## Try it in a browser
 
@@ -91,7 +92,7 @@ Every error has one shape:
 | `ticker_explanation` | Plain-language explanation of the ticker |
 | `copy_of[]` | Coins this one copies or derives from, with the signals that say so |
 | `image` | Hashes, OCR text, palette, near-duplicates, optional visual labels. `source_url` is the gateway URL. **Images are not screened for NSFW content; decide yourself whether to show them** |
-| `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author, text, `relation` (`narrative_reference`, `launch_announcement`, `spoofed`, …), reuse count |
+| `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author (handle, followers, verification type, join date, username changes), text, `relation` (`narrative_reference` = the coin is *about* someone else's earlier tweet; `launch_announcement`; `official_account`; `spoofed` = the URL's handle is not the tweet's real author; `search_only`), `status` (`ok`, `deleted`, `suspended`, `not_fetched`, `failed`), `reuse_count` (other tokens linking the same tweet/handle) |
 | `trend` | Trending-topic matches (Wikipedia spikes, news headlines) |
 | `flags[]` | `{code, severity, detail}`. Codes and descriptions are listed by `GET /v1/meta` |
 | `summary` | Template-generated plain-language summary |

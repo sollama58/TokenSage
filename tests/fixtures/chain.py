@@ -187,13 +187,21 @@ async def public_resolver(host: str, port: int, **_: Any) -> list[Any]:
     return [(2, 1, 6, "", ("93.184.216.34", port))]
 
 
-def install_web(router: respx.MockRouter, chain: FakeChain, *, gateways_ok: bool = True) -> None:
+def install_web(
+    router: respx.MockRouter,
+    chain: FakeChain,
+    *,
+    gateways_ok: bool = True,
+    meta: bytes | None = None,
+) -> None:
     router.post(RPC).mock(side_effect=chain.handle)
     if gateways_ok:
         for gw in (GW1, GW2):
             router.get(f"{gw}/ipfs/{CID_META}").mock(
                 return_value=httpx.Response(
-                    200, content=metadata_json(), headers={"content-type": "application/json"}
+                    200,
+                    content=meta if meta is not None else metadata_json(),
+                    headers={"content-type": "application/json"},
                 )
             )
             router.get(f"{gw}/ipfs/{CID_IMG}").mock(

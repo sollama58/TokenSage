@@ -2,7 +2,7 @@
 
 An HTTP API that takes a Solana pump.fun token's **Contract Address (CA)** and explains what the token *means*: its name, ticker, image, description and linked X/Twitter content, with categories, flags, confidence scores and evidence. Built for other applications to call. No external AI APIs; deployed on Render via a Blueprint.
 
-**Status:** Phases 1–3 done. A CA is resolved on-chain, its metadata and image are fetched safely, and the **basic-depth meaning engine** runs: normalization (homoglyphs, leet, emoji, camelCase, markers), meme-aware segmentation, slang/entity/WordNet gazetteers, ticker explanation, known-coin and same-name copycat detection, image perceptual hashes with near-duplicate matching, evidence scoring with a referent and templated summary. 67 golden cases pass. **Phase 4** (OCR, fetching the linked X content, trend matching) is next. Build plan: [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) §9.
+**Status:** Phases 1–4 done. A CA is resolved on-chain, its metadata and image are fetched safely, and the meaning engine runs at two depths. **basic:** normalization (homoglyphs, leet, emoji, camelCase, markers), meme-aware segmentation, slang/entity/WordNet gazetteers, ticker explanation, known-coin and same-name copycat detection, image perceptual hashes with near-duplicate matching, evidence scoring with a referent and templated summary. **full** adds OCR on the logo, the linked X content (FxTwitter → vxTwitter → syndication → oEmbed, cached) with relation and account-quality signals, Wikipedia-pageview trend matching with Google News confirmation, and a daily knowledge cron (trends, CoinGecko known coins). 160 tests incl. 67 golden cases. Next: **Phase 5** integration hardening, then calibration. Build plan: [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) §9.
 
 - [`docs/API.md`](docs/API.md): integration guide for the consumer application
 - [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md): full design; [`FABLE_BRIEF.md`](FABLE_BRIEF.md): kickoff brief
@@ -30,6 +30,10 @@ curl -H "Authorization: Bearer devkey123" \
 `INLINE_ANALYZER=true` runs the analyzer inside the web process. In production it runs as the
 separate `tokensage-analyzer` worker (`python -m tokensage.worker`).
 
+**Memory note:** `depth=full` loads RapidOCR lazily (~250 MB extra). With the engine that is
+~400–450 MB, which is tight on Render's 512 MB Starter; if the worker is OOM-killed, move
+`tokensage-analyzer` to `standard` (2 GB) in `render.yaml`. `depth=basic` never loads OCR.
+
 ## Develop
 
 ```bash
@@ -55,7 +59,9 @@ tokensage/api        FastAPI app, /v1 routes, auth, schemas (the contract)
 tokensage/resolve    CA validation, pump.fun PDAs, CreateEvent/BondingCurve decoders
 tokensage/engine     the meaning engine: normalize, segment, lexicon, ticker, known_coins, image,
                      aggregate, render_summary, pipeline; xref.py = X link parsing
-tokensage/sources    external lookups (pump.fun search, DexScreener) with circuit breakers
+tokensage/sources    external sources with circuit breakers: X mirrors, pump.fun search,
+                     DexScreener, Wikimedia pageviews, Google News RSS, CoinGecko
+tokensage/fulldepth.py  cached X content, cached OCR, trend index, news confirmation
 tokensage/queue.py   Postgres job queue (single-flight, leases, LISTEN/NOTIFY)
 tokensage/worker.py  analyzer worker loop
 tokensage/jobs       cron entrypoints (knowledge, maintenance)

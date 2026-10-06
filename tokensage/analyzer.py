@@ -15,6 +15,7 @@ import asyncpg
 import httpx
 import structlog
 
+from tokensage import fulldepth
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -29,11 +30,18 @@ from tokensage.api.schemas import (
     ReferentKind,
     Severity,
     Versions,
+    XAuthor,
     XInfo,
     XRef,
 )
 from tokensage.api.schemas import (
     Normalized as NormalizedOut,
+)
+from tokensage.api.schemas import (
+    Trend as TrendOut,
+)
+from tokensage.api.schemas import (
+    TrendTerm as TrendTermOut,
 )
 from tokensage.config import Settings
 from tokensage.engine import image as image_stage
@@ -45,6 +53,7 @@ from tokensage.engine.pipeline import (
     EngineOutput,
     SameNameToken,
     run_basic,
+    run_full,
 )
 from tokensage.engine.xref import parse_x_ref, snowflake_time
 from tokensage.resolve import metadata as md
@@ -352,6 +361,7 @@ def build_document(
     categories: list[Category] = []
     copy_of: list[CopyOf] = []
     ticker_explanation = None
+    doc_trend = TrendOut()
     summary = f"{raw.name or '?'} (${raw.symbol or '?'}): resolved, but the engine did not run."
     if out is not None:
         agg = out.agg
@@ -388,6 +398,34 @@ def build_document(
             )
         caveats.extend(out.caveats)
         summary = out.summary
+        if out.ocr_lines:
+            image.ocr = [ln.text for ln in out.ocr_lines]
+        if out.x is not None and x is not None:
+            xa = out.x
+            x.status = xa.status  # type: ignore[assignment]
+            x.relation = xa.relation  # type: ignore[assignment]
+            x.fetch_source = xa.fetch_source
+            x.text = xa.text[:1000] if xa.text else None
+            if xa.author_handle or xa.followers is not None:
+                x.author = XAuthor(
+                    handle=xa.author_handle,
+                    user_id=xa.author_id,
+                    name=xa.author_name,
+                    verified_type=xa.verified_type,
+                    followers=xa.followers,
+                    joined=xa.joined,
+                    username_changes=xa.username_changes,
+                )
+        if out.trend_hits:
+            doc_trend = TrendOut(
+                matched=True,
+                terms=[
+                    TrendTermOut(term=h.term.term, spike=h.term.spike, source=h.term.source)
+                    for h in out.trend_hits
+                ],
+            )
+        else:
+            doc_trend = TrendOut()
         feats = out.image.features
         if feats:
             image.phash = f"{feats.phash & ((1 << 64) - 1):016x}"
@@ -426,6 +464,7 @@ def build_document(
         copy_of=copy_of,
         image=image,
         x=x,
+        trend=doc_trend,
         flags=flags,
         summary=summary,
         evidence=evidence,
@@ -575,7 +614,21 @@ async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str)
         x_object_time=x.object_time if x else None,
         ctx=dbc,
     )
-    out = run_basic(inp)
+    if depth == "full":
+        tweet, profile = await fulldepth.x_content(conn, ctx.http, ctx.settings, x)
+        inp.x_url_handle = x.ref.url_handle if x else None
+        inp.tweet, inp.profile = tweet, profile
+        inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
+        inp.run_ocr = inp.ocr_lines is None and image_bytes is not None
+        inp.trend_index = await fulldepth.trend_index(conn)
+        out = run_full(inp)
+        if inp.run_ocr and m and m.image_content_key and not out.ocr_error:
+            await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
+        await _attach_news(conn, ctx, out)
+    else:
+        out = run_basic(inp)
+    if x is not None:
+        x.reuse_count = dbc.x_reuse_count
     if cached_feats is not None and out.image.features is None:
         out.image = image_stage.ImageResult(
             features=cached_feats,
@@ -591,6 +644,22 @@ async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str)
     doc = build_document(r, m, depth, out, x)
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
+
+
+async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:
+    """Confirm the top trend hits against Google News and surface headline counts."""
+    hits = sorted(out.trend_hits, key=lambda h: -h.term.spike)[: fulldepth.MAX_NEWS_LOOKUPS]
+    for h in hits:
+        heads = await fulldepth.news_for(conn, ctx.http, h.term.term)
+        if heads is None:
+            continue
+        if heads:
+            out.caveats.append(
+                f"news check: {len(heads)} recent headline(s) for '{h.term.term}', e.g. "
+                f'"{heads[0]["title"][:90]}"'
+            )
+        else:
+            out.caveats.append(f"news check: no recent headlines found for '{h.term.term}'")
 
 
 async def retry_metadata(

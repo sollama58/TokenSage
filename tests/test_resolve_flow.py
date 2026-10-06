@@ -58,7 +58,8 @@ async def db(migrated_db: str, clean_tables: None) -> AsyncIterator[asyncpg.Conn
 
 
 async def _get(client: httpx.AsyncClient, ca: str, **params: object) -> httpx.Response:
-    return await client.get(f"/v1/tokens/{ca}", params={"wait": 8, **params})
+    # these tests cover resolution; depth=basic keeps X/trend fetching out of the picture
+    return await client.get(f"/v1/tokens/{ca}", params={"wait": 8, "depth": "basic", **params})
 
 
 async def test_token2022_pump_coin_full_resolution(
