@@ -813,7 +813,7 @@ services:
     plan: starter                 # NOT free: a free service sleeps after 15 min idle and the consumer app would hit ~1 min cold starts
     region: oregon
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec uvicorn tokensage.api.app:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers"
+    # no dockerCommand: env TOKENSAGE_ROLE=api selects the entrypoint (tokensage/run.py)
     preDeployCommand: alembic upgrade head
     healthCheckPath: /healthz
     autoDeployTrigger: commit
@@ -839,7 +839,7 @@ services:
     plan: starter                 # → standard (2 GB) when ENABLE_CLIP=true or on OOM
     region: oregon
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec python -m tokensage.worker"
+    # no dockerCommand: env TOKENSAGE_ROLE=worker selects the entrypoint (tokensage/run.py)
     numInstances: 1
     maxShutdownDelaySeconds: 60
     autoDeployTrigger: commit
@@ -866,7 +866,7 @@ services:
     region: oregon
     schedule: "17 3 * * *"        # daily 03:17 UTC: trends; known coins weekly inside the job
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec python -m tokensage.jobs.knowledge"
+    # no dockerCommand: env TOKENSAGE_ROLE=knowledge selects the entrypoint (tokensage/run.py)
     envVars:
       - fromGroup: tokensage-shared
       - key: DATABASE_URL
@@ -881,7 +881,7 @@ services:
     region: oregon
     schedule: "7 * * * *"         # hourly: requeue expired leases, retry unresolved metadata, GC
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec python -m tokensage.jobs.maintenance"
+    # no dockerCommand: env TOKENSAGE_ROLE=maintenance selects the entrypoint (tokensage/run.py)
     envVars:
       - fromGroup: tokensage-shared
       - key: DATABASE_URL
@@ -913,7 +913,7 @@ The consumer app calls `https://tokensage-api.onrender.com/v1/...` (or a custom 
    - `PYTHON_VERSION` doesn't apply to Docker builds.
 7. **Docker:**
    - Bind `0.0.0.0:$PORT` (default 10000).
-   - Use shell-form `sh -c "exec …"` so `$PORT` expands and SIGTERM reaches Python.
+   - Don't put per-service start commands in `dockerCommand`. The first deploy exited with status 127 (command not found) on the `sh -c "exec …"` form. Instead the image has one exec-form `CMD` (`/app/.venv/bin/python -m tokensage.run`) and each service sets `TOKENSAGE_ROLE` (`api`, `worker`, `knowledge`, `maintenance`). Python reads `$PORT` itself, and as PID 1 it receives SIGTERM directly.
    - Builds are amd64 only.
 8. **Bake models and data files into the image** at build time. Never download them at startup: the filesystem is ephemeral, and downloads slow health checks.
 9. **Free web services sleep after 15 min** and take ~1 min to wake, which a calling application would see as timeouts. Use Starter for the API. Workers and cron jobs cannot be free.
@@ -938,7 +938,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 # Optional: fetch ONNX models at build time into /app/models (pinned URLs + sha256 check)
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
-CMD ["sh","-c","exec uvicorn tokensage.api.app:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["/app/.venv/bin/python", "-m", "tokensage.run"]   # TOKENSAGE_ROLE picks the service
 ```
 
 ---

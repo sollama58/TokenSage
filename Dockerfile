@@ -18,6 +18,6 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Render overrides this per service via dockerCommand. Shell form so $PORT expands;
-# exec so SIGTERM reaches the process.
-CMD ["sh", "-c", "exec uvicorn tokensage.api.app:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers"]
+# One entrypoint for every service; TOKENSAGE_ROLE picks api | worker | knowledge | maintenance.
+# Exec form with an absolute path: no shell, no PATH lookup, and SIGTERM reaches Python directly.
+CMD ["/app/.venv/bin/python", "-m", "tokensage.run"]

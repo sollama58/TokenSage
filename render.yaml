@@ -28,7 +28,6 @@ services:
     plan: starter # not free: a free service sleeps after 15 min idle
     region: oregon
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec uvicorn tokensage.api.app:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers"
     preDeployCommand: alembic upgrade head
     healthCheckPath: /healthz
     autoDeployTrigger: commit
@@ -37,6 +36,8 @@ services:
       ignoredPaths: ["**/*.md", "tests/**", "docs/**"]
     envVars:
       - fromGroup: tokensage-shared
+      - key: TOKENSAGE_ROLE # picks the entrypoint (tokensage/run.py); no dockerCommand
+        value: api
       - key: DATABASE_URL
         fromDatabase: { name: tokensage-db, property: connectionString }
       - key: API_KEYS # "consumer:<long random key>" pairs, comma-separated
@@ -54,7 +55,6 @@ services:
     plan: starter # -> standard (2 GB) when ENABLE_CLIP=true or on OOM
     region: oregon
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec python -m tokensage.worker"
     numInstances: 1
     maxShutdownDelaySeconds: 60
     autoDeployTrigger: commit
@@ -63,6 +63,8 @@ services:
       ignoredPaths: ["**/*.md", "tests/**", "docs/**"]
     envVars:
       - fromGroup: tokensage-shared
+      - key: TOKENSAGE_ROLE # picks the entrypoint (tokensage/run.py); no dockerCommand
+        value: worker
       - key: DATABASE_URL
         fromDatabase: { name: tokensage-db, property: connectionString }
       - key: SOLANA_RPC_URL # HTTPS RPC, e.g. Helius free tier (includes the api key)
@@ -81,9 +83,10 @@ services:
     region: oregon
     schedule: "17 3 * * *" # daily 03:17 UTC
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec python -m tokensage.jobs.knowledge"
     envVars:
       - fromGroup: tokensage-shared
+      - key: TOKENSAGE_ROLE # picks the entrypoint (tokensage/run.py); no dockerCommand
+        value: knowledge
       - key: DATABASE_URL
         fromDatabase: { name: tokensage-db, property: connectionString }
       - key: COINGECKO_API_KEY
@@ -96,9 +99,10 @@ services:
     region: oregon
     schedule: "7 * * * *" # hourly
     dockerfilePath: ./Dockerfile
-    dockerCommand: sh -c "exec python -m tokensage.jobs.maintenance"
     envVars:
       - fromGroup: tokensage-shared
+      - key: TOKENSAGE_ROLE # picks the entrypoint (tokensage/run.py); no dockerCommand
+        value: maintenance
       - key: DATABASE_URL
         fromDatabase: { name: tokensage-db, property: connectionString }
 
