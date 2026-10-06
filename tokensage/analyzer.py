@@ -489,6 +489,7 @@ def build_document(
                     detail=ev.detail,
                     source=ev.source,
                     url=ev.url,
+                    where=ev.where,
                 )
             )
         for f in out.flags:

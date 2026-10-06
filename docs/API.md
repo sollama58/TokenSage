@@ -105,9 +105,9 @@ Every error has one shape:
 | `trend` | Trending-topic matches (Wikipedia spikes, news headlines) |
 | `flags[]` | `{code, severity, detail}`. Codes and descriptions are listed by `GET /v1/meta` |
 | `summary` | Template-generated plain-language summary |
-| `evidence[]` | Why: `{kind, label, weight, detail, source, url}` |
+| `evidence[]` | Why: `{kind, label, weight, detail, source, url, where}`; `where` is the input it came from (`name`, `symbol`, `description`, `image`, `x`, `trend`, `chain`, `db`) |
 | `caveats[]` | Automatic caveats (single weak source, ambiguous referent, deleted tweet, …) |
-| `depth`, `analyzed_at`, `versions` | What was run, when, and with which rule/lexicon versions |
+| `depth`, `analyzed_at`, `versions` | What was run, when, and with which rule/lexicon versions. A cached analysis made by older rules (before a deploy) is re-run on the next request unless you pass `max_age` |
 
 Confidences are scores in 0–1. **They are uncalibrated until Phase 6** of the build plan, which
 fits them against hand-labelled tokens so that about 80% of "0.8" labels are right. Until then,

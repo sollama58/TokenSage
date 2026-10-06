@@ -445,6 +445,18 @@
             "minimum": 0.0,
             "title": "Weight",
             "type": "number"
+          },
+          "where": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which input it came from: name, symbol, description, image, x, trend, chain, db",
+            "title": "Where"
           }
         },
         "required": [

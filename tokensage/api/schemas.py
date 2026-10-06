@@ -301,6 +301,11 @@ class Evidence(_Model):
     detail: str
     source: str
     url: str | None = None
+    where: str | None = Field(
+        default=None,
+        description="Which input it came from: name, symbol, description, image, x, trend, "
+        "chain, db",
+    )
 
 
 class Versions(_Model):

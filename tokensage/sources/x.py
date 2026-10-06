@@ -521,6 +521,28 @@ def _paid_status(t: dict[str, Any], tweet_id: str) -> TweetData:
     )
 
 
+async def _supplement_links(http: httpx.AsyncClient, t: TweetData) -> None:
+    """A mirror that shows neither a reply nor a quote may simply not report them (its
+    format changes, or it drops replies). X's syndication CDN reports both, with the
+    parent and quoted tweets inline, so ask it and fill in what the mirror missed."""
+    if t.replying_to_id or t.quoted_tweet_id or t.quoted is not None:
+        return
+    try:
+        s = await syndication_tweet(http, t.id)
+    except Exception as e:  # noqa: BLE001 - only a supplement
+        log.info("x.supplement.error", error=str(e)[:120])
+        return
+    if s is None or s.status != "ok":
+        return
+    t.replying_to_id = s.replying_to_id
+    t.replying_to_handle = s.replying_to_handle
+    t.replied_to = s.replied_to
+    t.quoted_tweet_id = s.quoted_tweet_id
+    t.quoted = s.quoted
+    if s.media_urls and not t.media_urls:
+        t.media_urls = s.media_urls
+
+
 async def fetch_tweet(
     http: httpx.AsyncClient, tweet_id: str, paid_key: str = "", allow_paid: bool = False
 ) -> TweetData:
@@ -535,6 +557,8 @@ async def fetch_tweet(
         if t is not None:
             # a deleted verdict from a mirror can be stale; keep walking for an "ok"
             if t.status == "ok":
+                if fn is not syndication_tweet:
+                    await _supplement_links(http, t)
                 return t
             deleted = t
             continue

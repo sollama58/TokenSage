@@ -236,3 +236,59 @@ async def test_full_depth_fetches_the_replied_to_post(
     roles = {(acc.role, acc.handle) for acc in a.x.accounts}
     assert {("author", "nutdev"), ("replied_to_author", "elonmusk")} <= roles
     assert a.referent is not None and "Peanut" in a.referent.label
+
+
+# ----------------------------------------------------------------- staleness and fallbacks
+
+
+@respx.mock
+async def test_mirror_without_reply_info_is_supplemented_by_syndication(
+    http: httpx.AsyncClient,
+) -> None:
+    # FxTwitter answers but reports no reply (format drift, or it drops the field)
+    plain = {"code": 200, "status": {**FX_OK["status"], "id": REPLY_ID}}  # type: ignore[dict-item]
+    respx.get(f"{xs.FX}/status/{REPLY_ID}").mock(return_value=httpx.Response(200, json=plain))
+    elon = {"screen_name": "elonmusk", "name": "Elon Musk", "id_str": "44196397"}
+    parent = dict(SYND_OK, id_str=TID, text="Peanut the squirrel did nothing wrong", user=elon)
+    synd = dict(SYND_OK, id_str=REPLY_ID, in_reply_to_status_id_str=TID,
+                in_reply_to_screen_name="elonmusk", parent=parent)  # fmt: skip
+    respx.get(url__startswith=xs.SYND).mock(return_value=httpx.Response(200, json=synd))
+    t = await xs.fetch_tweet(http, REPLY_ID)
+    assert t.source == "fxtwitter"  # the mirror's copy stays the record
+    assert t.replying_to_id == TID and t.replied_to is not None
+    assert t.replied_to.author_handle == "elonmusk"
+
+
+@needs_db
+async def test_cached_tweet_from_before_reply_support_is_rechecked(
+    migrated_db: str, clean_tables: None, http: httpx.AsyncClient
+) -> None:
+    from tokensage.config import Settings
+
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        from tokensage.db import _init_connection
+
+        await _init_connection(conn)
+        await conn.execute("truncate x_tweet")
+        old = _tweet().to_json()
+        for k in ("replying_to_id", "replying_to_handle"):
+            old.pop(k)
+        await conn.execute(
+            """insert into x_tweet (tweet_id, first_snapshot, latest, status, source, fetched_at)
+               values ($1, $2, $2, 'ok', 'fxtwitter', now())""",
+            REPLY_ID,
+            old,
+        )
+        reply = {"code": 200, "status": {**FX_OK["status"], "id": REPLY_ID,  # type: ignore[dict-item]
+                 "replying_to": {"screen_name": "elonmusk", "post": TID}}}  # fmt: skip
+        with respx.mock(assert_all_called=False) as router:
+            route = router.get(f"{xs.FX}/status/{REPLY_ID}").mock(
+                return_value=httpx.Response(200, json=reply)
+            )
+            settings = Settings(database_url=migrated_db, _env_file=None)  # type: ignore[call-arg]
+            t = await fulldepth.tweet_cached(conn, http, settings, REPLY_ID)
+        assert route.called  # fresh (minutes old) but pre-reply: re-checked anyway
+        assert t.replying_to_id == TID and t.replying_to_handle == "elonmusk"
+    finally:
+        await conn.close()

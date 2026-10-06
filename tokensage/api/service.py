@@ -11,6 +11,7 @@ from tokensage import queue
 from tokensage.api.auth import ApiKey
 from tokensage.api.schemas import Analysis, Freshness, TokenResponse, UpstreamError
 from tokensage.config import Settings
+from tokensage.engine.pipeline import RULES_VERSION
 
 DEPTH_RANK = {"basic": 0, "full": 1}
 # A request that misses the cache while an identical job is committing reuses that job.
@@ -113,12 +114,18 @@ async def get_or_enqueue(
         created = await token_created_at(conn, mint)
         max_age = max_age_s if max_age_s is not None else default_max_age(settings, created)
         cached = await latest_analysis(conn, mint, depth)
+        outdated = False
         if cached and not refresh:
             doc, _ = cached
             if max_age_s is None and _status_for(doc) == "partial":
                 max_age = min(max_age, PARTIAL_MAX_AGE_S)
             fr = _freshness(doc, max_age, from_cache=True)
-            if fr.age_s is not None and fr.age_s <= max_age:
+            # an analysis made by older rules (before a deploy) is re-run on the next
+            # request instead of being served until it ages out; an explicit max_age wins
+            outdated = max_age_s is None and (doc.get("versions") or {}).get("rules") != (
+                RULES_VERSION
+            )
+            if fr.age_s is not None and fr.age_s <= max_age and not outdated:
                 return TokenResponse(
                     ca=mint,
                     status=_status_for(doc),  # type: ignore[arg-type]
@@ -149,7 +156,8 @@ async def get_or_enqueue(
             priority=priority,
             requested_by=requested_by,
             # a refresh always re-analyses; otherwise reuse a job that just finished
-            reuse_done_within_s=0 if refresh else REUSE_DONE_WITHIN_S,
+            # (nor one whose result came from older rules)
+            reuse_done_within_s=0 if refresh or outdated else REUSE_DONE_WITHIN_S,
             before_commit=charge,
             payload={"hints": hints} if hints else None,
         )
