@@ -136,6 +136,41 @@ def _fold(s: str) -> str:
     return anyascii(s)
 
 
+_HAN = re.compile(r"[\u4e00-\u9fff]+")
+_CJK_MAXLEN: dict[int, int] = {}
+
+
+def translate_han(s: str, k: Knowledge) -> tuple[str, list[tuple[str, str]]]:
+    """Translate Han runs with data/cjk_words.yaml, longest entry first at each position:
+    '中国龙' -> ' china  dragon '. Characters with no entry stay as they are (anyascii folds
+    them to pinyin later). Returns the new string and the (Han, English) pairs used."""
+    if not k.cjk or not _HAN.search(s):
+        return s, []
+    maxlen = _CJK_MAXLEN.get(id(k))
+    if maxlen is None:
+        maxlen = _CJK_MAXLEN[id(k)] = max(len(w) for w in k.cjk)
+    glosses: list[tuple[str, str]] = []
+
+    def run(m: re.Match[str]) -> str:
+        text, i, out = m.group(0), 0, []
+        while i < len(text):
+            for n in range(min(maxlen, len(text) - i), 0, -1):
+                word = text[i : i + n]
+                if word in k.cjk:
+                    eng = k.cjk[word]
+                    out.append(f" {eng} " if eng else " ")
+                    if eng:
+                        glosses.append((word, eng))
+                    i += n
+                    break
+            else:
+                out.append(text[i])
+                i += 1
+        return "".join(out)
+
+    return _HAN.sub(run, s), glosses
+
+
 def _split_camel(s: str) -> str:
     """'AIAgentSupercycle' -> 'AI Agent Supercycle'. Leaves lowercase words alone."""
     out: list[str] = []
@@ -247,6 +282,13 @@ def normalize(
         pass
     if "homoglyph" in obf and any(c.isascii() and c.isalpha() for c in n3):
         n3 = n3.translate(_CONFUSABLE)
+    # 4b. translate, not just transliterate, Han words (猫 -> cat, not mao)
+    translated, cjk_gloss = translate_han(n3, k)
+    # the pinyin reading stays available to the ticker step ($MAO for 猫)
+    name_pinyin = (
+        _PUNCT_TO_SPACE.sub(" ", _split_camel(_fold(n3)).lower()).split() if cjk_gloss else []
+    )
+    n3 = translated
     folded_name = _fold(n3)
     # 5. markers BEFORE stripping punctuation
     markers = _detect_markers(folded_name, k)
@@ -293,6 +335,7 @@ def normalize(
             emoji_kws.append(w)
     d3 = _ZW.sub("", d2)
     dollars = [m.upper() for m in _DOLLAR.findall(d3)]
+    d3, _ = translate_han(d3, k)
     d_fold = _fold(d3).lower()
     desc_clean = re.sub(r"\s+", " ", _PUNCT_TO_SPACE.sub(" ", d_fold)).strip()
     desc_tokens = desc_clean.split()[:400]
@@ -316,4 +359,6 @@ def normalize(
         desc_tokens=desc_tokens,
         dollar_mentions=dollars,
         leet_decoded=leet_decoded,
+        cjk_gloss=cjk_gloss,
+        name_pinyin=name_pinyin,
     )
