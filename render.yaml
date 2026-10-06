@@ -1,0 +1,112 @@
+previews:
+  generation: off
+
+envVarGroups:
+  - name: tokensage-shared
+    envVars:
+      - key: LOG_LEVEL
+        value: info
+      - key: HTTP_USER_AGENT
+        value: "TokenSage/0.1 (+https://github.com/sollama58/TokenSage)"
+      - key: ACCEPT_NON_PUMP
+        value: "true"
+      - key: ENABLE_CLIP
+        value: "false"
+      - key: ENABLE_CORPUS
+        value: "false"
+      - key: ENABLE_PAID_X
+        value: "false"
+      - key: PAID_X_DAILY_USD_CAP
+        value: "1.00"
+      - key: IPFS_GATEWAYS
+        value: "https://pump.mypinata.cloud,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"
+
+services:
+  - type: web
+    name: tokensage-api
+    runtime: docker
+    plan: starter # not free: a free service sleeps after 15 min idle
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "exec uvicorn tokensage.api.app:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers"
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    buildFilter:
+      paths: ["tokensage/**", "migrations/**", "alembic.ini", "data/**", "Dockerfile", "pyproject.toml", "uv.lock", "render.yaml"]
+      ignoredPaths: ["**/*.md", "tests/**", "docs/**"]
+    envVars:
+      - fromGroup: tokensage-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: tokensage-db, property: connectionString }
+      - key: API_KEYS # "consumer:<long random key>" pairs, comma-separated
+        sync: false
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: INLINE_ANALYZER
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: "1"
+
+  - type: worker
+    name: tokensage-analyzer
+    runtime: docker
+    plan: starter # -> standard (2 GB) when ENABLE_CLIP=true or on OOM
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "exec python -m tokensage.worker"
+    numInstances: 1
+    maxShutdownDelaySeconds: 60
+    autoDeployTrigger: commit
+    buildFilter:
+      paths: ["tokensage/**", "data/**", "Dockerfile", "pyproject.toml", "uv.lock", "render.yaml"]
+      ignoredPaths: ["**/*.md", "tests/**", "docs/**"]
+    envVars:
+      - fromGroup: tokensage-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: tokensage-db, property: connectionString }
+      - key: SOLANA_RPC_URL # HTTPS RPC, e.g. Helius free tier (includes the api key)
+        sync: false
+      - key: SOLANA_WS_URL # only needed when ENABLE_CORPUS=true
+        sync: false
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: TWITTERAPI_IO_KEY # optional paid X fallback
+        sync: false
+
+  - type: cron
+    name: tokensage-knowledge
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "17 3 * * *" # daily 03:17 UTC
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "exec python -m tokensage.jobs.knowledge"
+    envVars:
+      - fromGroup: tokensage-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: tokensage-db, property: connectionString }
+      - key: COINGECKO_API_KEY
+        sync: false
+
+  - type: cron
+    name: tokensage-maintenance
+    runtime: docker
+    plan: starter
+    region: oregon
+    schedule: "7 * * * *" # hourly
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "exec python -m tokensage.jobs.maintenance"
+    envVars:
+      - fromGroup: tokensage-shared
+      - key: DATABASE_URL
+        fromDatabase: { name: tokensage-db, property: connectionString }
+
+databases:
+  - name: tokensage-db
+    plan: basic-256mb # 'free' expires after 30 days
+    region: oregon
+    databaseName: tokensage
+    user: tokensage
+    postgresMajorVersion: "17"
+    ipAllowList: [] # private network only

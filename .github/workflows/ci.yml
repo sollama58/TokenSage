@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: tokensage
+          POSTGRES_PASSWORD: tokensage
+          POSTGRES_DB: tokensage
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tokensage"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://tokensage:tokensage@localhost:5432/tokensage
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --frozen --all-extras --python 3.12
+      - name: Lint
+        run: uv run ruff check tokensage tests scripts && uv run ruff format --check tokensage tests scripts
+      - name: Type check
+        run: uv run mypy tokensage scripts
+      - name: OpenAPI contract is committed and current
+        run: uv run python scripts/export_openapi.py --check
+      - name: Tests
+        run: uv run pytest -q

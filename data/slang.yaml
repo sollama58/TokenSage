@@ -1,0 +1,157 @@
+# Crypto / meme slang lexicon. Hand-curated (do not copy Urban Dictionary text).
+# term: {meaning, categories: [taxonomy labels], kind: slang|template|marker|character}
+# "weight" is the evidence weight when the term appears in the name (description gets 0.6x).
+terms:
+  # --- greetings / outcomes
+  gm: {meaning: "good morning (crypto greeting)", categories: [crypto_native/slang], weight: 0.5}
+  gn: {meaning: "good night", categories: [crypto_native/slang], weight: 0.4}
+  wagmi: {meaning: "we're all gonna make it", categories: [crypto_native/slang], weight: 0.7}
+  ngmi: {meaning: "not gonna make it", categories: [crypto_native/slang], weight: 0.7}
+  lfg: {meaning: "let's f***ing go", categories: [crypto_native/slang], weight: 0.6}
+  wen: {meaning: "when (baby-talk: wen moon, wen lambo)", categories: [crypto_native/slang], weight: 0.6}
+  ser: {meaning: "sir (baby-talk)", categories: [crypto_native/slang], weight: 0.5}
+  fren: {meaning: "friend (baby-talk)", categories: [crypto_native/slang], weight: 0.5}
+  frens: {meaning: "friends", categories: [crypto_native/slang], weight: 0.5}
+  anon: {meaning: "anonymous poster", categories: [crypto_native/slang], weight: 0.4}
+  degen: {meaning: "degenerate gambler (self-deprecating)", categories: [crypto_native/slang], weight: 0.7}
+  ape: {meaning: "to buy recklessly ('ape in')", categories: [crypto_native/slang], weight: 0.3}
+  fomo: {meaning: "fear of missing out", categories: [crypto_native/slang], weight: 0.7}
+  fud: {meaning: "fear, uncertainty and doubt", categories: [crypto_native/slang], weight: 0.7}
+  hodl: {meaning: "hold (misspelling turned slogan)", categories: [crypto_native/slang], weight: 0.7}
+  dyor: {meaning: "do your own research", categories: [crypto_native/slang], weight: 0.6}
+  nfa: {meaning: "not financial advice", categories: [crypto_native/slang], weight: 0.6}
+  iykyk: {meaning: "if you know you know", categories: [crypto_native/slang], weight: 0.5}
+  gg: {meaning: "good game / it's over", categories: [crypto_native/slang], weight: 0.3}
+  rekt: {meaning: "wrecked (lost money)", categories: [crypto_native/slang], weight: 0.6}
+  cope: {meaning: "coping with a loss", categories: [crypto_native/slang, meme_template/brainrot], weight: 0.5}
+  seethe: {meaning: "be angry (cope and seethe)", categories: [meme_template/brainrot], weight: 0.5}
+  ratio: {meaning: "being out-replied (twitter slang)", categories: [meme_template/brainrot], weight: 0.4}
+  # --- trading
+  jeet: {meaning: "panic seller", categories: [crypto_native/slang], weight: 0.7}
+  jeets: {meaning: "panic sellers", categories: [crypto_native/slang], weight: 0.7}
+  paperhands: {meaning: "sells at the first dip", categories: [crypto_native/slang], weight: 0.7}
+  diamondhands: {meaning: "never sells", categories: [crypto_native/slang], weight: 0.7}
+  bag: {meaning: "a position in a coin", categories: [crypto_native/slang], weight: 0.3}
+  bagholder: {meaning: "stuck holding a dead coin", categories: [crypto_native/slang], weight: 0.6}
+  rug: {meaning: "rug pull (dev abandons/dumps)", categories: [crypto_native/slang], weight: 0.6}
+  rugpull: {meaning: "dev abandons/dumps the coin", categories: [crypto_native/slang], weight: 0.7}
+  rugged: {meaning: "victim of a rug pull", categories: [crypto_native/slang], weight: 0.6}
+  honeypot: {meaning: "a coin you cannot sell", categories: [crypto_native/slang], weight: 0.6}
+  cto: {meaning: "community takeover", categories: [crypto_native/cto], weight: 0.8}
+  "community takeover": {meaning: "community takeover (dev gone, holders run it)", categories: [crypto_native/cto], weight: 0.9}
+  "fear of missing out": {meaning: "FOMO", categories: [crypto_native/slang], weight: 0.7}
+  "diamond hands": {meaning: "never sells", categories: [crypto_native/slang], weight: 0.7}
+  "paper hands": {meaning: "sells at the first dip", categories: [crypto_native/slang], weight: 0.7}
+  "send it": {meaning: "go all in", categories: [crypto_native/slang], weight: 0.6}
+  "rug pull": {meaning: "dev abandons/dumps the coin", categories: [crypto_native/slang], weight: 0.7}
+  "dex paid": {meaning: "DexScreener profile paid", categories: [crypto_native/pumpfun_meta], weight: 0.6}
+  dev: {meaning: "the token creator", categories: [crypto_native/pumpfun_meta], weight: 0.3}
+  kol: {meaning: "key opinion leader (influencer)", categories: [crypto_native/slang], weight: 0.5}
+  alpha: {meaning: "early information", categories: [crypto_native/slang], weight: 0.3}
+  ath: {meaning: "all-time high", categories: [crypto_native/slang], weight: 0.5}
+  pump: {meaning: "price rise / pump.fun", categories: [crypto_native/pumpfun_meta], weight: 0.3}
+  pumpfun: {meaning: "the launchpad itself", categories: [crypto_native/pumpfun_meta], weight: 0.8}
+  dump: {meaning: "price crash", categories: [crypto_native/slang], weight: 0.3}
+  sendit: {meaning: "go all in", categories: [crypto_native/slang], weight: 0.6}
+  moon: {meaning: "price going up a lot", categories: [crypto_native/slang], weight: 0.4}
+  mooning: {meaning: "price going up a lot", categories: [crypto_native/slang], weight: 0.5}
+  lambo: {meaning: "Lamborghini (wen lambo)", categories: [crypto_native/slang], weight: 0.5}
+  "100x": {meaning: "hundredfold gain", categories: [crypto_native/slang], weight: 0.6}
+  "1000x": {meaning: "thousandfold gain", categories: [crypto_native/slang], weight: 0.6}
+  lowcap: {meaning: "low market cap", categories: [crypto_native/slang], weight: 0.5}
+  mcap: {meaning: "market cap", categories: [crypto_native/slang], weight: 0.5}
+  bonding: {meaning: "bonding curve stage", categories: [crypto_native/pumpfun_meta], weight: 0.5}
+  graduate: {meaning: "leave the bonding curve", categories: [crypto_native/pumpfun_meta], weight: 0.5}
+  migrate: {meaning: "move to the DEX", categories: [crypto_native/pumpfun_meta], weight: 0.4}
+  bundle: {meaning: "dev buys with many wallets", categories: [crypto_native/pumpfun_meta], weight: 0.5}
+  bundled: {meaning: "launched with many wallets", categories: [crypto_native/pumpfun_meta], weight: 0.5}
+  sniper: {meaning: "bot buying at launch", categories: [crypto_native/pumpfun_meta], weight: 0.5}
+  insider: {meaning: "insider wallet", categories: [crypto_native/pumpfun_meta], weight: 0.4}
+  dexpaid: {meaning: "DexScreener profile paid", categories: [crypto_native/pumpfun_meta], weight: 0.6}
+  koth: {meaning: "king of the hill (pump.fun)", categories: [crypto_native/pumpfun_meta], weight: 0.7}
+  meta: {meaning: "the current narrative fashion", categories: [crypto_native/pumpfun_meta], weight: 0.4}
+  ticker: {meaning: "the symbol", categories: [crypto_native/pumpfun_meta], weight: 0.3}
+  ca: {meaning: "contract address", categories: [crypto_native/pumpfun_meta], weight: 0.2}
+  coin: {meaning: "a token", categories: [], weight: 0.0}
+  token: {meaning: "a token", categories: [], weight: 0.0}
+  inu: {meaning: "dog (Japanese); Shiba-Inu-style dog coin", categories: [animal/dog, derivative/template_family], weight: 0.6, kind: template}
+  shib: {meaning: "Shiba Inu", categories: [animal/dog], weight: 0.6}
+  shiba: {meaning: "Shiba Inu", categories: [animal/dog], weight: 0.7}
+  doge: {meaning: "Dogecoin / the Doge Shiba meme", categories: [animal/dog, meme_template/other], weight: 0.7}
+  # --- meme characters / culture
+  pepe: {meaning: "Pepe the Frog (meme)", categories: [animal/frog, meme_template/pepe_wojak_chad], weight: 0.8, kind: character}
+  peepo: {meaning: "Pepe variant", categories: [animal/frog, meme_template/pepe_wojak_chad], weight: 0.7, kind: character}
+  apu: {meaning: "Apu Apustaja (Pepe variant)", categories: [animal/frog, meme_template/pepe_wojak_chad], weight: 0.6, kind: character}
+  wojak: {meaning: "Wojak (feels guy) meme", categories: [meme_template/pepe_wojak_chad], weight: 0.8, kind: character}
+  doomer: {meaning: "Wojak doomer variant", categories: [meme_template/pepe_wojak_chad], weight: 0.6, kind: character}
+  bloomer: {meaning: "Wojak bloomer variant", categories: [meme_template/pepe_wojak_chad], weight: 0.6, kind: character}
+  soyjak: {meaning: "Wojak soy variant", categories: [meme_template/pepe_wojak_chad], weight: 0.6, kind: character}
+  chad: {meaning: "Chad (alpha male meme)", categories: [meme_template/pepe_wojak_chad], weight: 0.7, kind: character}
+  gigachad: {meaning: "Gigachad meme", categories: [meme_template/pepe_wojak_chad], weight: 0.8, kind: character}
+  sigma: {meaning: "sigma male (brainrot)", categories: [meme_template/brainrot], weight: 0.6}
+  based: {meaning: "admirably unapologetic", categories: [meme_template/brainrot, crypto_native/slang], weight: 0.5}
+  rizz: {meaning: "charisma (brainrot)", categories: [meme_template/brainrot], weight: 0.7}
+  gyatt: {meaning: "brainrot exclamation", categories: [meme_template/brainrot], weight: 0.7}
+  skibidi: {meaning: "Skibidi Toilet (brainrot)", categories: [meme_template/brainrot], weight: 0.8}
+  ohio: {meaning: "'only in Ohio' brainrot", categories: [meme_template/brainrot], weight: 0.4}
+  npc: {meaning: "NPC meme (mindless person)", categories: [meme_template/npc], weight: 0.7}
+  bobo: {meaning: "bear mascot (bearish)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
+  mumu: {meaning: "bull mascot (bullish)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
+  wif: {meaning: "'with' (dogwifhat spelling); marks the 'X wif hat' template", categories: [meme_template/x_wif_hat, derivative/template_family], weight: 0.7, kind: template}
+  fwog: {meaning: "frog (baby-talk)", categories: [animal/frog], weight: 0.8}
+  smol: {meaning: "small (baby-talk)", categories: [meme_template/other], weight: 0.4}
+  chonk: {meaning: "fat animal (baby-talk)", categories: [meme_template/other], weight: 0.5}
+  chonky: {meaning: "fat animal (baby-talk)", categories: [meme_template/other], weight: 0.5}
+  bonk: {meaning: "bonk (dog hit with bat meme; $BONK)", categories: [animal/dog, meme_template/other], weight: 0.6}
+  mog: {meaning: "to outshine (looksmaxxing slang)", categories: [meme_template/brainrot], weight: 0.5}
+  mew: {meaning: "cat sound; $MEW", categories: [animal/cat], weight: 0.5}
+  michi: {meaning: "cat (Spanish slang); $MICHI", categories: [animal/cat], weight: 0.6}
+  catwifhat: {meaning: "cat wif hat (template derivative)", categories: [animal/cat, meme_template/x_wif_hat], weight: 0.8, kind: template}
+  dogwifhat: {meaning: "dog wif hat ($WIF)", categories: [animal/dog, meme_template/x_wif_hat], weight: 0.9, kind: template}
+  chillguy: {meaning: "'Just a chill guy' drawing (2024 meme)", categories: [meme_template/chill_guy], weight: 0.9, kind: character}
+  "chill guy": {meaning: "'Just a chill guy' drawing", categories: [meme_template/chill_guy], weight: 0.9, kind: character}
+  "just a chill guy": {meaning: "'Just a chill guy' drawing", categories: [meme_template/chill_guy], weight: 0.95, kind: character}
+  brainrot: {meaning: "low-quality internet content culture", categories: [meme_template/brainrot], weight: 0.7}
+  copypasta: {meaning: "copy-pasted text meme", categories: [meme_template/copypasta], weight: 0.6}
+  goon: {meaning: "crude internet slang", categories: [humor_crude_offensive], weight: 0.5}
+  gooner: {meaning: "crude internet slang", categories: [humor_crude_offensive], weight: 0.6}
+  fart: {meaning: "toilet humour", categories: [humor_crude_offensive], weight: 0.6}
+  poop: {meaning: "toilet humour", categories: [humor_crude_offensive], weight: 0.6}
+  shit: {meaning: "crude", categories: [humor_crude_offensive], weight: 0.5}
+  shitcoin: {meaning: "worthless coin (self-aware)", categories: [crypto_native/slang], weight: 0.6}
+  retard: {meaning: "slur used in degen culture", categories: [humor_crude_offensive], weight: 0.7}
+  retardio: {meaning: "slur variant ($RETARDIO)", categories: [humor_crude_offensive, crypto_native/slang], weight: 0.7}
+  # --- AI / agent terms
+  ai: {meaning: "artificial intelligence", categories: [ai_agent], weight: 0.5}
+  agent: {meaning: "AI agent", categories: [ai_agent], weight: 0.5}
+  agents: {meaning: "AI agents", categories: [ai_agent], weight: 0.5}
+  agi: {meaning: "artificial general intelligence", categories: [ai_agent], weight: 0.7}
+  gpt: {meaning: "GPT (LLM family)", categories: [ai_agent], weight: 0.7}
+  llm: {meaning: "large language model", categories: [ai_agent], weight: 0.7}
+  terminal: {meaning: "'Truth Terminal' AI lore", categories: [ai_agent], weight: 0.4}
+  truthterminal: {meaning: "Truth Terminal (AI bot behind $GOAT)", categories: [ai_agent], weight: 0.9}
+  eliza: {meaning: "ElizaOS agent framework (ai16z)", categories: [ai_agent], weight: 0.7}
+  ai16z: {meaning: "ai16z (AI agent DAO)", categories: [ai_agent], weight: 0.9}
+  virtuals: {meaning: "Virtuals Protocol (AI agents)", categories: [ai_agent], weight: 0.7}
+  aixbt: {meaning: "aixbt (AI crypto analyst agent)", categories: [ai_agent], weight: 0.9}
+  swarm: {meaning: "AI agent swarm", categories: [ai_agent], weight: 0.4}
+  sentient: {meaning: "sentient AI lore", categories: [ai_agent], weight: 0.5}
+  robot: {meaning: "robot", categories: [ai_agent], weight: 0.4}
+  singularity: {meaning: "AI singularity", categories: [ai_agent], weight: 0.6}
+  # --- political
+  maga: {meaning: "Make America Great Again", categories: [political], weight: 0.9}
+  potus: {meaning: "President of the United States", categories: [political], weight: 0.8}
+  president: {meaning: "president", categories: [political], weight: 0.5}
+  election: {meaning: "election", categories: [political, news_event], weight: 0.6}
+  tariff: {meaning: "tariff (policy news)", categories: [political, news_event], weight: 0.6}
+  tariffs: {meaning: "tariffs (policy news)", categories: [political, news_event], weight: 0.6}
+  doge-gov: {meaning: "Department of Government Efficiency", categories: [political], weight: 0.6}
+  # --- generic markers
+  official: {meaning: "claims to be official", categories: [], weight: 0.0}
+  real: {meaning: "claims to be the real one", categories: [derivative/copycat], weight: 0.3, kind: marker}
+  og: {meaning: "original", categories: [derivative/sequel], weight: 0.4, kind: marker}
+  classic: {meaning: "the original version", categories: [derivative/sequel], weight: 0.5, kind: marker}
+  baby: {meaning: "'Baby X' derivative", categories: [derivative/template_family], weight: 0.5, kind: marker}
+  mini: {meaning: "'Mini X' derivative", categories: [derivative/template_family], weight: 0.4, kind: marker}
+  mother: {meaning: "'Mother of X' derivative", categories: [derivative/template_family], weight: 0.3, kind: marker}
+  son: {meaning: "'Son of X' derivative", categories: [derivative/template_family], weight: 0.2, kind: marker}
