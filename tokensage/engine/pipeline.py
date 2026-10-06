@@ -24,7 +24,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.8.0-full"
+RULES_VERSION = "0.9.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -166,11 +166,16 @@ def _lexicon_evidence(
         *(extra_passes or []),
     ]
     seen_hits: set[tuple[str, str, str]] = set()
+    # words the name was actually written with (before compound splitting): a 1-2 letter
+    # match such as "xi" only counts when it was its own word, not a piece of "robotaxi"
+    written = set(n.name_clean.split())
     for where, text, factor, *note in passes:
         if not text:
             continue
         first_new = len(evs)
         for h in lexicon.find(text, k):
+            if where == "name" and len(h.surface) <= 2 and h.surface not in written:
+                continue
             hk = (where, h.surface, h.kind)
             if hk in seen_hits:
                 continue
@@ -637,6 +642,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 "non_sol_pair",
                 "info",
                 f"trades against {pair.label()} instead of SOL"
+                + (f" (tokenized ${pair.underlying} stock)" if pair.underlying else "")
                 + (f"; the name builds on it ({pair.builds_on_detail})" if pair.builds_on else ""),
             )
         )
@@ -670,7 +676,10 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         extra_caveats.append("the linked tweet or account no longer exists")
     if depth == "full" and ocr_err and inp.image_bytes:
         extra_caveats.append(f"OCR unavailable: {ocr_err}")
-    summary, caveats = summarize(inp.name, n.ticker or inp.symbol, agg, tk.text, extra_caveats)
+    context = _context(pair, xa, recent_copies, trend_hits)
+    summary, caveats = summarize(
+        inp.name, n.ticker or inp.symbol, agg, tk.text, extra_caveats, context=context
+    )
     return EngineOutput(
         normalized=n,
         agg=agg,
@@ -724,6 +733,38 @@ def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
     return out
 
 
+def _context(
+    pair: pairing.PairAssessment | None,
+    xa: xsignals.XAssessment | None,
+    recent_copies: list[RecentCopy],
+    trend_hits: list[trends.TrendHit],
+) -> list[str]:
+    """The launch context in a few clauses, so the summary reads the whole picture: what
+    it trades against, what its X link points at, what it copies, what is trending."""
+    out: list[str] = []
+    if pair is not None and pair.meaningful:
+        what = f"the tokenized ${pair.underlying} stock" if pair.underlying else "that token"
+        out.append(
+            f"trades against {pair.label()} ({what})"
+            + (", and its name builds on it" if pair.builds_on else "")
+        )
+    if xa is not None and xa.status == "ok":
+        for verb, r in (("replies to", xa.replied_to), ("quotes", xa.quoted)):
+            if r is not None and r.author_handle:
+                gist = f': "{r.text[:80]}"' if r.text else ""
+                out.append(f"its X post {verb} @{r.author_handle}{gist}")
+        if xa.relation == "narrative_reference" and xa.author_handle:
+            out.append(f"it links an earlier post by @{xa.author_handle} (borrowed narrative)")
+        elif xa.relation == "spoofed":
+            out.append("its X link claims an author the post does not have")
+    if recent_copies:
+        c = min(recent_copies, key=lambda r: r.age_s)
+        out.append(f"copies {c.what} ({c.via}) launched {_dur(c.age_s)} earlier")
+    if trend_hits:
+        out.append(f"matches the trending topic '{trend_hits[0].term.term}'")
+    return out
+
+
 def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessment | None:
     """Read the pair token: a known coin, a stored analysis, or (failing both) the engine's
     basic read of the pair token's own name and ticker."""
@@ -731,7 +772,8 @@ def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessme
         return None
     coin = None
     pair_meaning = None
-    if inp.pair.kind == "token":
+    stock = pairing.xstock_ticker(inp.pair.symbol, inp.pair.name, inp.pair.mint)
+    if inp.pair.kind == "token" and not stock:
         coin = pairing.known_coin_for(inp.pair.mint, [*k.coins, *inp.ctx.extra_coins])
         if coin is None and inp.pair.referent is None and (inp.pair.name or inp.pair.symbol):
             pair_only = EngineInput(

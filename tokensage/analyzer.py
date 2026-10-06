@@ -16,7 +16,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage import fulldepth
+from tokensage import fulldepth, queue
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -485,6 +485,13 @@ def build_document(
                 desc=agg.referent.desc,
                 source=agg.referent.source,
                 confidence=agg.referent.score,
+                supported_by=list(
+                    dict.fromkeys(
+                        ev.where
+                        for ev in out.evidence
+                        if ev.referent is not None and ev.referent.label == agg.referent.label
+                    )
+                ),
             )
         categories = [Category(label=lbl, confidence=s) for lbl, s in agg.categories]
         copy_of = [
@@ -637,6 +644,7 @@ def _pair_out(p: pairing.PairAssessment | None) -> Pair | None:
         name=p.name,
         kind=p.kind,  # type: ignore[arg-type]
         source=p.source,
+        underlying=p.underlying,
         builds_on=p.builds_on,
         builds_on_detail=p.builds_on_detail,
         referent=ref,
@@ -922,6 +930,7 @@ async def analyze(
         pair=await pair_lookup.lookup(conn, ctx.rpc, r.quote_mint),
     )
     inp.logo_features = cached_feats  # hashes from cache: still compared with other logos
+    await _queue_pair_analysis(conn, inp.pair)
     if depth == "full":
         tweet, profile = await fulldepth.x_content(conn, ctx.http, ctx.settings, x)
         inp.x_url_handle = x.ref.url_handle if x else None
@@ -957,6 +966,20 @@ async def analyze(
     doc = build_document(r, m, depth, out, x, hint_use)
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
+
+
+async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput | None) -> None:
+    """A pair token we have never analysed but that is itself a pump.fun coin: analyse it in
+    the background (basic depth, lowest priority) so the next coin paired with it gets the
+    pair token's full meaning (its referent and categories) instead of a read of its name."""
+    if pair is None or pair.kind != "token" or pair.source not in ("db", "onchain", "none"):
+        return
+    if not pair.mint.endswith("pump") or pairing.xstock_ticker(pair.symbol, pair.name, pair.mint):
+        return
+    try:
+        await queue.enqueue(conn, "analyze", pair.mint, "basic", requested_by="pair_lookup")
+    except Exception as e:  # noqa: BLE001 - only a prefetch
+        log.info("pair.queue_failed", mint=pair.mint, error=str(e)[:120])
 
 
 async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:

@@ -317,7 +317,7 @@
         <dt>creator</dt><dd class="mono">${m.creator ? `<a href="https://solscan.io/account/${esc(m.creator)}" target="_blank" rel="noopener noreferrer">${esc(m.creator)}</a>` : "—"}</dd>
         <dt>mayhem</dt><dd>${m.is_mayhem_mode == null ? "—" : m.is_mayhem_mode}</dd>
         <dt>paired with</dt><dd>${pairText(m)}</dd>
-        ${m.pair && m.pair.kind === "token" ? `
+        ${m.pair && (m.pair.kind === "token" || m.pair.kind === "tokenized_stock") ? `
           <dt>pair mint</dt><dd class="mono"><a href="https://solscan.io/token/${esc(m.pair.mint)}" target="_blank" rel="noopener noreferrer">${esc(m.pair.mint)}</a></dd>
           <dt>builds on it</dt><dd>${m.pair.builds_on ? "yes — " + esc(m.pair.builds_on_detail || "") : "no"}</dd>
           <dt>pair means</dt><dd>${m.pair.referent ? `<b>${esc(m.pair.referent.label)}</b> <span class="muted">(${esc(m.pair.referent.kind)}, ${pct(m.pair.referent.confidence)})</span>` : "<span class='muted'>no referent</span>"}
@@ -391,10 +391,10 @@
       <h2>Meaning</h2>
       <p class="summary">${esc(a.summary)}</p>
       <dl class="kv">
-        <dt>referent</dt><dd>${ref ? `<b>${esc(ref.label)}</b> <span class="muted">(${esc(ref.kind)}, ${pct(ref.confidence)})</span> — ${esc(ref.desc || "")}` : "<span class='muted'>none yet</span>"}</dd>
+        <dt>referent</dt><dd>${ref ? `<b>${esc(ref.label)}</b> <span class="muted">(${esc(ref.kind)}, ${pct(ref.confidence)})</span> — ${esc(ref.desc || "")}${(ref.supported_by || []).length ? `<br><span class="muted">backed by:</span> ${ref.supported_by.map(w => badge(WHERE_LABEL[w] || w)).join("")}` : ""}` : "<span class='muted'>none yet</span>"}</dd>
         <dt>categories</dt><dd>${(a.categories || []).map(c => badge(`${c.label} ${pct(c.confidence)}`)).join("") || "<span class='muted'>none yet</span>"}</dd>
         <dt>ticker</dt><dd>${esc(a.ticker_explanation || "—")}</dd>
-        <dt>copy of</dt><dd>${(a.copy_of || []).map(c => `${badge(`$${c.ticker || "?"}${c.name ? " " + c.name : ""} (${(c.signals || []).join(", ")})`)}${c.mint ? `<a class="mono" href="https://solscan.io/token/${esc(c.mint)}" target="_blank" rel="noopener noreferrer">${esc(c.mint.slice(0, 6))}…</a> ` : ""}`).join("") || "—"}</dd>
+        <dt>copy of</dt><dd>${(a.copy_of || []).map(c => `${badge(`${c.recent ? "recent copy of" : (c.recent === false ? "references" : "")} $${c.ticker || "?"}${c.name ? " " + c.name : ""}${c.created_at ? " · launched " + dt(c.created_at) : ""} (${(c.signals || []).join(", ")})`, c.recent ? "sev-warn" : "")}${c.mint ? `<a class="mono" href="https://solscan.io/token/${esc(c.mint)}" target="_blank" rel="noopener noreferrer">${esc(c.mint.slice(0, 6))}…</a> ` : ""}`).join("") || "—"}</dd>
         <dt>trend</dt><dd>${a.trend?.matched ? (a.trend.terms || []).map(t => `${badge(`${t.term} ×${t.spike ?? "?"} (${t.source})`)}${t.headline ? `<span class="muted">${esc(t.headline)}</span> ` : ""}`).join("") : "no match"}</dd>
         <dt>flags</dt><dd>${(a.flags || []).map(f => badge(`${f.code}: ${f.detail}`, "sev-" + f.severity)).join("") || "—"}</dd>
         <dt>caveats</dt><dd>${(a.caveats || []).length ? `<ul class="plain">${a.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : "—"}</dd>
@@ -425,6 +425,7 @@
   function pairText(m) {
     const p = m.pair;
     if (!p) return esc(m.quote_mint || "—");
+    if (p.kind === "tokenized_stock") return `<b>$${esc(p.symbol || "?")}</b> ${esc(p.name || "")} ${badge("tokenized stock $" + (p.underlying || "?"), "sev-info")}`;
     if (p.kind !== "token") return `${esc(p.symbol || p.mint)} <span class="muted">(${esc(p.kind)}, no effect on meaning)</span>`;
     return `<b>$${esc(p.symbol || "?")}</b> ${esc(p.name || "")} ${badge("non-SOL pair", "sev-info")}`;
   }

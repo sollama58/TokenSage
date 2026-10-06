@@ -63,7 +63,13 @@ class Pair(_Model):
     mint: str
     symbol: str | None = None
     name: str | None = None
-    kind: Literal["sol", "stablecoin", "token"]
+    kind: Literal["sol", "stablecoin", "lst", "major", "token", "tokenized_stock"] = Field(
+        description="sol, stablecoin, lst (staked SOL) and major (wrapped BTC/ETH) carry no "
+        "meaning; token and tokenized_stock (an xStock such as TSLAx) feed the analysis"
+    )
+    underlying: str | None = Field(
+        default=None, description="For a tokenized stock: the stock ticker (TSLA for TSLAx)"
+    )
     source: str | None = Field(
         default=None,
         description="Where the pair token was identified: neutral (SOL/stablecoin), "
@@ -97,6 +103,11 @@ class Referent(_Model):
     desc: str | None = None
     source: str | None = None
     confidence: float = Field(ge=0, le=1)
+    supported_by: list[str] = Field(
+        default=[],
+        description="Inputs that point at this referent (name, symbol, description, image, "
+        "x, trend, chain, db); several independent ones make it more trustworthy",
+    )
 
 
 class Category(_Model):

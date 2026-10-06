@@ -16,20 +16,36 @@ Weights are hand-set, not yet fitted (Phase 6 calibration).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from tokensage.engine.aggregate import Aggregated
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
-from tokensage.engine.knowledge import Knowledge, KnownCoin
+from tokensage.engine.knowledge import Knowledge, KnownCoin, Stock
 from tokensage.engine.normalize import normalize
 
-# Pair tokens that carry no meaning: the coin is simply priced in SOL or dollars.
+# Pair tokens that carry no meaning: the coin is simply priced in SOL (or staked SOL),
+# dollars, or wrapped BTC/ETH. Matched by mint only: a fake "USDC" is just a token.
 NEUTRAL = {
     "So11111111111111111111111111111111111111112": ("SOL", "sol"),
     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": ("USDC", "stablecoin"),
     "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": ("USDT", "stablecoin"),
     "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB": ("USD1", "stablecoin"),
+    "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo": ("PYUSD", "stablecoin"),
+    "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn": ("JitoSOL", "lst"),
+    "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So": ("mSOL", "lst"),
+    "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1": ("bSOL", "lst"),
+    "jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v": ("JupSOL", "lst"),
+    "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij": ("cbBTC", "major"),
+    "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh": ("WBTC", "major"),
+    "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs": ("WETH", "major"),
 }
+# Kinds that feed the analysis; the rest are only reported.
+MEANINGFUL = ("token", "tokenized_stock")
+# Backed xStocks: the stock ticker plus "x" (TSLAx, NVDAx, SPYx, BRK.Bx), named
+# "<Company> xStock", minted at vanity addresses starting "Xs".
+XSTOCK_SYMBOL = re.compile(r"^([A-Za-z]{1,5}(?:\.[A-Za-z])?)([xX])$")
+W_TOKENIZED_STOCK = 0.6
 SOL_MINT = "So11111111111111111111111111111111111111112"
 
 W_ECOSYSTEM = 0.55
@@ -54,7 +70,7 @@ class PairInput:
     mint: str
     symbol: str | None = None
     name: str | None = None
-    kind: str = "token"  # sol | stablecoin | token
+    kind: str = "token"  # sol | stablecoin | lst | major | token | tokenized_stock
     source: str | None = None  # neutral | known_coin | analysis | db | onchain | none
     # from a stored TokenSage analysis of the pair token, when there is one
     referent: ReferentCandidate | None = None
@@ -73,10 +89,11 @@ class PairAssessment:
     referent: ReferentCandidate | None = None
     categories: list[tuple[str, float]] = field(default_factory=list)
     evidence: list[Ev] = field(default_factory=list)
+    underlying: str | None = None  # a tokenized stock's ticker (TSLA for TSLAx)
 
     @property
     def meaningful(self) -> bool:
-        return self.kind == "token"
+        return self.kind in MEANINGFUL
 
     def label(self) -> str:
         sym = f"${self.symbol}" if self.symbol else self.mint[:8] + "…"
@@ -92,14 +109,34 @@ def neutral(mint: str) -> PairInput | None:
     return None
 
 
+def xstock_ticker(symbol: str | None, name: str | None, mint: str) -> str | None:
+    """The stock ticker behind a Backed xStock pair token (TSLA for TSLAx), else None.
+    The symbol shape alone is not enough ("MAX", "SEX"): the name must say xStock or the
+    mint must be one of Backed's "Xs..." addresses."""
+    m = XSTOCK_SYMBOL.match((symbol or "").strip())
+    if not m:
+        return None
+    named = "xstock" in (name or "").casefold().replace(" ", "")
+    if named or (m.group(2) == "x" and mint.startswith("Xs")):
+        return m.group(1).replace(".", "").upper()
+    return None
+
+
 def known_coin_for(mint: str, coins: list[KnownCoin]) -> KnownCoin | None:
     return next((c for c in coins if c.mint and c.mint == mint), None)
 
 
-def builds_on(pair_n: Normalized, n: Normalized) -> str | None:
-    """Does the coin's name or ticker build on the pair token's? Returns why, or None."""
-    pt = pair_n.ticker_base or pair_n.ticker
+def builds_on(
+    pair_n: Normalized, n: Normalized, stock: Stock | None = None, underlying: str | None = None
+) -> str | None:
+    """Does the coin's name or ticker build on the pair token's (or, for a tokenized stock,
+    on the company's name or stock ticker)? Returns why, or None."""
     ticker = n.ticker.upper()
+    if underlying:
+        why = _builds_on_stock(n, ticker, stock, underlying)
+        if why:
+            return why
+    pt = pair_n.ticker_base or pair_n.ticker
     if pt and len(pt) >= 3:
         pt = pt.upper()
         if pt in (n.ticker_base.upper(), ticker):
@@ -118,6 +155,21 @@ def builds_on(pair_n: Normalized, n: Normalized) -> str | None:
     return None
 
 
+def _builds_on_stock(n: Normalized, ticker: str, stock: Stock | None, sym: str) -> str | None:
+    if len(sym) >= 2 and (ticker == sym or n.ticker_base.upper() == sym):
+        return f"same ticker as the stock ${sym}"
+    if len(sym) >= 3 and sym in ticker:
+        return f"ticker ${n.ticker} contains the stock ticker ${sym}"
+    if len(sym) >= 3 and sym.lower() in n.name_tokens:
+        return f"name contains the stock ticker '{sym.lower()}'"
+    if stock is not None:
+        company = normalize(stock.name, None, None)
+        for w in company.name_tokens:
+            if len(w) >= 4 and w not in NAME_STOP and w in n.name_tokens:
+                return f"name contains '{w}' ({stock.name})"
+    return None
+
+
 def assess(
     pair: PairInput,
     n: Normalized,
@@ -132,6 +184,10 @@ def assess(
     )
     if not a.meaningful:
         return a
+    if a.kind == "token":
+        underlying = xstock_ticker(pair.symbol, pair.name, pair.mint)
+        if underlying:
+            return _assess_tokenized_stock(a, underlying, n, k)
 
     referent = pair.referent
     categories = list(pair.categories)
@@ -215,6 +271,93 @@ def assess(
                 label=lbl,
                 weight=round(conf * scale, 3),
                 detail=f"the pair token {who} is {lbl}",
+                source=src,
+                where="chain",
+            )
+        )
+    return a
+
+
+def _assess_tokenized_stock(
+    a: PairAssessment, underlying: str, n: Normalized, k: Knowledge
+) -> PairAssessment:
+    """A coin paired against a tokenized stock (xStock) is launched for that stock's
+    crowd: Tesla/Elon fans for TSLAx, AI traders for NVDAx. Its meaning comes from the
+    company, and the coin often builds on the company name or ticker ("Tesla Moon")."""
+    a.kind = "tokenized_stock"
+    a.underlying = underlying
+    stock = k.stocks.get(underlying)
+    who = a.label()
+    src = f"pair:{a.symbol or a.mint}"
+    company = stock.name if stock else (a.name or "").replace("xStock", "").strip() or underlying
+    if stock is not None:
+        a.referent = ReferentCandidate(
+            label=stock.entity_label,
+            kind="other",
+            desc=stock.desc,
+            source=f"stocks:{underlying}",
+            score=0.9,
+            categories=list(stock.categories),
+        )
+        a.categories = [(c, 0.9) for c in stock.categories]
+    else:
+        a.categories = [("tradfi/stock", 0.8)]
+    why = builds_on(normalize(a.name, a.symbol, None), n, stock, underlying)
+    a.builds_on = why is not None
+    a.builds_on_detail = why
+    a.evidence.append(
+        Ev(
+            kind="pair",
+            label="tradfi/tokenized_stock",
+            weight=W_TOKENIZED_STOCK,
+            detail=f"trades against {who}, the tokenized {company} stock (xStock, "
+            f"${underlying}): launched for that stock's crowd",
+            source=src,
+            where="chain",
+        )
+    )
+    if a.builds_on:
+        a.evidence.append(
+            Ev(
+                kind="pair",
+                label="derivative/pair_family",
+                weight=W_BUILDS_ON,
+                detail=f"the name builds on {company} (${underlying}), the stock it trades "
+                f"against ({why})",
+                source=src,
+                where="chain",
+            )
+        )
+        if a.referent is not None:
+            ref = ReferentCandidate(
+                label=a.referent.label,
+                kind=a.referent.kind,
+                desc=a.referent.desc,
+                source=src,
+                score=REFERENT_BUILDS_ON,
+                categories=list(a.referent.categories),
+            )
+            a.evidence.append(
+                Ev(
+                    kind="referent",
+                    label="referent",
+                    weight=ref.score,
+                    detail=f"builds on the paired stock {a.referent.label}: {a.referent.desc}",
+                    source=src,
+                    where="chain",
+                    referent=ref,
+                )
+            )
+    scale = CATEGORY_BUILDS_ON if a.builds_on else CATEGORY_PAIRED
+    for lbl, conf in a.categories:
+        if lbl.startswith(SKIP_CATEGORIES) or lbl == "tradfi/stock":
+            continue  # tradfi/tokenized_stock above already says it
+        a.evidence.append(
+            Ev(
+                kind="pair",
+                label=lbl,
+                weight=round(conf * scale, 3),
+                detail=f"the paired stock {company} is {lbl}",
                 source=src,
                 where="chain",
             )
