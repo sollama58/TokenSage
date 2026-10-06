@@ -33,6 +33,7 @@ from tokensage.api.schemas import (
     ReferentKind,
     Severity,
     Versions,
+    XAccount,
     XAuthor,
     XInfo,
     XMatchField,
@@ -516,6 +517,18 @@ def build_document(
                 )
             if xa.quoted is not None:
                 x.quoted = _quoted_out(xa.quoted, r.created_at)
+            if xa.replied_to is not None:
+                x.replied_to = _quoted_out(xa.replied_to, r.created_at)
+            x.accounts = [
+                XAccount(
+                    role=acc.role,  # type: ignore[arg-type]
+                    handle=acc.handle,
+                    name=acc.name,
+                    followers=acc.followers,
+                    verified_type=acc.verified_type,
+                )
+                for acc in xa.accounts
+            ]
         if out.x_match is not None and x is not None:
             x.match = _match_out(out.x_match)
         if out.trend_hits:

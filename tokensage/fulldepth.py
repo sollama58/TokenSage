@@ -97,8 +97,20 @@ async def tweet_cached(
             return t
         if t.status == "ok" and row is not None and row["source"] == "oembed":
             return t  # the richer copy replaces the sparse oEmbed record
+        if t.status == "ok":
+            _fill_missing(record, t)
         return record
     return t
+
+
+# Fields older cache records may lack: filled from a fresh copy without replacing the record.
+_BACKFILL = ("media_urls", "quoted_tweet_id", "quoted", "replying_to_id", "replying_to_handle")
+
+
+def _fill_missing(record: TweetData, fresh: TweetData) -> None:
+    for f in (*_BACKFILL, "replied_to"):
+        if not getattr(record, f) and getattr(fresh, f):
+            setattr(record, f, getattr(fresh, f))
 
 
 async def profile_cached(
@@ -168,6 +180,14 @@ async def x_content(
         ):
             # oEmbed and pre-quote cache rows carry only the quoted id: fetch it (cached too)
             tweet.quoted = await tweet_cached(conn, http, settings, tweet.quoted_tweet_id)
+        if (
+            tweet.status == "ok"
+            and tweet.replied_to is None
+            and tweet.replying_to_id
+            and tweet.replying_to_id != tweet.id
+        ):
+            # a reply: the post it answers is usually the context the coin is about
+            tweet.replied_to = await tweet_cached(conn, http, settings, tweet.replying_to_id)
         if tweet.status == "ok" and tweet.author_handle:
             profile = await profile_cached(conn, http, tweet.author_handle)
     elif x.ref.kind == "profile" and x.ref.handle:
@@ -261,14 +281,15 @@ MEDIA_FAILED_RETRY = timedelta(hours=6)
 
 def media_urls(tweet: TweetData | None, profile: ProfileData | None) -> list[str]:
     """The images to compare with the token logo: the post's photos and video thumbnails
-    (then the quoted post's), or a linked profile's avatar and banner. At most 4."""
+    (then the quoted and replied-to posts'), or a linked profile's avatar and banner. At most 4."""
     from tokensage.sources.x import MAX_MEDIA
 
     urls: list[str] = []
     if tweet is not None and tweet.status == "ok":
         urls += tweet.media_urls
-        if tweet.quoted is not None and tweet.quoted.status == "ok":
-            urls += tweet.quoted.media_urls
+        for other in (tweet.quoted, tweet.replied_to):
+            if other is not None and other.status == "ok":
+                urls += other.media_urls
     elif profile is not None and profile.status == "ok":
         urls += [u for u in (profile.avatar_url, profile.banner_url) if u]
     seen: list[str] = []

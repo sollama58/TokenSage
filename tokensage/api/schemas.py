@@ -213,8 +213,9 @@ class XMatch(_Model):
 
 
 class XQuoted(_Model):
-    """The tweet the linked tweet quotes (full depth). Often the real narrative: a launch
-    post that quote-tweets someone else's earlier post."""
+    """A tweet the linked tweet points at (full depth): the one it quotes (x.quoted) or the
+    one it replies to (x.replied_to). Often the real narrative: a launch post that quotes
+    or answers someone else's earlier post."""
 
     id: str
     url: str | None = None
@@ -223,8 +224,19 @@ class XQuoted(_Model):
     text: str | None = None
     created_at: datetime | None = None
     predates_token_by_s: int | None = Field(
-        default=None, description="Seconds the quoted post predates the token; negative if after"
+        default=None, description="Seconds the post predates the token; negative if after"
     )
+
+
+class XAccount(_Model):
+    """An account involved in the linked post. Its display name and handle are read like
+    the post text (a reply to @elonmusk points at Elon Musk)."""
+
+    role: Literal["author", "quoted_author", "replied_to_author", "mentioned"]
+    handle: str | None = None
+    name: str | None = Field(default=None, description="Display name, when known")
+    followers: int | None = None
+    verified_type: str | None = None
 
 
 class XInfo(_Model):
@@ -249,6 +261,14 @@ class XInfo(_Model):
     status: Literal["ok", "deleted", "suspended", "not_fetched", "failed", "none"] = "none"
     quoted: XQuoted | None = Field(
         default=None, description="Present when the linked tweet is a quote tweet (full depth)"
+    )
+    replied_to: XQuoted | None = Field(
+        default=None, description="Present when the linked tweet is a reply (full depth)"
+    )
+    accounts: list[XAccount] = Field(
+        default=[],
+        description="Accounts involved: author (or linked profile), quoted and replied-to "
+        "authors, @mentions (full depth)",
     )
     match: XMatch | None = Field(
         default=None,

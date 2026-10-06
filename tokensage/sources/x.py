@@ -54,15 +54,22 @@ class TweetData:
     possibly_sensitive: bool | None = None
     # The tweet this one quotes, when the source returns it inline (one level only).
     quoted: TweetData | None = None
+    # The tweet this one replies to: its id and author from the source, the tweet itself
+    # inline (syndication) or fetched separately (one level only).
+    replying_to_id: str | None = None
+    replying_to_handle: str | None = None
+    replied_to: TweetData | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
-        d = {k: v for k, v in self.__dict__.items() if k not in ("raw", "quoted")}
+        d = {k: v for k, v in self.__dict__.items() if k not in ("raw", "quoted", "replied_to")}
         for k in ("created_at", "author_joined"):
             if d.get(k) is not None:
                 d[k] = d[k].isoformat()
         if self.quoted is not None:
             d["quoted"] = self.quoted.to_json()
+        if self.replied_to is not None:
+            d["replied_to"] = self.replied_to.to_json()
         return d
 
     @classmethod
@@ -73,6 +80,8 @@ class TweetData:
                 d[k] = _utc(datetime.fromisoformat(d[k]))
         q = d.get("quoted")
         d["quoted"] = cls.from_json(q) if isinstance(q, dict) else None
+        rt = d.get("replied_to")
+        d["replied_to"] = cls.from_json(rt) if isinstance(rt, dict) else None
         d.setdefault("raw", {})
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
@@ -164,6 +173,30 @@ def _verified(v: Any) -> str | None:
 
 
 MAX_MEDIA = 4
+
+
+def _id(v: Any) -> str | None:
+    """A tweet id as a string of digits, or None."""
+    if v is None or isinstance(v, bool):
+        return None
+    s = str(v).strip()
+    return s if s.isdigit() else None
+
+
+def _handle(v: Any) -> str | None:
+    if not isinstance(v, str):
+        return None
+    h = v.strip().lstrip("@")
+    return h if re.fullmatch(r"[A-Za-z0-9_]{1,15}", h) else None
+
+
+def _fx_reply(st: dict[str, Any]) -> tuple[str | None, str | None]:
+    """FxTwitter: v2 gives replying_to {screen_name, post}; v1 gives replying_to (handle)
+    and replying_to_status (id)."""
+    rt = st.get("replying_to")
+    if isinstance(rt, dict):
+        return _id(rt.get("post") or rt.get("status")), _handle(rt.get("screen_name"))
+    return _id(st.get("replying_to_status")), _handle(rt)
 
 
 def _https(u: Any) -> str | None:
@@ -278,6 +311,8 @@ def _fx_status(st: dict[str, Any], tweet_id: str) -> TweetData:
         views=_int(st.get("views")),
         community=st.get("community") if isinstance(st.get("community"), dict) else None,
         possibly_sensitive=st.get("possibly_sensitive"),
+        replying_to_id=_fx_reply(st)[0],
+        replying_to_handle=_fx_reply(st)[1],
         raw=st,
     )
 
@@ -321,6 +356,8 @@ def _vx_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         replies=_int(j.get("replies")),
         reposts=_int(j.get("retweets")),
         possibly_sensitive=j.get("possibly_sensitive"),
+        replying_to_id=_id(j.get("replyingToID")),
+        replying_to_handle=_handle(j.get("replyingTo")),
         raw=j,
     )
 
@@ -344,6 +381,11 @@ async def syndication_tweet(http: httpx.AsyncClient, tweet_id: str) -> TweetData
     q = j.get("quoted_tweet")
     if isinstance(q, dict) and q.get("text"):
         t.quoted = _synd_status(q, str(q.get("id_str") or ""))
+    parent = j.get("parent")
+    if isinstance(parent, dict) and parent.get("text"):
+        t.replied_to = _synd_status(parent, str(parent.get("id_str") or ""))
+        t.replying_to_id = t.replying_to_id or t.replied_to.id or None
+        t.replying_to_handle = t.replying_to_handle or t.replied_to.author_handle
     return t
 
 
@@ -373,6 +415,8 @@ def _synd_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         likes=_int(j.get("favorite_count")),
         replies=_int(j.get("conversation_count")),
         possibly_sensitive=j.get("possibly_sensitive"),
+        replying_to_id=_id(j.get("in_reply_to_status_id_str")),
+        replying_to_handle=_handle(j.get("in_reply_to_screen_name")),
         raw=j,
     )
 
@@ -471,6 +515,8 @@ def _paid_status(t: dict[str, Any], tweet_id: str) -> TweetData:
         replies=_int(t.get("replyCount")),
         reposts=_int(t.get("retweetCount")),
         views=_int(t.get("viewCount")),
+        replying_to_id=_id(t.get("inReplyToId")),
+        replying_to_handle=_handle(t.get("inReplyToUsername")),
         raw=t,
     )
 

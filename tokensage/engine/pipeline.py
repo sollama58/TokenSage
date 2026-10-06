@@ -24,7 +24,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.7.0-full"
+RULES_VERSION = "0.8.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -145,14 +145,19 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
     return evs
 
 
+# An extra lexicon pass: (where, text, factor) or (where, text, factor, note). A note marks
+# a pass over account names: its details say so and its referents are scaled by the factor.
+Pass = tuple[str, str, float] | tuple[str, str, float, str]
+
+
 def _lexicon_evidence(
-    n: Normalized, k: Knowledge, extra_passes: list[tuple[str, str, float]] | None = None
+    n: Normalized, k: Knowledge, extra_passes: list[Pass] | None = None
 ) -> list[Ev]:
     evs: list[Ev] = []
     name_text = " ".join(n.name_tokens)
     # The compact form catches brand names the camelCase split breaks apart ("DeepSeek")
     # and multi-word slang stored compact ("diamondhands"); the ticker is a signal too.
-    passes = [
+    passes: list[Pass] = [
         ("name", name_text, 1.0),
         ("name", n.name_compact if n.name_compact != name_text else "", 1.0),
         ("symbol", n.ticker.lower() if len(n.ticker) >= 3 else "", 0.8),
@@ -160,9 +165,10 @@ def _lexicon_evidence(
         *(extra_passes or []),
     ]
     seen_hits: set[tuple[str, str, str]] = set()
-    for where, text, factor in passes:
+    for where, text, factor, *note in passes:
         if not text:
             continue
+        first_new = len(evs)
         for h in lexicon.find(text, k):
             hk = (where, h.surface, h.kind)
             if hk in seen_hits:
@@ -232,6 +238,15 @@ def _lexicon_evidence(
                     )
                 )
             # coin hits are handled by the known-coin stage (fuzzy + ticker aware)
+        if note:
+            scaled: set[int] = set()  # one entity's evidence rows share one candidate
+            for ev in evs[first_new:]:
+                ev.detail = f"{note[0]}: {ev.detail}"
+                if ev.referent is not None and id(ev.referent) not in scaled:
+                    scaled.add(id(ev.referent))
+                    ev.referent.score = round(ev.referent.score * factor, 3)
+                if ev.referent is not None and ev.label == "referent":
+                    ev.weight = ev.referent.score
     return evs
 
 
@@ -477,7 +492,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     evidence: list[Ev] = []
     evidence += _normalization_evidence(n, k)
 
-    extra_passes: list[tuple[str, str, float]] = []
+    extra_passes: list[Pass] = []
     ocr_lines: list[ocr.OcrLine] = []
     ocr_err: str | None = None
     xa: xsignals.XAssessment | None = None
@@ -500,8 +515,10 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             evidence += xa.evidence
             if xa.text:
                 extra_passes.append(("x", xa.text, 0.8))
-            if xa.quoted and xa.quoted.text:
-                extra_passes.append(("x", xa.quoted.text, 0.7))
+            for related in (xa.quoted, xa.replied_to):
+                if related and related.text:
+                    extra_passes.append(("x", related.text, 0.7))
+            extra_passes += _account_passes(xa)
     evidence += _lexicon_evidence(n, k, extra_passes)
 
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
@@ -540,8 +557,9 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         texts = [("name", " ".join(n.name_tokens)), ("description", n.desc_clean)]
         if xa and xa.text:
             texts.append(("x", xa.text))
-        if xa and xa.quoted and xa.quoted.text:
-            texts.append(("x", xa.quoted.text))
+        for related in (xa.quoted, xa.replied_to) if xa else ():
+            if related and related.text:
+                texts.append(("x", related.text))
         seen_terms: set[str] = set()
         for where, text in texts:
             for h in inp.trend_index.match(text, where):
@@ -610,6 +628,39 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         trend_hits=trend_hits,
         pair=pair,
     )
+
+
+# The quoted / replied-to author is usually the narrative; the posting account is often the
+# deployer's own; a mention is the weakest tie.
+_ACCOUNT_FACTOR = {"author": 0.4, "quoted_author": 0.5, "replied_to_author": 0.5, "mentioned": 0.3}
+_ACCOUNT_ROLE = {
+    "author": "the posting account",
+    "quoted_author": "the quoted account",
+    "replied_to_author": "the replied-to account",
+    "mentioned": "a mentioned account",
+}
+
+
+def account_text(name: str | None, handle: str | None) -> str:
+    """An account's display name and handle as words: "Elon Musk elon musk" for
+    (Elon Musk, @elonmusk). Handles are segmented ("elonmusk" -> "elon musk")."""
+    parts: list[str] = []
+    for raw in (name, handle):
+        if raw:
+            parts += normalize(raw, None, None).name_tokens
+    return " ".join(dict.fromkeys(parts))
+
+
+def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
+    """The names of the accounts involved are evidence too: a reply to @elonmusk, a quote of
+    a famous dog's account, a launch post from an account named like the coin."""
+    out: list[Pass] = []
+    for acc in xa.accounts:
+        text = account_text(acc.name, acc.handle)
+        if text:
+            who = f"@{acc.handle}" if acc.handle else (acc.name or "?")
+            out.append(("x", text, _ACCOUNT_FACTOR[acc.role], f"{_ACCOUNT_ROLE[acc.role]} {who}"))
+    return out
 
 
 def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessment | None:

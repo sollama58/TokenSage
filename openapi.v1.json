@@ -1698,6 +1698,72 @@
         "title": "Versions",
         "type": "object"
       },
+      "XAccount": {
+        "additionalProperties": false,
+        "description": "An account involved in the linked post. Its display name and handle are read like\nthe post text (a reply to @elonmusk points at Elon Musk).",
+        "properties": {
+          "followers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Followers"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name, when known",
+            "title": "Name"
+          },
+          "role": {
+            "enum": [
+              "author",
+              "quoted_author",
+              "replied_to_author",
+              "mentioned"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "verified_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Type"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "XAccount",
+        "type": "object"
+      },
       "XAuthor": {
         "additionalProperties": false,
         "properties": {
@@ -1786,6 +1852,15 @@
       "XInfo": {
         "additionalProperties": false,
         "properties": {
+          "accounts": {
+            "default": [],
+            "description": "Accounts involved: author (or linked profile), quoted and replied-to authors, @mentions (full depth)",
+            "items": {
+              "$ref": "#/components/schemas/XAccount"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
           "author": {
             "anyOf": [
               {
@@ -1873,6 +1948,17 @@
               }
             ],
             "title": "Relation"
+          },
+          "replied_to": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XQuoted"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present when the linked tweet is a reply (full depth)"
           },
           "reuse_count": {
             "default": 0,
@@ -2080,7 +2166,7 @@
       },
       "XQuoted": {
         "additionalProperties": false,
-        "description": "The tweet the linked tweet quotes (full depth). Often the real narrative: a launch\npost that quote-tweets someone else's earlier post.",
+        "description": "A tweet the linked tweet points at (full depth): the one it quotes (x.quoted) or the\none it replies to (x.replied_to). Often the real narrative: a launch post that quotes\nor answers someone else's earlier post.",
         "properties": {
           "author": {
             "anyOf": [
@@ -2117,7 +2203,7 @@
                 "type": "null"
               }
             ],
-            "description": "Seconds the quoted post predates the token; negative if after",
+            "description": "Seconds the post predates the token; negative if after",
             "title": "Predates Token By S"
           },
           "status": {
