@@ -400,6 +400,41 @@
             ],
             "title": "Name"
           },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This token's place by launch time among the coins with this name or ticker launched within rank_window_hours of it (1 = the earliest); set on the recent same-name copy",
+            "title": "Rank"
+          },
+          "rank_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many coins with this name or ticker launched within rank_window_hours of it, this one included (\"3rd of 41\")",
+            "title": "Rank Of"
+          },
+          "rank_window_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank Window Hours"
+          },
           "recent": {
             "anyOf": [
               {
