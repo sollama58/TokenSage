@@ -3,6 +3,7 @@ engine pass), the Wikipedia lookup fallback, and their database/cron plumbing.""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import asyncpg
@@ -335,6 +336,7 @@ async def test_wikipedia_search_and_failure() -> None:
         assert route.calls.last.request.url.params["gsrsearch"] == "sydney sweeney"
         route.mock(return_value=httpx.Response(503))
         assert await wikipedia.search(http, "sydney sweeney") is None
+    wikipedia.reset()  # the 503 paused lookups for Retry-After
 
 
 # ----------------------------------------------------------------- Wikidata parsing
@@ -497,3 +499,36 @@ async def test_wiki_search_is_cached(db: asyncpg.Connection) -> None:
             route.mock(return_value=httpx.Response(503))
             stale = await fulldepth.wiki_search(db, http, "sydney sweeney")
             assert stale == first and route.call_count == 2
+
+
+@respx.mock
+async def test_wikipedia_backs_off_on_429_and_caps_concurrency() -> None:
+    """Wikimedia's rate-limit rules: at most 3 requests in flight, and Retry-After respected."""
+    wikipedia.reset()
+    in_flight = peak = 0
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+        return httpx.Response(200, json={"query": {"pages": [{"title": "X", "index": 1}]}})
+
+    route = respx.get(wikipedia.API).mock(side_effect=slow)
+    try:
+        async with httpx.AsyncClient() as http:
+            got = await asyncio.gather(*(wikipedia.search(http, f"q{i}") for i in range(8)))
+            assert all(got) and peak == wikipedia.MAX_CONCURRENT
+
+            route.mock(return_value=httpx.Response(429, headers={"Retry-After": "30"}))
+            assert await wikipedia.search(http, "a") is None
+            calls = route.call_count
+            # paused: no request is sent until Retry-After has passed
+            route.mock(return_value=httpx.Response(200, json={"query": {"pages": []}}))
+            assert await wikipedia.search(http, "b") is None
+            assert route.call_count == calls
+            wikipedia.reset()
+            assert await wikipedia.search(http, "b") == []
+    finally:
+        wikipedia.reset()

@@ -6,7 +6,7 @@ import asyncio
 
 import structlog
 
-from tokensage import queue
+from tokensage import queue, recall
 from tokensage.config import get_settings
 from tokensage.db import create_pool
 from tokensage.logging import configure_logging
@@ -33,6 +33,9 @@ async def run_once() -> dict[str, int]:
                    where a.mint = r.mint and a.version = r.version and r.rn > 3
                      and a.created_at < now() - interval '30 days'"""
             )
+            # the recall number (guide §5.9): how often the last day's analyses resolved a
+            # referent, per depth; the series to watch as the gazetteer and rules change
+            log.info("recall.daily", **(await recall.summary(conn)))
         return {
             "requeued": requeued,
             "pruned_jobs": int(pruned_jobs.split()[-1]),
