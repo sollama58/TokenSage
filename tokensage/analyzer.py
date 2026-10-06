@@ -8,8 +8,9 @@ tokens, X link reuse, creator history, image-hash candidates), run the basic-dep
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import asyncpg
 import httpx
@@ -327,7 +328,12 @@ def _quoted_out(q: xsignals.QuotedAssessment, token_created: datetime | None) ->
 
 
 def build_document(
-    r: Resolved, m: md.Metadata | None, depth: str, out: EngineOutput | None, x: XInfo | None
+    r: Resolved,
+    m: md.Metadata | None,
+    depth: str,
+    out: EngineOutput | None,
+    x: XInfo | None,
+    hint_use: HintUse | None = None,
 ) -> Analysis:
     now = datetime.now(UTC)
     flags: list[Flag] = []
@@ -372,19 +378,44 @@ def build_document(
     if r.created_at is None:
         caveats.append("token creation time could not be determined")
 
-    evidence.append(
-        Evidence(
-            kind="onchain",
-            label="source",
-            weight=0.0,
-            detail=(
-                f"{r.token_program} mint; pump.fun={r.is_pumpfun}; "
-                f"on-chain metadata via {r.onchain_metadata_source}; "
-                f"created_at via {r.created_at_source or 'unknown'}"
-            ),
-            source="solana-rpc",
+    if hint_use is None or hint_use.onchain_visible:
+        evidence.append(
+            Evidence(
+                kind="onchain",
+                label="source",
+                weight=0.0,
+                detail=(
+                    f"{r.token_program} mint; pump.fun={r.is_pumpfun}; "
+                    f"on-chain metadata via {r.onchain_metadata_source}; "
+                    f"created_at via {r.created_at_source or 'unknown'}"
+                ),
+                source="solana-rpc",
+            )
         )
-    )
+    if hint_use is not None:
+        used = ", ".join(hint_use.fields) or "none"
+        evidence.append(
+            Evidence(
+                kind="provenance",
+                label="hints",
+                weight=0.0,
+                detail=(
+                    f"caller-supplied hints used for: {used}"
+                    + ("" if hint_use.onchain_visible else "; mint not yet visible on-chain")
+                ),
+                source="hints:caller",
+            )
+        )
+        if m is not None and m.origin == "hints":
+            caveats.append("hints: metadata supplied by caller")
+        elif "created_at" in hint_use.fields:
+            caveats.append("hints: creation time supplied by caller")
+        if not hint_use.onchain_visible:
+            caveats.append(
+                "partial: mint not yet visible on-chain; analysed from caller hints "
+                "(market data missing)"
+            )
+        caveats.extend(hint_use.notes)
 
     referent = None
     categories: list[Category] = []
@@ -595,21 +626,122 @@ async def _schedule_retry(conn: asyncpg.Connection, mint: str, depth: str) -> No
 # ----------------------------------------------------------------- entry points
 
 
-async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str) -> int:
+@dataclass
+class HintUse:
+    """How caller-supplied hints were used for this analysis (surfaced in caveats/evidence)."""
+
+    fields: list[str]
+    onchain_visible: bool = True
+    notes: list[str] = field(default_factory=list)
+
+
+def _hint_created_at(hints: dict[str, Any] | None) -> datetime | None:
+    raw = (hints or {}).get("created_at")
+    if not raw:
+        return None
+    try:
+        dt = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    # pump.fun launched in 2024; anything else (or from the future) is not a creation time
+    if dt < datetime(2023, 1, 1, tzinfo=UTC) or dt > datetime.now(UTC) + timedelta(minutes=5):
+        return None
+    return dt
+
+
+def _resolved_from_hints(mint: str, hints: dict[str, Any]) -> Resolved:
+    """The mint is not visible on-chain yet (seconds-old coin): analyse from the hints."""
+    return Resolved(
+        mint=mint,
+        token_program="unknown",
+        is_pumpfun=mint.endswith("pump"),
+        name=md._clean_str(hints.get("name"), 256),
+        symbol=md._clean_str(hints.get("symbol"), 64),
+        uri=None,
+        creator=None,
+        bonding_curve=None,
+        complete=None,
+        curve_progress=None,
+        is_mayhem=None,
+        quote_mint=None,
+        created_at=_hint_created_at(hints),
+        created_at_source="hints" if _hint_created_at(hints) else None,
+        onchain_metadata_source="none",
+    )
+
+
+async def _persist_stub_token(conn: asyncpg.Connection, r: Resolved) -> None:
+    """analysis rows reference token; keep only what is known so a later on-chain resolve
+    fills everything else (persist() only overwrites nulls)."""
+    await conn.execute(
+        """insert into token (mint, created_at, created_at_source, seen_by)
+           values ($1, $2, $3, '{request}') on conflict (mint) do nothing""",
+        r.mint,
+        r.created_at,
+        r.created_at_source,
+    )
+
+
+async def analyze(
+    conn: asyncpg.Connection,
+    ctx: Context,
+    mint: str,
+    depth: str,
+    hints: dict[str, Any] | None = None,
+) -> int:
     """Resolve + fetch + engine + persist. Returns the new analysis.version.
-    Raises AnalyzeFailed for definitive per-CA failures (404/422 at the API)."""
+    Raises AnalyzeFailed for definitive per-CA failures (404/422 at the API).
+
+    hints: metadata the caller already has (name, symbol, description, image_url, twitter,
+    telegram, website, created_at). They replace the metadata fetch and, for a mint not yet
+    visible on-chain, the on-chain read; they never turn into a 404."""
     if ctx.rpc is None:
         raise RuntimeError("SOLANA_RPC_URL is not configured; the analyzer cannot resolve CAs")
+    hints = {k: v for k, v in (hints or {}).items() if v not in (None, "")}
+    hint_meta_fields = [k for k in md.HINT_FIELDS if k in hints]
+    hint_use: HintUse | None = (
+        HintUse(fields=[*hint_meta_fields, *(["created_at"] if "created_at" in hints else [])])
+        if hints
+        else None
+    )
     try:
-        r = await resolve(conn, ctx.rpc, ctx.http, ctx.settings, mint)
+        r = await resolve(
+            conn, ctx.rpc, ctx.http, ctx.settings, mint, created_hint=_hint_created_at(hints)
+        )
     except ResolveError as e:
-        raise AnalyzeFailed(e.code, str(e)) from e
+        if not (hint_meta_fields and e.code == "token_not_found"):
+            raise AnalyzeFailed(e.code, str(e)) from e
+        assert hint_use is not None
+        r = _resolved_from_hints(mint, hints)
+        hint_use.onchain_visible = False
+        await _persist_stub_token(conn, r)
+        log.info("analyze.from_hints", mint=mint, reason=e.code)
 
     m: md.Metadata | None = None
     image_bytes: bytes | None = None
     cached_feats: image_stage.ImageFeatures | None = None
-    if r.uri:
-        m = await md.load_cached(conn, r.mint)
+    cached = await md.load_cached(conn, r.mint) if r.uri else None
+    if cached is None and hint_meta_fields:
+        # The caller already has the metadata: skip the IPFS round trip, still fetch the
+        # image (guarded) so the logo can be hashed and compared.
+        m = md.from_hints(hints)
+        await md.attach_image(ctx.http, m, ctx.settings)
+        image_bytes = m.image_bytes
+        if m.image_content_key:
+            cached_feats = await _cached_image_features(conn, m.image_content_key)
+        assert hint_use is not None
+        for f, chain_v in (("name", r.name), ("symbol", r.symbol)):
+            hv = getattr(m, f)
+            if chain_v and hv and hv.strip().casefold() != chain_v.strip().casefold():
+                hint_use.notes.append(
+                    f"hints: caller-supplied {f} '{hv[:40]}' differs from on-chain "
+                    f"'{chain_v[:40]}'; using on-chain"
+                )
+                setattr(m, f, chain_v)
+    elif r.uri:
+        m = cached
         if m is None:
             attempts = await _metadata_attempts(conn, r.mint)
             m = await md.fetch_metadata(ctx.http, r.uri, ctx.settings)
@@ -674,7 +806,7 @@ async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str)
     if m and m.image_content_key and out.image.features and image_bytes:
         await _persist_image(conn, m.image_content_key, out)
 
-    doc = build_document(r, m, depth, out, x)
+    doc = build_document(r, m, depth, out, x, hint_use)
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
 

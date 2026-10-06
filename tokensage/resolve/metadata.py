@@ -57,6 +57,7 @@ class Metadata:
     image_error: str | None = None
     extra_links: list[str] = field(default_factory=list)
     image_bytes: bytes | None = None  # transient; never persisted
+    origin: str = "fetched"  # fetched | hints (supplied by the API caller; never cached)
 
 
 def _sniff_image(body: bytes) -> str | None:
@@ -199,6 +200,39 @@ async def fetch_metadata(client: httpx.AsyncClient, uri: str, settings: Settings
     m = build(uri, f.body)
     if m.status != "ok" or not m.image_url:
         return m
+    await attach_image(client, m, settings)
+    return m
+
+
+HINT_FIELDS = ("name", "symbol", "description", "image_url", "twitter", "telegram", "website")
+
+
+def from_hints(hints: dict[str, Any]) -> Metadata:
+    """Metadata from values the API caller already had (e.g. from pump.fun), cleaned exactly
+    like fetched metadata JSON. Untrusted: URLs go through the same cleaning here and the same
+    SSRF-guarded fetch when the image is downloaded."""
+    data = {k: hints.get(k) for k in HINT_FIELDS}
+    body = json.dumps(data, sort_keys=True, default=str).encode()
+    m = Metadata(
+        status="ok",
+        content_key="hints:" + hashlib.sha256(body).hexdigest(),
+        raw={k: v for k, v in data.items() if v is not None},
+        origin="hints",
+    )
+    m.name = _clean_str(data.get("name"), 256)
+    m.symbol = _clean_str(data.get("symbol"), 64)
+    m.description = _clean_str(data.get("description"), 4000)
+    m.image_url = clean_url(rewrite_dead_gateways(str(data.get("image_url") or "")))
+    m.twitter = clean_social(data.get("twitter"))
+    m.telegram = clean_social(data.get("telegram"))
+    m.website = clean_url(data.get("website"))
+    return m
+
+
+async def attach_image(client: httpx.AsyncClient, m: Metadata, settings: Settings) -> None:
+    """Download and sniff m.image_url (SSRF-guarded, size/time capped). Never raises."""
+    if not m.image_url:
+        return
     try:
         img = await fetch_url(
             client, m.image_url, settings, max_bytes=settings.image_max_bytes, accept="image/*,*/*"
@@ -215,7 +249,6 @@ async def fetch_metadata(client: httpx.AsyncClient, uri: str, settings: Settings
         m.image_error = f"unsafe image url: {e}"
     except FetchError as e:
         m.image_error = str(e)
-    return m
 
 
 async def load_cached(conn: asyncpg.Connection, mint: str) -> Metadata | None:

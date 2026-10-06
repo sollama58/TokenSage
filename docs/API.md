@@ -119,9 +119,45 @@ not financial advice**.
 | Call | Purpose |
 |---|---|
 | `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below). Items are handled one by one: if the daily quota runs out or the queue is full partway through, the remaining items come back as `status: "failed"` with `error: "quota_exceeded"` or `"overloaded"` and `retry_after_s`, while items already queued keep their `job_id` |
+| `POST /v1/tokens/{ca}` with `{"hints": {...}}` | Same as the GET, with metadata you already have (see below) |
 | `GET /v1/jobs/{job_id}` | `pending \| running \| done \| failed`, with the result when done. `result.status` is `complete` or `partial`, exactly as `GET /v1/tokens/{ca}` would report it (webhook callbacks carry the same) |
 | `GET /v1/meta` | Schema/rule versions, the full category taxonomy, flag codes, and the disclaimer. Use it instead of hard-coding labels |
 | `GET /healthz` | Liveness (no auth) |
+
+### Passing metadata you already have (hints)
+
+If you already hold a coin's pump.fun data, pass it as hints. TokenSage then skips the IPFS
+metadata fetch, which is faster and saves RPC credits. A coin seconds old that is not yet
+visible on-chain is analysed from the hints instead of returning `404 token_not_found`.
+
+- Single coin: `POST /v1/tokens/{ca}` takes the same query parameters as the GET, plus an
+  optional JSON body `{"hints": {...}}`.
+- Batch: alongside `cas`, send `items: [{"ca": "...", "hints": {...}}]`. Both forms may be
+  mixed in one request, at most 50 CAs in total.
+
+```json
+{"hints": {"name": "Peanut the Squirrel 2.0", "symbol": "PNUT2",
+           "description": "...", "image_url": "https://ipfs.io/ipfs/bafk...",
+           "twitter": "https://x.com/...", "telegram": null, "website": null,
+           "created_at": "2026-10-06T19:41:07Z"}}
+```
+
+Every field is optional. How hints are treated:
+
+- **Untrusted.** Strings are length-capped and cleaned exactly like fetched metadata. The image
+  URL is downloaded through the same SSRF guard (https, public hosts, size and time caps), so
+  an unsafe URL is simply not fetched.
+- **Still verified on-chain.** TokenSage still reads the mint and bonding curve. If the on-chain
+  name or symbol differs from a hint, the on-chain value wins and a caveat says so.
+  `created_at` replaces the slow signature-history lookup when nothing better is stored.
+- **Visible in the result.** `caveats` contains `hints: metadata supplied by caller`, and
+  `evidence` has an entry with `kind: "provenance"` and `source: "hints:caller"` listing the
+  fields used.
+- **Not on-chain yet.** The result is `partial`, with the caveat
+  `partial: mint not yet visible on-chain; analysed from caller hints (market data missing)`.
+  `market` fields stay null. Request it again later for the on-chain view.
+- A cached analysis that is still fresh is returned as is; hints only matter when a new
+  analysis runs. Hints are never cached as the coin's metadata.
 
 ### Webhook callbacks (optional)
 

@@ -156,7 +156,8 @@ class Worker:
         try:
             if job.kind == "analyze":
                 assert job.mint and job.depth
-                version = await analyze(conn, self.ctx, job.mint, job.depth)
+                hints = (job.payload or {}).get("hints") if job.payload else None
+                version = await analyze(conn, self.ctx, job.mint, job.depth, hints=hints)
                 await queue.complete(conn, job.id, version)
                 bound.info("job.done", version=version)
             elif job.kind == "callback":
