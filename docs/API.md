@@ -22,10 +22,10 @@ flow and the rendered result. Useful for checking what a given CA returns before
 - Base URL: `https://<tokensage-api host>` (Render: `https://tokensage-api.onrender.com`).
 - Every `/v1` call needs `Authorization: Bearer <api key>`. Keys are issued by the TokenSage
   owner. Missing or unknown key → `401`.
-- Each key has a per-minute rate limit (default 60/min). Exceeding it → `429 rate_limited` with
+- Each key has a per-minute rate limit (300/min on the deployed service; code default 60). Exceeding it → `429 rate_limited` with
   `Retry-After` (seconds).
 - Each key also has **daily quotas** (UTC day) for the expensive calls: `depth=full` analyses
-  (default 2000/day) and `refresh=true` re-analyses (default 200/day). Cached reads and
+  (20,000/day on the deployed service; code default 2000) and `refresh=true` re-analyses (default 200/day). Cached reads and
   `depth=basic` work are not quota-limited. A unit is charged only when a request creates a
   new analysis job: re-requesting a pending analysis (the 202 → retry loop), polling
   `GET /v1/jobs/{id}`, or a batch item that joins an already-open job costs nothing, even after
