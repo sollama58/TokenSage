@@ -101,8 +101,12 @@ async def test_concurrent_requests_share_one_job(client: httpx.AsyncClient) -> N
     rs = await asyncio.gather(
         *[client.get(f"/v1/tokens/{CA}?wait=0&depth=full") for _ in range(20)]
     )
-    ids = {r.json()["job_id"] for r in rs}
+    # The inline worker may finish the job inside the burst; late callers then get the
+    # result (200) instead of a 202. Single-flight means every 202 names the same job.
+    assert {r.status_code for r in rs} <= {200, 202}
+    ids = {r.json()["job_id"] for r in rs if r.status_code == 202}
     assert len(ids) == 1, ids
+    assert all(r.json()["ca"] == CA for r in rs)
 
 
 async def test_batch(client: httpx.AsyncClient) -> None:

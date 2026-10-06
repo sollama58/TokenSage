@@ -32,6 +32,7 @@ class ApiKey:
     rate_per_min: int
     full_per_day: int
     refresh_per_day: int
+    digest: str = ""  # sha256 hex of the raw key; also the HMAC secret for callbacks
 
 
 @dataclass
@@ -64,11 +65,13 @@ class KeyStore:
     def __init__(self, settings: Settings):
         self._by_digest: dict[str, ApiKey] = {}
         for name, raw in settings.api_key_pairs.items():
-            self._by_digest[sha256_hex(raw)] = ApiKey(
+            d = sha256_hex(raw)
+            self._by_digest[d] = ApiKey(
                 name=name,
                 rate_per_min=settings.rate_per_min_default,
                 full_per_day=settings.full_per_day_default,
                 refresh_per_day=settings.refresh_per_day_default,
+                digest=d,
             )
         self._admin_digest = sha256_hex(settings.admin_key) if settings.admin_key else None
         self.limiter = RateLimiter()
@@ -104,6 +107,12 @@ async def require_api_key(
     if wait:
         raise errors.rate_limited(wait)
     request.state.api_key = key
+    pool = getattr(request.app.state, "pool", None)
+    if pool is not None:
+        from tokensage.api import usage
+
+        async with pool.acquire() as conn:
+            await usage.bump(conn, key.name, requests=1)
     return key
 
 

@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     enable_paid_x: bool = False
     paid_x_daily_usd_cap: float = 1.0
 
+    # DEV ONLY: lets the SSRF guard accept http:// / private hosts (local fake chain server).
+    dev_allow_insecure_fetch: bool = False
+
     # --- upstream ---
     solana_rpc_url: str = ""
     solana_ws_url: str = ""

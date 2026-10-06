@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -70,11 +71,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
         request.state.request_id = rid
         structlog.contextvars.bind_contextvars(request_id=rid)
+        t0 = time.perf_counter()
         try:
             resp = await call_next(request)
         finally:
             structlog.contextvars.unbind_contextvars("request_id")
         resp.headers["X-Request-Id"] = rid
+        if request.url.path.startswith("/v1"):
+            key = getattr(request.state, "api_key", None)
+            log.info(
+                "http.request",
+                method=request.method,
+                path=request.url.path,
+                status=resp.status_code,
+                ms=int((time.perf_counter() - t0) * 1000),
+                key=key.name if key else None,
+            )
         return resp
 
     app.add_exception_handler(errors.ApiError, errors.api_error_handler)  # type: ignore[arg-type]
@@ -97,13 +109,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             health = await conn.fetch(
                 "select source, state, failures, open_until from source_health"
             )
+            from tokensage.api import usage
+
+            use = await usage.all_today(conn)
         return JSONResponse(
             {
                 "status": "ok",
                 "queue": {"pending": pending, "running": running, "failed_24h": failed_24h},
                 "sources": [dict(r) for r in health],
+                "usage_today": use,
                 "inline_analyzer": settings.inline_analyzer,
-            }
+            },
+            headers={"Cache-Control": "no-store"},
         )
 
     app.include_router(v1)

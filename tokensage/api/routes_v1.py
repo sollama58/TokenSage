@@ -83,6 +83,7 @@ async def get_token(
         refresh=refresh,
         requested_by=key.name,
         request_id=request.state.request_id,
+        key=key,
     )
     if res.status == "pending":
         response.status_code = 202
@@ -101,6 +102,15 @@ async def batch(
     settings = request.app.state.settings
     if len(body.cas) > settings.batch_max:
         raise errors.validation(f"at most {settings.batch_max} CAs per batch")
+    cb: str | None = None
+    if body.callback_url:
+        from tokensage import callbacks
+        from tokensage.net.safe_fetch import FetchError, UnsafeUrl
+
+        try:
+            cb = await callbacks.validate_callback_url(body.callback_url)
+        except (UnsafeUrl, FetchError) as e:
+            raise errors.ApiError(400, "invalid_callback_url", str(e)) from None
     items: list[BatchItem] = []
     for raw in body.cas:
         try:
@@ -120,6 +130,8 @@ async def batch(
             requested_by=key.name,
             request_id=request.state.request_id,
             priority=queue.PRIORITY_BATCH,
+            key=key,
+            callback_url=cb,
         )
         items.append(
             BatchItem(ca=mint, status=res.status, analysis=res.analysis, job_id=res.job_id)

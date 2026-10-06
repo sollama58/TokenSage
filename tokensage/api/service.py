@@ -8,6 +8,7 @@ from typing import Any
 import asyncpg
 
 from tokensage import queue
+from tokensage.api.auth import ApiKey
 from tokensage.api.schemas import Analysis, Freshness, TokenResponse, UpstreamError
 from tokensage.config import Settings
 
@@ -59,6 +60,18 @@ def _status_for(doc: dict[str, Any]) -> str:
     return "partial" if any(str(c).startswith("partial:") for c in caveats) else "complete"
 
 
+async def _enforce_quotas(conn: asyncpg.Connection, key: ApiKey, depth: str, refresh: bool) -> None:
+    """Cache hits are free; a new full analysis or a forced refresh counts against the key."""
+    from tokensage.api import errors, usage
+
+    u = await usage.today(conn, key.name)
+    if refresh and u.refreshes >= key.refresh_per_day:
+        raise errors.quota_exceeded("refresh", usage.seconds_until_utc_midnight())
+    if depth == "full" and u.full_calls >= key.full_per_day:
+        raise errors.quota_exceeded("full-depth", usage.seconds_until_utc_midnight())
+    await usage.bump(conn, key.name, full=1 if depth == "full" else 0, refresh=1 if refresh else 0)
+
+
 async def get_or_enqueue(
     pool: asyncpg.Pool,
     waiter: queue.DoneWaiter,
@@ -72,6 +85,8 @@ async def get_or_enqueue(
     requested_by: str,
     request_id: str,
     priority: int = queue.PRIORITY_API,
+    key: ApiKey | None = None,
+    callback_url: str | None = None,
 ) -> TokenResponse:
     async with pool.acquire() as conn:
         created = await token_created_at(conn, mint)
@@ -93,9 +108,17 @@ async def get_or_enqueue(
             from tokensage.api import errors
 
             raise errors.overloaded()
+        if key is not None:
+            await _enforce_quotas(conn, key, depth, refresh)
         job = await queue.enqueue(
             conn, "analyze", mint, depth, priority=priority, requested_by=requested_by
         )
+        if callback_url and key is not None:
+            from tokensage import callbacks
+
+            await callbacks.schedule(
+                conn, target_job_id=job.id, callback_url=callback_url, key_digest=key.digest
+            )
 
     finished = await waiter.wait(job.id, wait_s) if wait_s > 0 else False
 

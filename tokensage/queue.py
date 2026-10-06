@@ -33,6 +33,7 @@ class Job:
     result_version: int | None
     last_error: str | None
     error_code: str | None = None
+    payload: dict[str, Any] | None = None
 
     @classmethod
     def from_record(cls, r: asyncpg.Record) -> Job:
@@ -46,6 +47,7 @@ class Job:
             result_version=r["result_version"],
             last_error=r["last_error"],
             error_code=r["error_code"],
+            payload=r["payload"] if "payload" in r.keys() else None,
         )
 
 

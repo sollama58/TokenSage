@@ -256,6 +256,10 @@ class JobResponse(_Model):
 class BatchRequest(_Model):
     cas: list[str] = Field(min_length=1, max_length=50)
     depth: Depth = "basic"
+    callback_url: str | None = Field(
+        default=None,
+        description="Optional https URL that receives a signed JobResponse per finished job",
+    )
 
 
 class BatchItem(_Model):

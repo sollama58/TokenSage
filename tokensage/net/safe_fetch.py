@@ -27,6 +27,14 @@ Resolver = Callable[..., Awaitable[list[Any]]]
 DEFAULT_RESOLVER: Resolver | None = None
 
 MAX_REDIRECTS = 3
+
+
+def _dev_insecure() -> bool:
+    from tokensage.config import get_settings
+
+    return bool(get_settings().dev_allow_insecure_fetch)
+
+
 _BLOCKED_HOSTS = {"localhost", "metadata.google.internal", "metadata"}
 
 
@@ -67,6 +75,8 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 async def check_url(url: str, resolver: Resolver | None = None) -> str:
     """Validate scheme/host and resolve DNS; return the normalised URL or raise UnsafeUrl."""
     parts = urlsplit(url)
+    if _dev_insecure():
+        return url  # DEV ONLY (see Settings.dev_allow_insecure_fetch)
     if parts.scheme != "https":
         raise UnsafeUrl(f"scheme not allowed: {parts.scheme or 'none'}")
     host = (parts.hostname or "").lower().rstrip(".")

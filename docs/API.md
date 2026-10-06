@@ -22,8 +22,12 @@ flow and the rendered result. Useful for checking what a given CA returns before
 - Base URL: `https://<tokensage-api host>` (Render: `https://tokensage-api.onrender.com`).
 - Every `/v1` call needs `Authorization: Bearer <api key>`. Keys are issued by the TokenSage
   owner. Missing or unknown key → `401`.
-- Each key has a per-minute rate limit (default 60/min). Exceeding it → `429` with
+- Each key has a per-minute rate limit (default 60/min). Exceeding it → `429 rate_limited` with
   `Retry-After` (seconds).
+- Each key also has **daily quotas** (UTC day) for the expensive calls: `depth=full` analyses
+  (default 2000/day) and `refresh=true` re-analyses (default 200/day). Cached reads and
+  `depth=basic` work are not quota-limited. Exceeding a quota → `429 quota_exceeded` with
+  `Retry-After` set to the seconds until UTC midnight. The owner can see today's counters per key.
 - Send an `X-Request-Id` header if you want to correlate logs; otherwise one is generated.
   The response echoes it in `X-Request-Id` and in every body's `request_id`.
 
@@ -49,11 +53,11 @@ GET /v1/tokens/{ca}?depth=full&wait=10
 |---|---|---|
 | `200` | Analysis in body. `status` is `complete`, `partial` (some upstream source failed; see `errors` and `analysis.caveats`) or `failed` | Use it |
 | `202` | Not ready yet. Body has `status: "pending"`, a `job_id`, and `stale_analysis` if an older result exists | Retry the same URL after `Retry-After` seconds (≈3 s), or poll `GET /v1/jobs/{job_id}`. Give up after ~60 s total |
-| `400` | `invalid_ca`: not a Solana address | Don't retry |
+| `400` | `invalid_ca`: not a Solana address; `invalid_callback_url` (batch only) | Don't retry |
 | `401` | `unauthorized` | Fix the key |
 | `404` | `token_not_found`: no account on-chain (very new tokens may appear after a few seconds) | Retry once after a few seconds, then treat as unknown |
 | `422` | `not_a_token_mint` (e.g. a wallet address) or `not_pumpfun` (only if the service is configured to reject non-pump.fun mints) | Don't retry |
-| `429` | `rate_limited` | Back off per `Retry-After` |
+| `429` | `rate_limited` (per-minute) or `quota_exceeded` (daily full/refresh quota) | Back off per `Retry-After`; for `quota_exceeded`, fall back to `depth=basic` or a cached read |
 | `503` | `overloaded`: queue full or RPC down | Back off per `Retry-After` |
 
 Every error has one shape:
@@ -107,10 +111,41 @@ Confidences are probabilities in 0–1, calibrated so that about 80% of "0.8" la
 
 | Call | Purpose |
 |---|---|
-| `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits |
+| `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below) |
 | `GET /v1/jobs/{job_id}` | `pending \| running \| done \| failed`, with the result when done |
 | `GET /v1/meta` | Schema/rule versions, the full category taxonomy, flag codes, and the disclaimer. Use it instead of hard-coding labels |
 | `GET /healthz` | Liveness (no auth) |
+
+### Webhook callbacks (optional)
+
+If a batch request carries `callback_url`, TokenSage POSTs the finished `JobResponse` JSON
+(the same body `GET /v1/jobs/{job_id}` returns, including `result` or `error`) to that URL once
+per job that was not already cached. Rules:
+
+- The URL must be `https` on a public host (validated at submit time and again at delivery;
+  otherwise `400 invalid_callback_url`). No redirects are followed.
+- Answer with any `2xx` within 8 s. Anything else is retried twice, 30 s apart, then dropped;
+  the job result itself stays available via `GET /v1/jobs/{job_id}` either way.
+- Every delivery is signed. Headers: `X-TokenSage-Signature: sha256=<hex>`,
+  `X-TokenSage-Timestamp: <unix seconds>`, `X-TokenSage-Job: <job_id>`. The signature is
+  HMAC-SHA256 over the string `"{timestamp}.{raw body}"`, keyed with the **SHA-256 hex digest
+  of your API key** (so no second secret has to be exchanged). Verify it and reject stale
+  timestamps (older than ~5 min):
+
+```python
+import hashlib, hmac, time
+
+def verify(api_key: str, headers: dict, raw_body: bytes) -> bool:
+    secret = hashlib.sha256(api_key.encode()).hexdigest().encode()
+    ts = headers["X-TokenSage-Timestamp"]
+    if abs(time.time() - int(ts)) > 300:
+        return False
+    expected = "sha256=" + hmac.new(secret, f"{ts}.".encode() + raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, headers["X-TokenSage-Signature"])
+```
+
+Deliveries can arrive out of order and, in rare retry cases, twice; key your handling on
+`job_id` (or `result.ca` + `result.depth`).
 
 ## Recommended client behaviour
 

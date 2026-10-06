@@ -96,6 +96,44 @@ class Worker:
                 self._current_job_id = None
             return True
 
+    async def _callback(self, conn: asyncpg.Connection, job: queue.Job) -> None:
+        from tokensage import callbacks
+        from tokensage.api import service
+        from tokensage.api.schemas import Analysis, JobResponse, TokenResponse
+
+        payload = job.payload or {}
+        target = await queue.get(conn, int(payload["target_job_id"]))
+        if target is None:
+            return
+        if target.status not in ("done", "failed"):
+            # not finished yet: push this callback back a little
+            raise RuntimeError("target job not finished")
+        result = None
+        if target.status == "done" and target.mint and target.depth:
+            latest = await service.latest_analysis(conn, target.mint, target.depth)
+            if latest:
+                doc, _ = latest
+                result = TokenResponse(
+                    ca=target.mint,
+                    status="complete",
+                    depth=doc["depth"],
+                    analysis=Analysis.model_validate(doc),
+                    request_id=f"callback-{job.id}",
+                )
+        body = JobResponse(
+            job_id=target.id,
+            status=target.status,  # type: ignore[arg-type]
+            ca=target.mint,
+            depth=target.depth,  # type: ignore[arg-type]
+            result=result,
+            error=(f"{target.error_code}: " if target.error_code else "")
+            + (target.last_error or "")
+            if target.status == "failed"
+            else None,
+            request_id=f"callback-{job.id}",
+        ).model_dump(mode="json")
+        await callbacks.deliver(self.ctx.http, payload, body)
+
     async def _process(self, conn: asyncpg.Connection, job: queue.Job) -> None:
         bound = log.bind(job_id=job.id, kind=job.kind, mint=job.mint, depth=job.depth)
         if self.stop.is_set():
@@ -107,6 +145,10 @@ class Worker:
                 version = await analyze(conn, self.ctx, job.mint, job.depth)
                 await queue.complete(conn, job.id, version)
                 bound.info("job.done", version=version)
+            elif job.kind == "callback":
+                await self._callback(conn, job)
+                await queue.complete(conn, job.id, None)
+                bound.info("job.callback.done")
             elif job.kind == "retry_metadata":
                 assert job.mint and job.depth
                 rv = await retry_metadata(conn, self.ctx, job.mint, job.depth)
@@ -121,7 +163,18 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 - a bad token must never kill the loop
             err = "".join(traceback.format_exception_only(type(exc), exc)).strip()
             bound.error("job.error", error=err, attempt=job.attempts)
-            await queue.fail(conn, job.id, err, max_attempts=self.settings.job_max_attempts)
+            if job.kind == "callback":
+                from tokensage import callbacks
+
+                await queue.fail(
+                    conn,
+                    job.id,
+                    err,
+                    max_attempts=callbacks.CALLBACK_MAX_ATTEMPTS,
+                    retry_in_s=callbacks.CALLBACK_RETRY_S,
+                )
+            else:
+                await queue.fail(conn, job.id, err, max_attempts=self.settings.job_max_attempts)
 
 
 async def run_worker(

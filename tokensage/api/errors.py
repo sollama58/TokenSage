@@ -34,6 +34,15 @@ def rate_limited(retry_after_s: int, msg: str = "rate limit exceeded") -> ApiErr
     return ApiError(429, "rate_limited", msg, headers={"Retry-After": str(retry_after_s)})
 
 
+def quota_exceeded(kind: str, retry_after_s: int) -> ApiError:
+    return ApiError(
+        429,
+        "quota_exceeded",
+        f"daily quota for {kind} calls exhausted for this key",
+        headers={"Retry-After": str(retry_after_s)},
+    )
+
+
 def overloaded(retry_after_s: int = 10) -> ApiError:
     return ApiError(
         503,
