@@ -103,7 +103,7 @@ Most coins are an attempt to **attach to an attention source**. Recognising whic
 | **AI / agent** | AI-agent lore, "launched by an AI", LLM-related terms | `$GOAT` (Goatseus Maximus, promoted by the "Truth Terminal" AI bot), `$ZEREBRO`, `$AI16Z`, `$ACT` |
 | **Crypto-native / self-referential** | Slang, pump.fun jokes, "community takeover" (CTO), utility claims | `$FARTCOIN` (toilet humour plus "AI-generated idea" lore), `$WEN` |
 | **Regional / language meta** | CJK names, country tickers | Chinese-character coins are a recurring pump.fun "meta" |
-| **Toilet humour / NSFW / offensive** | — | Must be detected and hidden, never amplified |
+| **Crude humour / offensive** | toilet jokes, slurs, shock content | Recognised as a category from text (and OCR text), like any other narrative. There is no image moderation (owner decision). |
 
 > The famous-coin facts above are well known up to 2024–2025 but must be **verified when seeding** the known-coins table (CoinGecko/Wikipedia), not hard-coded from this guide.
 
@@ -178,7 +178,7 @@ Every analysed token produces one **Analysis** document. This is the product: th
   "copy_of": [ {"ticker": "PNUT", "mint": "…", "signals": ["ticker_base", "name", "logo_phash:6"]} ],
   "image": { "status": "ok", "phash": "…", "pdq": "…", "ocr": ["$PNUT"],
              "palette": ["#c87f3a"], "near_duplicates": [ … ], "labels": [],
-             "nsfw": "safe", "source_url": "…", "display_url": "…" },   // display_url is null unless nsfw == "safe"
+             "source_url": "…" },              // gateway URL of the image
   "x": { "ref": {"kind": "tweet", "tweet_id": "…", "url_handle": "…"},
          "tweet_time": "…", "predates_token_by_s": 10800,
          "author": {"handle": "…", "verified_type": "…", "followers": 0, "username_changes": 0},
@@ -276,11 +276,11 @@ Typical cost of a cold resolve: 2–3 RPC calls plus 1 metadata fetch, well insi
 
 **Enrichment (optional, throttled):** `GET https://frontend-api-v3.pump.fun/coins-v2/{mint}`.
 - This is the one endpoint pump.fun itself documents.
-- It returns already-parsed `twitter/telegram/website`, plus `nsfw`, `is_banned`, `hidden`, `usd_market_cap`, `complete`, `reply_count`, `created_timestamp` (ms) and `market_cap` (SOL).
+- It returns already-parsed `twitter/telegram/website`, plus `is_banned`, `hidden`, `usd_market_cap`, `complete`, `reply_count`, `created_timestamp` (ms) and `market_cap` (SOL).
 - Call it server-side only (it is CORS-protected), at ≤2–4 requests/second, with backoff on 429.
 - It **may be Cloudflare-challenged from Render IPs**; test in Phase 0.
 - **Never trust its `token_program` field** (pump.fun's own warning).
-- Use it for moderation flags and market signals, not as the primary source.
+- Use it for parsed socials and market signals, not as the primary source.
 
 **Market context (reported in `market`, used only as context, never as advice):**
 - Bonding-curve state from the resolver: `complete` and curve progress.
@@ -349,7 +349,7 @@ TokenContext(raw on-chain + metadata + optional enrichment)
   ├─ S3 lexicon match    → slang, CLDR, WordNet classes, gazetteer entities (Aho-Corasick)
   ├─ S4 ticker↔name      → ticker explanation (subsequence / vowel-drop / acronym / lore)
   ├─ S5 known-coin match → copycat / derivative / template-family evidence
-  ├─ S6 image            → hashes, near-dupes, OCR, palette, NSFW, (optional) visual labels
+  ├─ S6 image            → hashes, near-dupes, OCR, palette, (optional) visual labels
   ├─ S7 X reference      → parse, snowflake timing, reuse count, (tier-gated) fetch + relation
   ├─ S8 trend match      → trending-entity hits (+ optional news confirmation)
   ├─ S9 aggregate        → per-label noisy-OR confidences, referent selection, flags
@@ -421,10 +421,7 @@ If nothing fits, report "ticker unrelated to name" (itself mildly informative).
 - **AI-generation metadata:**
   - Check PNG `tEXt` `parameters`/`prompt` chunks, EXIF `Software`, and C2PA. A Stable Diffusion prompt chunk is a free textual description of the image.
   - Absence of these markers means nothing.
-- **NSFW** (required; the consumer app must not show an image that is not `safe`):
-  - Honour pump.fun's `nsfw`/`hidden`/`is_banned` flags when enrichment is available.
-  - Run a local classifier. **NudeNet is AGPL-3.0**, so prefer **Yahoo open_nsfw** (BSD-2) converted to ONNX, unless the AGPL implications are accepted.
-  - The API returns `image.nsfw` as `safe | suggestive | explicit | unknown`, and `image.display_url` only when it is `safe`.
+- **No NSFW / image moderation.** This is an owner decision: TokenSage analyses meaning, and the consumer app decides what to show. Do not add an NSFW classifier.
 - **Optional visual labels (flag `ENABLE_CLIP`, needs a 2 GB worker):**
   - CLIP ViT-B/32 **vision tower only** in ONNX (~0.34 GB file, ~0.5 GB RSS), with **text-label embeddings precomputed offline** for ~300 prompts ("a dog wearing a hat", "Pepe the frog meme", "a squirrel", "a baby hippo", "pixel art", "a photograph of food"…).
   - Report labels only above an absolute cosine threshold (~0.25–0.28; tune it), marked "visual guess".
@@ -486,7 +483,7 @@ Tweet text is fed back through S1–S5 and S8. **The tweet is often the "meaning
   - Version the weights.
 
 ### 5.10 Taxonomy (multi-label; keep it in a YAML config, not code)
-`animal/{dog,cat,frog,monkey,hippo,squirrel,bird,bear_bull,fish,other}` · `meme_template/{pepe_wojak_chad,x_wif_hat,chill_guy,npc,brainrot,copypasta,other}` · `ai_agent` · `political` · `celebrity/{elon,musician,athlete,streamer_kol,other}` · `news_event` · `food_object_abstract` · `regional_language` · `crypto_native/{slang,pumpfun_meta,cto,utility_claim}` · `derivative` (with subtypes `copycat`, `template_family`, `sequel`, `homoglyph_spoof`, `logo_reuse`) · `humor_nsfw_offensive`.
+`animal/{dog,cat,frog,monkey,hippo,squirrel,bird,bear_bull,fish,other}` · `meme_template/{pepe_wojak_chad,x_wif_hat,chill_guy,npc,brainrot,copypasta,other}` · `ai_agent` · `political` · `celebrity/{elon,musician,athlete,streamer_kol,other}` · `news_event` · `food_object_abstract` · `regional_language` · `crypto_native/{slang,pumpfun_meta,cto,utility_claim}` · `derivative` (with subtypes `copycat`, `template_family`, `sequel`, `homoglyph_spoof`, `logo_reuse`) · `humor_crude_offensive`.
 
 ---
 
@@ -552,13 +549,13 @@ Analysis depth is chosen **per request** by the consumer:
 
 | Depth | Work | Cost |
 |---|---|---|
-| **basic** | resolve; metadata; S1–S5 on name, ticker, description; X link parse, snowflake time and reuse count (no X fetch); image fetch + hashes + near-duplicates + NSFW; on-demand copycat lookup; S9/S10 | ~300 ms CPU + a few fetches; never any paid call |
+| **basic** | resolve; metadata; S1–S5 on name, ticker, description; X link parse, snowflake time and reuse count (no X fetch); image fetch + hashes + near-duplicates; on-demand copycat lookup; S9/S10 | ~300 ms CPU + a few fetches; never any paid call |
 | **full** (default) | everything in basic, plus OCR, the X fetch chain (§4.3), trend matching and news confirmation, optional CLIP | seconds; the paid X fallback only here, under a daily cap |
 
 **What never changes and is cached forever:**
 - on-chain name, symbol, uri, creator and creation time;
 - the metadata JSON (by CID);
-- image hashes, OCR and NSFW verdict (by image CID or content hash);
+- image hashes and OCR (by image CID or content hash);
 - the first-seen snapshot of a linked tweet.
 
 **What changes, and the default `max_age` before a request triggers re-analysis:**
@@ -630,7 +627,7 @@ Recommended client behaviour: on `200`, use the result; on `202`, retry the same
 
 Upstream failures *after* the token is resolved (IPFS down, X blocked, OCR crash) are **not errors**: they produce `status: "partial"` with the problem listed in `errors` and explained in `caveats`.
 
-**Images:** the API never proxies image bytes (Render's Hobby workspace includes only 5 GB/month of bandwidth). `analysis.image` carries the gateway URL and the NSFW verdict. **The consumer must not display an image unless `nsfw == "safe"`**; for anything else `image.display_url` is `null`.
+**Images:** the API never proxies image bytes (Render's Hobby workspace includes only 5 GB/month of bandwidth). `analysis.image.source_url` carries the gateway URL. There is no NSFW screening; the consumer app decides whether and how to display images.
 
 **Optional, later:** a `callback_url` on `POST /v1/tokens:batch`. When a job finishes, TokenSage POSTs the envelope to that URL, signed with an HMAC-SHA256 header using a per-key secret. Only HTTPS, and the callback host goes through the same SSRF guard as any fetch (§10).
 
@@ -646,10 +643,9 @@ Upstream failures *after* the token is resolved (IPFS down, X blocked, OCR crash
 | Pillow + ImageHash + numpy/scipy | ~60 MB |
 | onnxruntime base | ~44 MB |
 | RapidOCR | ~130 MB |
-| open_nsfw ONNX | ~100 MB (est.) |
 | CLIP B/32 vision | ~500 MB |
 
-- **Analyzer without CLIP:** ~400–450 MB, which is tight on 512 MB. Process one image at a time, load OCR lazily, and cap the image pixel count. If it runs out of memory, move the analyzer to Standard (2 GB, $25).
+- **Analyzer without CLIP:** ~300–350 MB, which fits on 512 MB with care. Process one image at a time, load OCR lazily, and cap the image pixel count. If it runs out of memory, move the analyzer to Standard (2 GB, $25).
 - **API:** ~150 MB. It must not import the analysis modules.
 
 ### 6.6 Optional corpus ingester (improves copycat detection)
@@ -704,14 +700,14 @@ create table token_metadata (
 create table token_market (        -- latest bonding-curve / market snapshot (short TTL)
   mint text primary key references token on delete cascade,
   complete boolean, curve_progress real, usd_market_cap double precision,
-  reply_count int, nsfw boolean, hidden boolean, is_banned boolean,
+  reply_count int, hidden boolean, is_banned boolean,
   updated_at timestamptz
 );
 
 create table image (                -- keyed by content, shared across tokens
   content_key text primary key,      -- CID or sha256
   phash bigint, dhash bigint, phash_mirror bigint, pdq bytea,
-  ocr text[], palette text[], nsfw text, labels jsonb, clip vector null, -- pgvector optional
+  ocr text[], palette text[], labels jsonb, clip vector null, -- pgvector optional
   width int, height int, animated boolean, analyzed_at timestamptz
 );
 create index on image (phash);
@@ -992,7 +988,7 @@ Deploy a throwaway Starter worker (or use the Render shell) that runs `scripts/s
 
 ### Phase 3: Basic-depth understanding engine (the heart)
 - S1–S5, S7 (parse, snowflake, reuse only), S9 and S10, with the §3 schema.
-- **Image:** hashes, near-dup and NSFW.
+- **Image:** hashes and near-duplicates.
 - On-demand copycat lookups (frontend-api search, DexScreener search, own DB).
 - Packaged knowledge: the slang YAML, CLDR emoji, WordNet-derived class lists (built by a script in `scripts/`), and a seed `known_coin` table.
 - **Golden test set** `tests/golden/*.yaml`: ≥ 60 hand-written cases covering every pattern in §2.2 and every pitfall in research. They run against the engine directly (raw name, symbol, description, link as input), so they need no network. Must include:
@@ -1006,7 +1002,7 @@ Deploy a throwaway Starter worker (or use the Render shell) that runs `scripts/s
 - all golden cases and recorded end-to-end cases pass;
 - p95 engine CPU for basic depth is under 300 ms;
 - cold `depth=basic` p95 is under 4 s from Render;
-- analyzer RSS stays under 450 MB on Starter.
+- analyzer RSS stays under 400 MB on Starter.
 
 ### Phase 4: Full depth
 - X fetch chain with circuit breakers, caching, single-flight and spend cap. The paid fallback stays off by default.
@@ -1063,10 +1059,7 @@ Deploy a throwaway Starter worker (or use the Render shell) that runs `scripts/s
   - Names, descriptions, tweet text and OCR output are returned as data. Document in `docs/API.md` that **the consumer app must escape them** when displaying them.
   - URL fields (`website`, `telegram`, `twitter`, image URLs) are normalised, and only `https` URLs on non-private hosts are returned. `javascript:`, `data:` and anything unparsable become `null`, with the raw value available only under `include=raw`.
   - The debug pages use Jinja autoescape and a strict CSP header.
-- **NSFW and illegal content:**
-  - `image.display_url` is `null` unless the image is classified `safe`.
-  - Never re-host or cache image bytes beyond processing. Store only hashes and labels.
-  - Honour pump.fun moderation flags when available.
+- **Image content:** there is no NSFW screening (owner decision); `docs/API.md` must say so plainly, so the consumer app knows images are unscreened. Never re-host or cache image bytes beyond processing. Store only hashes, OCR text and labels.
 - **Abuse of the API:**
   - Every `/v1` call needs an API key. Use long random keys, store only their SHA-256, and compare in constant time.
   - Per-key rate limits and daily quotas (`full` and `refresh` cost more), and a global queue limit that returns `503 overloaded`.
@@ -1083,7 +1076,6 @@ Deploy a throwaway Starter worker (or use the Render shell) that runs `scripts/s
   - **Know Your Meme:** do not scrape.
   - **Licences:**
     - Use `anyascii`, not GPL `Unidecode`.
-    - **NudeNet is AGPL**; prefer open_nsfw (BSD).
     - Wiktionary data is CC BY-SA (attribute). Wikidata is CC0.
     - MobileCLIP uses an Apple licence (review).
 - **Not financial advice:** `GET /v1/meta` and `docs/API.md` state that flags and categories are informational only. The consumer app should surface that.
@@ -1170,8 +1162,7 @@ Unless noted, these must be resolved by the Phase 0 smoke test.
 9. Is the Render pricing after the April 2026 change as summarised (Hobby 5 GB egress, Starter $7, Postgres basic-256mb $6)?
 10. What are the real pHash/PDQ/CLIP thresholds on real pump.fun logos? Does the ~18% near-duplicate rate reproduce?
 11. How accurate is RapidOCR on stylized meme logos (only clean synthetic text was tested)?
-12. Which NSFW model, licence-wise (open_nsfw vs NudeNet AGPL)?
-13. **Owner decisions:** whether to enable the paid X fallback and its daily cap; the ToS risk appetite for unofficial X mirrors and the pump.fun frontend API.
+12. **Owner decisions:** whether to enable the paid X fallback and its daily cap; the ToS risk appetite for unofficial X mirrors and the pump.fun frontend API.
 
 ---
 
@@ -1189,7 +1180,7 @@ Run them with: `cd docs/reference && python -m pytest -q`.
 ## Appendix B: Research reports
 1. `docs/research/01-pumpfun-data-sources.md`: frontend APIs and real payloads, feeds and vendors, on-chain program and IDL details, metadata/IPFS, volume, pitfalls.
 2. `docs/research/02-x-twitter-access.md`: official API pricing 2026, free mirrors with schemas, paid scrapers, communities, URL shapes, signals, tiered strategy, smoke-test commands.
-3. `docs/research/03-understanding-techniques.md`: normalization, segmentation benchmarks, lexicons/APIs, fuzzy and phonetic matching, trend sources, taxonomy, image hashing/OCR/NSFW measurements, local models, explainable output, library table with licences and RAM.
+3. `docs/research/03-understanding-techniques.md`: normalization, segmentation benchmarks, lexicons/APIs, fuzzy and phonetic matching, trend sources, taxonomy, image hashing/OCR/NSFW measurements (NSFW is out of scope; see §5.6), local models, explainable output, library table with licences and RAM.
 4. `docs/research/04-render-platform.md`: Blueprint field reference, pricing, Python/Docker specifics, worker/cron/deploy semantics, memory, gotchas.
 
 > **Research caveat:** the research sandbox could not reach pump.fun, IPFS gateways, Solana RPCs, X or its mirrors, or Wikimedia/CoinGecko directly. Findings come from official repos (pump-fun/pump-public-docs IDLs as of 2026-09-29, render-oss/skills), the source code of the relevant open-source tools, captured real payloads in public repos, and 2026 web sources. Hence Phase 0.
