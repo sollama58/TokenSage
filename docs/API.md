@@ -56,7 +56,7 @@ GET /v1/tokens/{ca}?depth=full&wait=10
 
 | HTTP | Meaning | What to do |
 |---|---|---|
-| `200` | Analysis in body. `status` is `complete`, `partial` (some upstream source failed; see `errors` and `analysis.caveats`) or `failed` | Use it |
+| `200` | Analysis in body. `status` is `complete`, `partial` (some upstream source failed; see `errors` and `analysis.caveats`) or `failed` (the analysis job failed; `errors[0].detail` says why, `job_id` names the job). A failure is reported as `failed` for 10 minutes without starting a new job or spending quota; pass `refresh=true` to retry at once. The same applies per item in a batch | Use it; for `failed`, retry later or with `refresh=true` |
 | `202` | Not ready yet. Body has `status: "pending"`, a `job_id`, and `stale_analysis` if an older result exists | Retry the same URL after `Retry-After` seconds (≈3 s), or poll `GET /v1/jobs/{job_id}`. Give up after ~60 s total |
 | `400` | `invalid_ca`: not a Solana address; `invalid_callback_url` (batch only) | Don't retry |
 | `401` | `unauthorized` | Fix the key |

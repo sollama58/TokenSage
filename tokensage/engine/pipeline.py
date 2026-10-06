@@ -24,7 +24,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.9.0-full"
+RULES_VERSION = "0.10.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -169,6 +169,9 @@ def _lexicon_evidence(
     # words the name was actually written with (before compound splitting): a 1-2 letter
     # match such as "xi" only counts when it was its own word, not a piece of "robotaxi"
     written = set(n.name_clean.split())
+    named_words: set[str] = set()  # words of entity/slang matches in the name
+    head = _head_word(n)
+    head_named = False  # an entity in the name covers its head word
     for where, text, factor, *note in passes:
         if not text:
             continue
@@ -176,6 +179,14 @@ def _lexicon_evidence(
         for h in lexicon.find(text, k):
             if where == "name" and len(h.surface) <= 2 and h.surface not in written:
                 continue
+            if where == "name" and h.kind != "wordnet":
+                named_words.update(h.surface.split())
+                if head and h.kind == "entity" and head in h.surface.replace(" ", ""):
+                    head_named = True
+            if where == "symbol" and h.kind == "wordnet" and h.surface in named_words:
+                continue  # the ticker repeats a word of a named match ("HAWK" of Hawk Tuah)
+            if where == "symbol" and h.kind == "entity" and head_named:
+                continue  # the name says what it is; a punning ticker ($DOGE) is secondary
             hk = (where, h.surface, h.kind)
             if hk in seen_hits:
                 continue
@@ -204,6 +215,7 @@ def _lexicon_evidence(
                     source=f"entities:{e.label}",
                     score=round(0.45 + 0.45 * e.popularity, 3),
                     categories=list(e.categories),
+                    surface=h.surface,
                 )
                 for cat in e.categories:
                     evs.append(
@@ -582,7 +594,26 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
     is_famous = any(known_coins.is_self(m, n) for m in matches)
     evidence += known_coins.evidence_for(matches, n, k)
-    evidence += known_coins.family_evidence(n, k)
+    self_symbols = {m.coin.symbol for m in matches if known_coins.is_self(m, n)}
+    if self_symbols:
+        # the famous coin itself (exact name and ticker): its own words ("wif" in Dogwifhat,
+        # "inu" in Shiba Inu) do not make it a derivative of anything
+        evidence = [
+            e
+            for e in evidence
+            if not (e.kind in ("marker", "lexicon") and e.label.startswith("derivative/"))
+        ]
+    for ev in known_coins.family_evidence(n, k):
+        # the template's own parent ("Dogwifhat" for the wif-hat family) is not derivative
+        if ev.referent is not None and ev.source.startswith("templates:") and self_symbols:
+            parent = next(
+                (f.parent for f in k.families if ev.source == f"templates:{f.name}"), None
+            )
+            if parent in self_symbols:
+                continue
+        evidence.append(ev)
+    head = _head_word(n)
+    _weight_by_position(evidence, head)
 
     tk = ticker.explain(n, k)
 
@@ -676,9 +707,17 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         extra_caveats.append("the linked tweet or account no longer exists")
     if depth == "full" and ocr_err and inp.image_bytes:
         extra_caveats.append(f"OCR unavailable: {ocr_err}")
-    context = _context(pair, xa, recent_copies, trend_hits)
+    context = _context(pair, recent_copies, trend_hits)
     summary, caveats = summarize(
-        inp.name, n.ticker or inp.symbol, agg, tk.text, extra_caveats, context=context
+        inp.name,
+        n.ticker or inp.symbol,
+        agg,
+        tk.text,
+        extra_caveats,
+        context=context,
+        framing=_framing(n, head, agg, k),
+        narrative=_narrative(inp, xa),
+        rival=any(m.code == "marker:rival" for m in n.markers),
     )
     return EngineOutput(
         normalized=n,
@@ -733,14 +772,109 @@ def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
     return out
 
 
+# Words that never carry a coin's subject on their own.
+_HEAD_STOP = {
+    "coin", "token", "sol", "solana", "inu", "hat", "cap", "beanie", "edition", "fun", "pump",
+    "meme", "official", "the", "a", "an", "of", "on", "x", "ai", "dao", "v2", "2", "cto", "army",
+    "gang", "club", "wif", "killer", "slayer", "season", "szn", "mode", "moon", "rocket",
+    "mania", "fever", "summer", "winter", "era", "vibes", "energy", "maxi", "king", "queen",
+    "god", "lord", "boss", "time", "life", "world", "nation", "party", "money", "cash", "bag",
+}  # fmt: skip
+
+
+def _head_word(n: Normalized) -> str | None:
+    """The head of the name: in "Elon's Cat" it is "cat" (the coin is a cat), in "Trump Dog"
+    "dog". The last content word, by English compound order."""
+    for t in reversed(n.name_tokens):
+        if len(t) >= 3 and t not in _HEAD_STOP and t.isalpha():
+            return t
+    return None
+
+
+def _covers(ref: ReferentCandidate, head: str) -> bool:
+    s = (ref.surface or "").lower()
+    return head in s.split() or (len(head) >= 4 and head in s.replace(" ", ""))
+
+
+def _weight_by_position(evidence: list[Ev], head: str | None) -> None:
+    """A referent that covers the head word is what the coin is ("Elon Pepe" is a Pepe);
+    one found only in a modifier is its theme ("Elon's Cat" is a cat tied to Elon)."""
+    if not head:
+        return
+    done: set[int] = set()
+    for ev in evidence:
+        r = ev.referent
+        if r is None or r.surface is None or ev.where != "name" or id(r) in done:
+            continue
+        done.add(id(r))
+        factor = 1.1 if _covers(r, head) else 0.85
+        r.score = round(min(0.98, r.score * factor), 3)
+    for ev in evidence:
+        if ev.referent is not None and ev.label == "referent" and ev.where == "name":
+            ev.weight = ev.referent.score
+
+
+_HEAD_PHRASE = {
+    "animal/dog": "a dog coin", "animal/cat": "a cat coin", "animal/frog": "a frog coin",
+    "animal/monkey": "a monkey coin", "animal/hippo": "a hippo coin",
+    "animal/squirrel": "a squirrel coin", "animal/bird": "a bird coin",
+    "animal/bear_bull": "a bear/bull coin", "animal/fish": "a fish coin",
+    "animal/other": "an animal coin", "food": "a food coin", "vehicle": "a vehicle coin",
+    "body_part": "a body-part coin",
+}  # fmt: skip
+
+
+def _framing(n: Normalized, head: str | None, agg: Aggregated, k: Knowledge) -> str | None:
+    """ "a cat coin" when the referent is only the modifier of the name, so the summary
+    says "a cat coin tied to Elon Musk" rather than "refers to Elon Musk"."""
+    r = agg.referent
+    if not head or r is None or r.surface is None or _covers(r, head):
+        return None
+    for cls in lexicon.wordnet_classes_for(head, k):
+        phrase = _HEAD_PHRASE.get(cls)
+        if phrase:
+            return phrase
+    return None
+
+
+def _narrative(inp: EngineInput, xa: xsignals.XAssessment | None) -> str | None:
+    """The post a coin was launched on, when its X link points at someone else's earlier
+    post (directly, or by replying to or quoting it). For many coins this *is* the story."""
+    if xa is None or xa.status != "ok" or inp.created_at is None:
+        return None
+    own = (xa.author_handle or "").lower()
+    cands: list[tuple[str, str | None, str | None, datetime | None, str]] = []
+    if xa.relation == "narrative_reference" and inp.tweet is not None:
+        t = inp.tweet
+        cands.append(("posted", t.author_handle, t.author_name, t.created_at, t.text or ""))
+    for verb, r in (("replied to a post by", xa.replied_to), ("quoted a post by", xa.quoted)):
+        if r is not None and r.status == "ok" and (r.author_handle or "").lower() != own:
+            cands.append((verb, r.author_handle, r.author_name, r.created_at, r.text or ""))
+    for verb, handle, name, when, text in cands:
+        gap = (_aware(inp.created_at) - _aware(when)).total_seconds() if when else None
+        if gap is not None and gap <= 0:
+            continue
+        who = f"@{handle}" + (
+            f" ({name})" if name and name.lower() != (handle or "").lower() else ""
+        )
+        gist = " ".join(text.split())[:140]
+        if verb == "posted":
+            lead = (
+                f"launched {_dur(gap)} after {who} posted" if gap else f"its X link is {who}'s post"
+            )
+        else:
+            lead = f"its X post {verb} {who}" + (f" from {_dur(gap)} before launch" if gap else "")
+        return f'{lead}: "{gist}"' if gist else lead
+    return None
+
+
 def _context(
     pair: pairing.PairAssessment | None,
-    xa: xsignals.XAssessment | None,
     recent_copies: list[RecentCopy],
     trend_hits: list[trends.TrendHit],
 ) -> list[str]:
-    """The launch context in a few clauses, so the summary reads the whole picture: what
-    it trades against, what its X link points at, what it copies, what is trending."""
+    """The launch context in a few clauses: what it trades against, what it copies, what is
+    trending. (The X post it rides is its own sentence, see _narrative.)"""
     out: list[str] = []
     if pair is not None and pair.meaningful:
         what = f"the tokenized ${pair.underlying} stock" if pair.underlying else "that token"
@@ -748,15 +882,6 @@ def _context(
             f"trades against {pair.label()} ({what})"
             + (", and its name builds on it" if pair.builds_on else "")
         )
-    if xa is not None and xa.status == "ok":
-        for verb, r in (("replies to", xa.replied_to), ("quotes", xa.quoted)):
-            if r is not None and r.author_handle:
-                gist = f': "{r.text[:80]}"' if r.text else ""
-                out.append(f"its X post {verb} @{r.author_handle}{gist}")
-        if xa.relation == "narrative_reference" and xa.author_handle:
-            out.append(f"it links an earlier post by @{xa.author_handle} (borrowed narrative)")
-        elif xa.relation == "spoofed":
-            out.append("its X link claims an author the post does not have")
     if recent_copies:
         c = min(recent_copies, key=lambda r: r.age_s)
         out.append(f"copies {c.what} ({c.via}) launched {_dur(c.age_s)} earlier")

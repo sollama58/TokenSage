@@ -138,6 +138,11 @@ def _json(name: str) -> Any:
         return json.load(f)
 
 
+def _wordnet(ignore: set[str]) -> dict[str, list[str]]:
+    raw = _json("wordnet_classes.json")
+    return {cls: [w for w in words if w not in ignore] for cls, words in raw.items()}
+
+
 def _stocks() -> tuple[dict[str, Stock], list[Entity]]:
     """Stocks and the lexicon entities they become: the company name (unless it is a common
     word), extra aliases, the ticker (unless it is a word) and the xStock ticker (TSLAx)."""
@@ -238,7 +243,7 @@ def load_knowledge() -> Knowledge:
         ticker_suffixes=[str(s).upper() for s in t["ticker"]["suffixes"]],
         ticker_min_base=int(t["ticker"].get("min_base_len", 3)),
         scoring={k: float(v) for k, v in t["scoring"].items()},
-        wordnet=_json("wordnet_classes.json"),
+        wordnet=_wordnet(set(str(w).lower() for w in t.get("wordnet_ignore") or [])),
         emoji=_json("cldr_emoji_en.json"),
         versions={"lexicon": "2026-10-06.2", "known_coins": "seed-2026-10-06"},
     )

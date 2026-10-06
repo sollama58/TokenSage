@@ -143,9 +143,9 @@ cases:
       agrees: true
       verdict: about_this_coin
 
-  - id: name_without_its_own_referent_is_only_related
-    # "Justice for Peanut" alone does not say which Peanut; the post does, so the match is
-    # partial (one name word, no referent of the token's own to agree with)
+  - id: name_word_gives_a_referent_the_post_agrees_with
+    # "peanut" on its own resolves to Peanut the squirrel (a distinctive word of a known
+    # coin's name), and the post is about the same squirrel: the two agree
     token: {name: "Justice for Peanut", symbol: JFP, logo: null}
     link: tweet
     tweet:
@@ -155,7 +155,7 @@ cases:
       hours_before_token: 20
     expect:
       name_how: segment
-      verdict: related
+      verdict: about_this_coin
       flags_exclude: [x_content_mismatch]
 
   - id: quote_tweet_text_counts

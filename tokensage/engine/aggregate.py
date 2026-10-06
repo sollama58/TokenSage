@@ -94,6 +94,7 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
     # referent: noisy-OR over candidates with the same label
     rc: dict[str, ReferentCandidate] = {}
     rcomp: dict[str, float] = {}
+    surf: dict[str, str] = {}  # first matched words seen for a label, whichever row
     voted: set[tuple[str, str]] = set()  # one vote per (source, referent) however many rows
     for ev in uniq:
         r = ev.referent
@@ -108,6 +109,8 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
         rcomp[r.label] = rcomp.get(r.label, 1.0) * (1 - w)
         if r.label not in rc or r.score > rc[r.label].score:
             rc[r.label] = r
+        if r.surface and r.label not in surf:
+            surf[r.label] = r.surface
     ranked = sorted(((1 - c, lbl) for lbl, c in rcomp.items()), reverse=True)
     referent = runner = None
     caveats: list[str] = []
@@ -120,11 +123,12 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
             source=rc[top_l].source,
             score=round(min(cap, top_s), 3),
             categories=rc[top_l].categories,
+            surface=surf.get(top_l),
         )
         if len(ranked) > 1:
             s2, l2 = ranked[1]
             # a copy: rc[l2] is the candidate object shared with the evidence entries
-            runner = dataclasses.replace(rc[l2], score=round(s2, 3))
+            runner = dataclasses.replace(rc[l2], score=round(s2, 3), surface=surf.get(l2))
             if top_s - s2 < k.scoring.get("referent_ambiguity_gap", 0.1) and s2 >= 0.3:
                 caveats.append(
                     f"referent is ambiguous: '{top_l}' ({top_s:.2f}) vs '{l2}' ({s2:.2f})"

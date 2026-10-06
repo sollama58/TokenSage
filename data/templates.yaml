@@ -14,6 +14,8 @@ markers:
   - {pattern: '(?i)\b(?:ai|agent)\b$', code: "marker:ai-suffix", kind: template_family, weight: 0.3}
   - {pattern: '(?i)\b(?:inu)\b', code: "marker:inu", kind: template_family, weight: 0.45}
   - {pattern: '(?i)\b(?:wif)\b', code: "marker:wif", kind: template_family, weight: 0.5}
+  # the name sets itself against its subject ("Doge Killer", "Anti Pepe", "Not Peanut")
+  - {pattern: '(?i)(?:\b(?:killer|slayer|anti|versus|vs\.?)\b|^not\b)', code: "marker:rival", kind: null, weight: 0.0}
 
 # Template families: a compact-name regex, the parent coin it derives from, and labels.
 families:
@@ -30,6 +32,10 @@ ticker:
   prefixes: [BABY, B, MINI, LIL, V2, NEW, REAL, OG, THE]
   suffixes: ["2", "20", "3", "V2", "INU", "AI", "SOL", "X", "COIN", "CTO", "OG"]
   min_base_len: 3
+
+# WordNet words whose everyday meaning in a coin name is not the animal/food sense.
+wordnet_ignore: [killer, kid, kids, monster, fly, buck, bucks, seal, ram, mole, bat, chick, jack,
+                 crane, swallow, kite, drone, fluke, sole, perch, pike, bass, ray, skate]
 
 # Scoring knobs (guide §5.9). Tune after calibration (Phase 6).
 scoring:

@@ -68,7 +68,7 @@ entities:
   - {label: Moo Deng (hippo), kind: famous_animal, aliases: [moo deng, moodeng, mudeng], categories: [animal/hippo], desc: "viral baby pygmy hippo, Thailand, 2024", popularity: 0.8}
   - {label: Peanut (squirrel), kind: famous_animal, aliases: [peanut the squirrel, peanut squirrel, pnut the squirrel], categories: [animal/squirrel], desc: "pet squirrel euthanised by NY officials, 2024", popularity: 0.8}
   - {label: Pesto (penguin), kind: famous_animal, aliases: [pesto, pesto the penguin], categories: [animal/bird], desc: "giant king penguin chick, Melbourne aquarium, 2024", popularity: 0.5}
-  - {label: Doge (Kabosu), kind: famous_animal, aliases: [kabosu], categories: [animal/dog], desc: "the Shiba Inu behind the Doge meme (died 2024)", popularity: 0.7}
+  - {label: Doge (Kabosu), kind: famous_animal, aliases: [kabosu, doge], categories: [animal/dog, meme_template/other], desc: "the Shiba Inu behind the Doge meme / Dogecoin (died 2024)", popularity: 0.7}
   - {label: Grumpy Cat, kind: famous_animal, aliases: [grumpy cat], categories: [animal/cat], desc: "famous cat meme", popularity: 0.5}
   - {label: Harambe, kind: famous_animal, aliases: [harambe], categories: [animal/monkey], desc: "gorilla killed at Cincinnati zoo, 2016 meme", popularity: 0.6}
   - {label: Fred (raccoon), kind: famous_animal, aliases: [fred the raccoon], categories: [animal/other], desc: "raccoon seized with Peanut", popularity: 0.4}
