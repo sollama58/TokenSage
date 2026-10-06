@@ -13,6 +13,8 @@ _WHERE_FACTOR = {"description": "description_factor", "image": None, "x": None}
 # Labels about the coin's context, not its subject: they score on their own but do not
 # lift their parent (a coin paired against BONK is not thereby a crypto in-joke coin).
 NO_PARENT = {"crypto_native/paired_ecosystem"}
+# Evidence kinds that only say what a word usually means, not what this coin refers to.
+DICTIONARY_KINDS = {"wordnet", "emoji"}
 
 
 @dataclass
@@ -54,6 +56,7 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
     # per-label noisy-OR plus source-diversity bonus
     comp: dict[str, float] = {}
     wheres: dict[str, set[str]] = {}
+    named: set[str] = set()  # labels with evidence beyond dictionary words
     for ev in uniq:
         if ev.label not in labels:
             continue
@@ -67,11 +70,18 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
         for t in targets:
             comp[t] = comp.get(t, 1.0) * (1 - w)
             wheres.setdefault(t, set()).add(ev.where)
+            if ev.kind not in DICTIONARY_KINDS:
+                named.add(t)
     scores: dict[str, float] = {}
+    dict_cap = k.scoring.get("wordnet_only_cap", 0.6)
     for label, c in comp.items():
         conf = 1 - c
         extra = max(0, len(wheres.get(label, set())) - 1)
         conf = min(cap, conf + bonus * min(extra, 2))
+        if label not in named:
+            # "ani is a bird" and "🐿" are dictionary senses, not knowledge of this coin: a
+            # label they alone support never outranks one a named entity or coin supports
+            conf = min(conf, dict_cap)
         scores[label] = round(conf, 3)
 
     # conflict: several animal species -> keep the top one strong, soften the rest

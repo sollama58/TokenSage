@@ -111,6 +111,8 @@ class Knowledge:
     emoji: dict[str, list[str]]
     versions: dict[str, str] = field(default_factory=dict)
     stocks: dict[str, Stock] = field(default_factory=dict)  # by compact ticker
+    # WordNet words that are also given names / surnames: their dictionary sense is weak
+    name_words: frozenset[str] = frozenset()
 
     # -- derived indexes
     def coin_by_symbol(self) -> dict[str, list[KnownCoin]]:
@@ -251,5 +253,6 @@ def load_knowledge() -> Knowledge:
         scoring={k: float(v) for k, v in t["scoring"].items()},
         wordnet=_wordnet(set(str(w).lower() for w in t.get("wordnet_ignore") or [])),
         emoji=_json("cldr_emoji_en.json"),
-        versions={"lexicon": "2026-10-06.2", "known_coins": "seed-2026-10-06"},
+        name_words=frozenset(str(w).lower() for w in t.get("wordnet_name_words") or []),
+        versions={"lexicon": "2026-10-06.3", "known_coins": "seed-2026-10-06"},
     )

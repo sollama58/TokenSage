@@ -300,3 +300,32 @@ cases:
   - name: Coin
     symbol: COIN
     no_referent: true
+  # ---------------------------------------------------------------- dictionary senses vs names
+  - name: Grok Companion Ani        # "ani" is a cuckoo in WordNet, and Grok's companion here
+    symbol: ANI
+    referent: Grok
+    top_category: ai_agent           # the bird sense survives only as a weak label
+  - name: Baby Shark                # a song; "baby" derives nothing from a shark coin
+    symbol: SHARK
+    categories_include: [animal/fish]
+    categories_exclude: [derivative, derivative/template_family]
+  - name: Baby Trump                # ...but "Baby X" of a named entity is the template
+    symbol: BTRUMP
+    referent: Trump
+    categories_include: [derivative/template_family, political]
+  - name: Department of Government Efficiency   # the DOGE pun: not a dog coin
+    symbol: DOGE
+    referent: Government Efficiency
+    categories_include: [political]
+    categories_exclude: [animal/dog]
+    copy_of_includes: [DOGE]
+  - name: Gork                      # the subject is unknown; Elon in the description is a theme
+    symbol: GORK
+    description: "elons dumb ai"
+    no_referent: true
+    categories_include: [celebrity/elon]
+    caveats_include: ["appears only in the description"]
+  - name: Zeus the Dog              # dictionary-only labels cap at 0.6 but still lead
+    symbol: ZEUS
+    top_category: animal
+    categories_include: [animal/dog]

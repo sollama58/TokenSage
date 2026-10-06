@@ -37,6 +37,14 @@ ticker:
 wordnet_ignore: [killer, kid, kids, monster, fly, buck, bucks, seal, ram, mole, bat, chick, jack,
                  crane, swallow, kite, drone, fluke, sole, perch, pike, bass, ray, skate]
 
+# WordNet words that are also common given names, surnames or stage names. In a coin name
+# they usually name someone ("Ani", Grok's companion; "Drake"; "Kirk"), not the animal or
+# food, so their dictionary sense counts at half weight (scoring.name_word_factor).
+wordnet_name_words: [ani, drake, kirk, chase, hunter, robin, jay, wren, raven, rose, olive,
+                     basil, ginger, pepper, candy, brandy, sherry, rocky, finch, martin, sage,
+                     lily, daisy, iris, violet, poppy, honey, kit, colt, fawn, jade, ruby, pearl,
+                     amber, coco, kobe, tucker, lark, bo, pike, reed, heath, cliff, rex, remy]
+
 # Scoring knobs (guide §5.9). Tune after calibration (Phase 6).
 scoring:
   description_factor: 0.6     # evidence found only in the description is worth 0.6x
@@ -50,3 +58,6 @@ scoring:
   fuzzy_threshold: 86
   logo_phash_same: 8
   logo_phash_edited: 14
+  wordnet_only_cap: 0.6       # a label backed only by dictionary words (WordNet, emoji) caps here
+  name_word_factor: 0.5       # a WordNet word that is also a given name counts at this factor
+  framing_min_confidence: 0.5 # "a cat coin tied to X" needs the head word's class at least this strong

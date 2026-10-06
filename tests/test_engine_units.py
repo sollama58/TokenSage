@@ -203,3 +203,75 @@ def test_cached_logo_hashes_are_still_compared() -> None:
     inp.logo_features = f  # no image bytes this run: hashes from cache
     out = run_basic(inp)
     assert out.image.near and any(e.kind == "image_hash" for e in out.evidence)
+
+
+# ----------------------------------------------------------------- dictionary senses vs names
+
+
+def _basic(name: str, symbol: str, description: str | None = None):  # type: ignore[no-untyped-def]
+    from datetime import UTC, datetime
+
+    return run_basic(
+        EngineInput(
+            mint="So11111111111111111111111111111111111111112",
+            name=name,
+            symbol=symbol,
+            description=description,
+            image_bytes=None,
+            created_at=datetime(2026, 10, 1, tzinfo=UTC),
+        )
+    )
+
+
+def test_dictionary_only_label_is_capped_and_name_word_halved() -> None:
+    k = load_knowledge()
+    out = _basic("Grok Companion Ani", "ANI")
+    cats = dict(out.agg.categories)
+    assert cats.get("animal/bird", 0) < k.scoring["wordnet_only_cap"]
+    assert cats["ai_agent"] > cats.get("animal/bird", 0)
+    bird = [e for e in out.evidence if e.label == "animal/bird" and e.kind == "wordnet"]
+    assert bird and bird[0].weight <= 0.55 * k.scoring["name_word_factor"] + 1e-9
+    assert "given name" in bird[0].detail
+    # the framing follows the scores: not "a bird coin tied to Grok"
+    assert "bird coin" not in out.summary
+    assert "refers to Grok" in out.summary
+
+
+def test_dictionary_only_cap_keeps_plain_animal_coins() -> None:
+    out = _basic("Zeus the Dog", "ZEUS")
+    cats = dict(out.agg.categories)
+    assert 0.5 <= cats["animal/dog"] <= load_knowledge().scoring["wordnet_only_cap"]
+    assert out.agg.categories[0][0] == "animal"
+
+
+def test_baby_marker_needs_something_to_derive_from() -> None:
+    shark = _basic("Baby Shark", "SHARK")
+    assert not any(lbl.startswith("derivative") for lbl, _ in shark.agg.categories)
+    assert not any(e.label.startswith("derivative/") for e in shark.evidence)
+    trump = _basic("Baby Trump", "BTRUMP")
+    assert "derivative/template_family" in dict(trump.agg.categories)
+    pnut = _basic("Baby PNUT", "BPNUT")
+    assert "derivative/template_family" in dict(pnut.agg.categories)
+
+
+def test_ticker_only_coin_match_does_not_inherit_its_subject() -> None:
+    out = _basic("Department of Government Efficiency", "DOGE")
+    cats = dict(out.agg.categories)
+    assert "animal/dog" not in cats
+    assert out.agg.referent is not None and "Efficiency" in out.agg.referent.label
+    # the pun on Dogecoin is still reported as a reference
+    assert any(e.kind == "known_coin" and e.source == "known_coins:DOGE" for e in out.evidence)
+    assert {c["ticker"] for c in out.copy_of} >= {"DOGE"}
+    # a name that *contains* the coin keeps inheriting ("Mini Doge" is a dog coin)
+    mini = _basic("Mini Doge", "MDOGE")
+    assert "animal/dog" in dict(mini.agg.categories)
+
+
+def test_description_only_referent_is_a_weak_guess() -> None:
+    out = _basic("Gork", "GORK", "elons dumb ai")
+    assert out.agg.referent is not None and out.agg.referent.score < 0.45
+    assert any("appears only in the description" in c for c in out.caveats)
+    assert "weak guess: Elon Musk" in out.summary
+    # the name itself naming the entity is unaffected
+    named = _basic("Elon's Cat", "ECAT")
+    assert named.agg.referent is not None and named.agg.referent.score >= 0.6
