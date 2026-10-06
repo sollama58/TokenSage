@@ -33,6 +33,9 @@ from tokensage.api.schemas import (
     Versions,
     XAuthor,
     XInfo,
+    XMatchField,
+    XMatchImage,
+    XMatchReferent,
     XQuoted,
     XRef,
 )
@@ -45,9 +48,12 @@ from tokensage.api.schemas import (
 from tokensage.api.schemas import (
     TrendTerm as TrendTermOut,
 )
+from tokensage.api.schemas import (
+    XMatch as XMatchOut,
+)
 from tokensage.config import Settings
 from tokensage.engine import image as image_stage
-from tokensage.engine import xsignals
+from tokensage.engine import xmatch, xsignals
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.pipeline import (
     RULES_VERSION,
@@ -300,6 +306,28 @@ async def _cached_image_features(
 # ----------------------------------------------------------------- document
 
 
+def _match_out(m: xmatch.XMatch) -> XMatchOut:
+    return XMatchOut(
+        name=XMatchField(score=m.name.score, how=m.name.how, detail=m.name.detail),
+        ticker=XMatchField(score=m.ticker.score, how=m.ticker.how, detail=m.ticker.detail),
+        image=XMatchImage(
+            score=m.image.score,
+            best_distance=m.image.best_distance,
+            media_checked=m.image.media_checked,
+            detail=m.image.detail,
+        ),
+        referent=XMatchReferent(
+            x_label=m.referent.x_label,
+            x_kind=m.referent.x_kind,
+            agrees=m.referent.agrees,
+            confidence=m.referent.confidence,
+        ),
+        x_categories=[Category(label=lbl, confidence=c) for lbl, c in m.x_categories],
+        fit=m.fit,
+        verdict=m.verdict,  # type: ignore[arg-type]
+    )
+
+
 def _quoted_out(q: xsignals.QuotedAssessment, token_created: datetime | None) -> XQuoted:
     status = q.status if q.status in ("ok", "deleted") else "failed"
     author = None
@@ -478,6 +506,8 @@ def build_document(
                 )
             if xa.quoted is not None:
                 x.quoted = _quoted_out(xa.quoted, r.created_at)
+        if out.x_match is not None and x is not None:
+            x.match = _match_out(out.x_match)
         if out.trend_hits:
             doc_trend = TrendOut(
                 matched=True,
@@ -784,6 +814,10 @@ async def analyze(
         inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
         inp.run_ocr = inp.ocr_lines is None and image_bytes is not None
         inp.trend_index = await fulldepth.trend_index(conn)
+        inp.logo_features = cached_feats
+        inp.x_media = await fulldepth.media_hashes(
+            conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
+        )
         # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
         # worker's other concurrent jobs keep making network progress meanwhile.
         out = await asyncio.to_thread(run_full, inp)

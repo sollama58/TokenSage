@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from tokensage.engine import image as image_stage
-from tokensage.engine import known_coins, lexicon, ocr, ticker, trends, xsignals
+from tokensage.engine import known_coins, lexicon, ocr, ticker, trends, xmatch, xsignals
 from tokensage.engine.aggregate import Aggregated, aggregate
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
@@ -15,7 +15,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.5.0-full"
+RULES_VERSION = "0.6.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -62,6 +62,9 @@ class EngineInput:
     ocr_lines: list[ocr.OcrLine] | None = None  # pre-computed (cached) OCR; None = run it
     run_ocr: bool = False
     trend_index: trends.TrendIndex | None = None
+    x_media: list[xmatch.MediaHash] | None = None  # hashed post images / profile avatar
+    # the logo's hashes when they come from cache instead of image_bytes
+    logo_features: image_stage.ImageFeatures | None = None
 
 
 @dataclass
@@ -87,6 +90,7 @@ class EngineOutput:
     ocr_error: str | None = None
     x: xsignals.XAssessment | None = None
     trend_hits: list[trends.TrendHit] = field(default_factory=list)
+    x_match: xmatch.XMatch | None = None
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -536,6 +540,20 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     if xa:
         for code, sev, detail in xa.flags:
             flags.append(FlagOut(code, sev, detail))
+    x_match: xmatch.XMatch | None = None
+    if depth == "full" and inp.x_kind in ("tweet", "profile"):
+        x_match = _x_match(inp, n, img, k)
+        if x_match.content_fetched and x_match.fit < xmatch.FIT_RELATED:
+            flags.append(
+                FlagOut(
+                    "x_content_mismatch",
+                    "warn",
+                    f"the linked X {inp.x_kind} does not match the token "
+                    f"(fit {x_match.fit:.2f}: {x_match.name.detail}; {x_match.ticker.detail})",
+                )
+            )
+        if xmatch.is_image_match(x_match.image, k):
+            flags.append(FlagOut("x_image_match", "info", x_match.image.detail))
     extra_caveats: list[str] = []
     if img.error and inp.image_bytes:
         extra_caveats.append(f"image could not be analysed: {img.error}")
@@ -562,9 +580,50 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         evidence=agg.evidence,
         depth=depth,
         ocr_lines=ocr_lines,
+        x_match=x_match,
         ocr_error=ocr_err,
         x=xa,
         trend_hits=trend_hits,
+    )
+
+
+def _x_match(
+    inp: EngineInput, n: Normalized, img: image_stage.ImageResult, k: Knowledge
+) -> xmatch.XMatch:
+    """Compare the linked post with the token, keeping the two apart: what the name, ticker
+    and logo mean on their own vs what the post alone is about."""
+    token_only = EngineInput(
+        mint=inp.mint,
+        name=inp.name,
+        symbol=inp.symbol,
+        description=None,
+        image_bytes=inp.image_bytes,
+        created_at=inp.created_at,
+        ctx=inp.ctx,
+    )
+    text = xmatch.post_text(inp.tweet, inp.profile)
+    post_meaning = None
+    if text:
+        post_only = EngineInput(
+            mint=inp.mint,
+            name=None,
+            symbol=None,
+            description=text,
+            image_bytes=None,
+            created_at=inp.created_at,
+            ctx=DbContext(extra_coins=inp.ctx.extra_coins),
+        )
+        post_meaning = _run(post_only, "basic").agg
+    token_meaning = _run(token_only, "basic").agg
+    return xmatch.assess(
+        n,
+        inp.tweet,
+        inp.profile,
+        img.features or inp.logo_features,
+        inp.x_media or [],
+        token_meaning,
+        post_meaning,
+        k,
     )
 
 

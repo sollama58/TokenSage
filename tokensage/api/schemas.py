@@ -135,6 +135,49 @@ class XAuthor(_Model):
     username_changes: int | None = None
 
 
+class XMatchField(_Model):
+    score: float = Field(ge=0, le=1)
+    how: str = Field(
+        description="name: exact|normalized|segment|fuzzy|none; "
+        "ticker: cashtag|bare|hashtag|fuzzy|none"
+    )
+    detail: str
+
+
+class XMatchImage(_Model):
+    score: float = Field(ge=0, le=1)
+    best_distance: int | None = Field(
+        default=None, description="Smallest perceptual-hash Hamming distance to the logo"
+    )
+    media_checked: int = 0
+    detail: str
+
+
+class XMatchReferent(_Model):
+    x_label: str | None = Field(default=None, description="What the post alone is about")
+    x_kind: str | None = None
+    agrees: bool | None = Field(
+        default=None,
+        description="Whether it is the referent the name, ticker and image point to on "
+        "their own; null when either side has no confident referent",
+    )
+    confidence: float = Field(default=0, ge=0, le=1)
+
+
+class XMatch(_Model):
+    """How well the linked X post (or profile) matches the token (depth=full)."""
+
+    name: XMatchField
+    ticker: XMatchField
+    image: XMatchImage
+    referent: XMatchReferent
+    x_categories: list[Category] = Field(
+        default=[], description="Categories of the post text read on its own"
+    )
+    fit: float = Field(ge=0, le=1, description="Overall match, 0-1 (uncalibrated until Phase 6)")
+    verdict: Literal["about_this_coin", "related", "unrelated", "unknown"]
+
+
 class XQuoted(_Model):
     """The tweet the linked tweet quotes (full depth). Often the real narrative: a launch
     post that quote-tweets someone else's earlier post."""
@@ -172,6 +215,10 @@ class XInfo(_Model):
     status: Literal["ok", "deleted", "suspended", "not_fetched", "failed", "none"] = "none"
     quoted: XQuoted | None = Field(
         default=None, description="Present when the linked tweet is a quote tweet (full depth)"
+    )
+    match: XMatch | None = Field(
+        default=None,
+        description="Post/profile vs token comparison (full depth, tweet or profile links)",
     )
 
 

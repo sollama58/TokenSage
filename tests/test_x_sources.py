@@ -370,3 +370,77 @@ def test_deleted_quoted_tweet_is_reported_without_signals() -> None:
     a = xsignals.assess("tweet", "nutdev", launch, None, TOKEN_T, "NUT", "mint", [])
     assert a.quoted is not None and a.quoted.status == "deleted" and a.quoted.text is None
     assert not any(e.kind.startswith("x_quote") for e in a.evidence)
+
+
+# ----------------------------------------------------------------- media for x.match
+
+
+@respx.mock
+async def test_media_urls_are_kept_from_each_source(http: httpx.AsyncClient) -> None:
+    fx = {
+        "code": 200,
+        "status": dict(
+            FX_OK["status"],  # type: ignore[arg-type]
+            media={
+                "photos": [{"url": "https://pbs.twimg.com/media/A.jpg"}],
+                "videos": [{"thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/B.jpg"}],
+            },
+        ),
+    }
+    respx.get(f"{xs.FX}/status/{TID}").mock(return_value=httpx.Response(200, json=fx))
+    t = await xs.fetch_tweet(http, TID)
+    assert t.media_urls == [
+        "https://pbs.twimg.com/media/A.jpg",
+        "https://pbs.twimg.com/ext_tw_video_thumb/B.jpg",
+    ]
+    assert xs.TweetData.from_json(t.to_json()).media_urls == t.media_urls
+    old = t.to_json()
+    old.pop("media_urls")
+    assert xs.TweetData.from_json(old).media_urls == []  # rows cached before this field
+
+    vx = dict(
+        VX_OK,
+        media_extended=[
+            {"type": "image", "url": "https://pbs.twimg.com/media/C.jpg"},
+            {
+                "type": "video",
+                "url": "https://video.twimg.com/x.mp4",
+                "thumbnail_url": "https://pbs.twimg.com/D.jpg",
+            },
+            {"type": "image", "url": "http://insecure/x.jpg"},
+        ],
+    )
+    respx.get(f"{xs.FX}/status/{TID}").mock(return_value=httpx.Response(500))
+    respx.get(f"{xs.VX}/i/status/{TID}").mock(return_value=httpx.Response(200, json=vx))
+    t = await xs.fetch_tweet(http, TID)
+    assert t.media_urls == ["https://pbs.twimg.com/media/C.jpg", "https://pbs.twimg.com/D.jpg"]
+
+    synd = dict(
+        SYND_OK,
+        mediaDetails=[{"media_url_https": f"https://pbs.twimg.com/{i}.jpg"} for i in range(6)],
+    )
+    respx.get(f"{xs.VX}/i/status/{TID}").mock(return_value=httpx.Response(500))
+    respx.get(url__startswith=xs.SYND).mock(return_value=httpx.Response(200, json=synd))
+    t = await xs.fetch_tweet(http, TID)
+    assert len(t.media_urls) == xs.MAX_MEDIA == 4
+
+
+def test_media_selection_for_tweets_and_profiles() -> None:
+    from tokensage import fulldepth
+
+    q = _tweet(id="2", media_urls=["https://pbs.twimg.com/media/Q.jpg"])
+    t = _tweet(media_urls=["https://pbs.twimg.com/media/T.jpg"], quoted=q)
+    assert fulldepth.media_urls(t, None) == [
+        "https://pbs.twimg.com/media/T.jpg",
+        "https://pbs.twimg.com/media/Q.jpg",
+    ]
+    p = xs.ProfileData(
+        handle="a",
+        status="ok",
+        avatar_url="https://pbs.twimg.com/profile_images/1/a_normal.jpg",
+        banner_url="https://pbs.twimg.com/profile_banners/1/2",
+    )
+    assert fulldepth.media_urls(None, p) == [p.avatar_url, p.banner_url]
+    assert fulldepth.media_urls(xs.TweetData(id="1", status="deleted"), None) == []
+    assert fulldepth._small("https://pbs.twimg.com/media/T.jpg").endswith("?name=small")
+    assert "_400x400." in fulldepth._small(p.avatar_url)  # type: ignore[arg-type]

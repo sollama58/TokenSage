@@ -11,6 +11,7 @@ from tokensage.engine.knowledge import Knowledge
 
 _lock = threading.Lock()
 _loaded = False
+_common: frozenset[str] | None = None
 _segmenter = None
 
 # Extra weight for domain words so they beat the English prior (research: "dog w if hat").
@@ -28,6 +29,11 @@ def _ensure_loaded(k: Knowledge) -> None:
 
         seg = Segmenter()
         seg.load()
+        global _common
+        # everyday English by raw frequency, captured before domain words get boosted
+        _common = frozenset(
+            w for w, _ in sorted(seg.unigrams.items(), key=lambda kv: -kv[1])[:20000]
+        )
         for w in k.vocabulary():
             seg.unigrams[w] = max(seg.unigrams.get(w, 0.0), _BOOST)
         # a few compounds we want kept whole
@@ -36,6 +42,13 @@ def _ensure_loaded(k: Knowledge) -> None:
         seg.total = sum(seg.unigrams.values())
         _segmenter = seg
         _loaded = True
+
+
+def common_words(k: Knowledge) -> frozenset[str]:
+    """The 20k most frequent everyday English words (raw frequency, before domain boosts)."""
+    _ensure_loaded(k)
+    assert _common is not None
+    return _common
 
 
 def segment_compact(compact: str, k: Knowledge) -> list[str]:

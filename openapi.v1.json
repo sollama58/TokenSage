@@ -1654,6 +1654,17 @@
             ],
             "title": "Fetch Source"
           },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Post/profile vs token comparison (full depth, tweet or profile links)"
+          },
           "object_time": {
             "anyOf": [
               {
@@ -1744,6 +1755,174 @@
           "ref"
         ],
         "title": "XInfo",
+        "type": "object"
+      },
+      "XMatch": {
+        "additionalProperties": false,
+        "description": "How well the linked X post (or profile) matches the token (depth=full).",
+        "properties": {
+          "fit": {
+            "description": "Overall match, 0-1 (uncalibrated until Phase 6)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Fit",
+            "type": "number"
+          },
+          "image": {
+            "$ref": "#/components/schemas/XMatchImage"
+          },
+          "name": {
+            "$ref": "#/components/schemas/XMatchField"
+          },
+          "referent": {
+            "$ref": "#/components/schemas/XMatchReferent"
+          },
+          "ticker": {
+            "$ref": "#/components/schemas/XMatchField"
+          },
+          "verdict": {
+            "enum": [
+              "about_this_coin",
+              "related",
+              "unrelated",
+              "unknown"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "x_categories": {
+            "default": [],
+            "description": "Categories of the post text read on its own",
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            },
+            "title": "X Categories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "ticker",
+          "image",
+          "referent",
+          "fit",
+          "verdict"
+        ],
+        "title": "XMatch",
+        "type": "object"
+      },
+      "XMatchField": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "how": {
+            "description": "name: exact|normalized|segment|fuzzy|none; ticker: cashtag|bare|hashtag|fuzzy|none",
+            "title": "How",
+            "type": "string"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "score",
+          "how",
+          "detail"
+        ],
+        "title": "XMatchField",
+        "type": "object"
+      },
+      "XMatchImage": {
+        "additionalProperties": false,
+        "properties": {
+          "best_distance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Smallest perceptual-hash Hamming distance to the logo",
+            "title": "Best Distance"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "media_checked": {
+            "default": 0,
+            "title": "Media Checked",
+            "type": "integer"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "score",
+          "detail"
+        ],
+        "title": "XMatchImage",
+        "type": "object"
+      },
+      "XMatchReferent": {
+        "additionalProperties": false,
+        "properties": {
+          "agrees": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether it is the referent the name, ticker and image point to on their own; null when either side has no confident referent",
+            "title": "Agrees"
+          },
+          "confidence": {
+            "default": 0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "x_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Kind"
+          },
+          "x_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the post alone is about",
+            "title": "X Label"
+          }
+        },
+        "title": "XMatchReferent",
         "type": "object"
       },
       "XQuoted": {

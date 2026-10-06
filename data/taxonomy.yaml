@@ -99,6 +99,12 @@ flags:
   - code: borrowed_narrative
     severity: info
     description: The linked tweet is by an unrelated notable account; the coin borrows its narrative.
+  - code: x_content_mismatch
+    severity: warn
+    description: The linked X post or profile was fetched but does not match the token (x.match.fit below 0.2).
+  - code: x_image_match
+    severity: info
+    description: An image in the linked X post (or the linked profile's avatar/banner) is a near-duplicate of the token logo.
   - code: x_link_reused
     severity: warn
     description: The same tweet, handle or community is linked by many other tokens.
