@@ -219,9 +219,8 @@ async def batch(
                 hints=_hints_dict(entry.hints),
             )
         except errors.ApiError as e:
-            if e.code not in ("quota_exceeded", "overloaded"):
-                raise
-            # Reject this item only; items already queued keep their job ids.
+            # Fail this item only (quota/overload rejection, or a recent definitive
+            # failure such as token_not_found); the other items are still answered.
             retry = (e.headers or {}).get("Retry-After")
             items.append(
                 BatchItem(

@@ -210,7 +210,7 @@ before it is visible on-chain.
 
 | Call | Purpose |
 |---|---|
-| `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below). Items are handled one by one: if the daily quota runs out or the queue is full partway through, the remaining items come back as `status: "failed"` with `error: "quota_exceeded"` or `"overloaded"` and `retry_after_s`, while items already queued keep their `job_id` |
+| `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below). Items are handled one by one: if the daily quota runs out or the queue is full partway through, the remaining items come back as `status: "failed"` with `error: "quota_exceeded"` or `"overloaded"` and `retry_after_s`, while items already queued keep their `job_id`. A coin whose analysis failed for good in the last 10 minutes comes back as `status: "failed"` with its code in `error` (`token_not_found`, `not_a_token_mint` or `not_pumpfun`) instead of failing the whole batch |
 | `POST /v1/tokens/{ca}` with `{"hints": {...}}` | Same as the GET, with metadata you already have (see below) |
 | `GET /v1/jobs/{job_id}` | `pending \| running \| done \| failed`, with the result when done. `result.status` is `complete` or `partial`, exactly as `GET /v1/tokens/{ca}` would report it (webhook callbacks carry the same) |
 | `GET /v1/meta` | Schema/rule versions, the full category taxonomy, flag codes, and the disclaimer. Use it instead of hard-coding labels |
