@@ -4,9 +4,11 @@ For the developer of the application that calls TokenSage. The machine-readable 
 `openapi.v1.json` in the repo root, also served live at `GET /openapi.json`; generate a typed
 client from it.
 
-> **Status:** the contract is final for v1; the *analysis content* is a stub until Phase 3 of
-> the build plan lands. Stub responses are schema-valid, carry `versions.rules = "0.0.0-stub"`
-> and say so in `summary`/`caveats`. Integrate against them now; nothing in the shape changes.
+> **Status:** the contract is final for v1. As of Phase 2 the service returns real on-chain and
+> metadata facts (`raw`, `market`, `launchpad`, `image.source_url`, `x.ref` with the linked
+> tweet's creation time, `flags`). The *meaning* fields (`referent`, `categories`, `copy_of`,
+> `trend`, fetched X content, OCR) are still empty until Phases 3–4; `versions.rules` tells
+> you which build produced a document. Nothing in the shape changes.
 
 ## Base URL and auth
 

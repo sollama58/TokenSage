@@ -7,11 +7,14 @@ from collections.abc import AsyncIterator
 
 import asyncpg
 import pytest
+import respx
 
 from tests.conftest import needs_db
+from tests.fixtures.chain import CID_META, FakeChain, install_web, public_resolver
 from tokensage import queue
 from tokensage.config import Settings
 from tokensage.db import create_pool
+from tokensage.net import safe_fetch
 from tokensage.worker import Worker
 
 pytestmark = needs_db
@@ -27,9 +30,21 @@ async def pool(migrated_db: str, clean_tables: None) -> AsyncIterator[asyncpg.Po
         await p.close()
 
 
+@pytest.fixture(autouse=True)
+def _fake_world(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(safe_fetch, "DEFAULT_RESOLVER", public_resolver)
+    chain = FakeChain()
+    chain.add_t22_pump(MINT, "Fear Of Missing Out", "FOMO", f"https://ipfs.io/ipfs/{CID_META}")
+    with respx.mock(assert_all_called=False) as router:
+        install_web(router, chain)
+        yield
+
+
 def _settings(db: str) -> Settings:
     return Settings(
         database_url=db,
+        solana_rpc_url="https://rpc.test/",
+        ipfs_gateways="https://gw1.test,https://gw2.test",
         worker_poll_interval_s=0.1,
         job_max_attempts=2,
         _env_file=None,  # type: ignore[call-arg]

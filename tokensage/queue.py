@@ -32,6 +32,7 @@ class Job:
     attempts: int
     result_version: int | None
     last_error: str | None
+    error_code: str | None = None
 
     @classmethod
     def from_record(cls, r: asyncpg.Record) -> Job:
@@ -44,6 +45,7 @@ class Job:
             attempts=r["attempts"],
             result_version=r["result_version"],
             last_error=r["last_error"],
+            error_code=r["error_code"],
         )
 
 
@@ -122,23 +124,32 @@ async def complete(conn: asyncpg.Connection, job_id: int, result_version: int | 
 
 
 async def fail(
-    conn: asyncpg.Connection, job_id: int, error: str, max_attempts: int, retry_in_s: int = 30
+    conn: asyncpg.Connection,
+    job_id: int,
+    error: str,
+    max_attempts: int,
+    retry_in_s: int = 30,
+    error_code: str | None = None,
 ) -> None:
-    """Retry with a delay until max_attempts, then mark failed."""
+    """Retry with a delay until max_attempts, then mark failed. An error_code marks a
+    definitive failure: no retry, and the API maps the code to a status."""
     await conn.execute(
         """
         update job set
-          status = case when attempts >= $3 then 'failed' else 'pending' end,
+          status = case when attempts >= $3 or $5::text is not null
+                        then 'failed' else 'pending' end,
           run_after = now() + make_interval(secs => $4),
           locked_until = null,
           last_error = left($2, 2000),
-          finished_at = case when attempts >= $3 then now() else null end
+          error_code = $5,
+          finished_at = case when attempts >= $3 or $5::text is not null then now() else null end
         where id = $1
         """,
         job_id,
         error,
         max_attempts,
         retry_in_s,
+        error_code,
     )
     await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
 

@@ -157,7 +157,9 @@ async def get_job(
         ca=job.mint,
         depth=job.depth,  # type: ignore[arg-type]
         result=result,
-        error=job.last_error if job.status == "failed" else None,
+        error=(f"{job.error_code}: " if job.error_code else "") + (job.last_error or "")
+        if job.status == "failed"
+        else None,
         request_id=rid,
     )
 

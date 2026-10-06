@@ -2,7 +2,7 @@
 
 An HTTP API that takes a Solana pump.fun token's **Contract Address (CA)** and explains what the token *means*: its name, ticker, image, description and linked X/Twitter content, with categories, flags, confidence scores and evidence. Built for other applications to call. No external AI APIs; deployed on Render via a Blueprint.
 
-**Status:** Phase 1 done. The `/v1` API contract, job queue, worker and deploy pipeline exist and are tested; analysis results are **stubs** until Phase 3. See the build plan in [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) §9.
+**Status:** Phases 1–2 done. The `/v1` API, job queue, worker and deploy pipeline are tested; a CA is resolved on-chain (mint, pump.fun bonding curve, name/symbol/uri, creation time) and its off-chain metadata and image are fetched safely. The **meaning engine** (categories, referent, copycats, X content) arrives in Phases 3–4; until then `summary` says so. Build plan: [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) §9.
 
 - [`docs/API.md`](docs/API.md): integration guide for the consumer application
 - [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md): full design; [`FABLE_BRIEF.md`](FABLE_BRIEF.md): kickoff brief

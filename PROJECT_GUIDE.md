@@ -1,7 +1,7 @@
 # TokenSage — Project Guide
 
 > **Audience:** the engineer or AI coding agent who will build TokenSage from an empty repo.
-> **Status:** Phase 0 script and Phase 1 (skeleton, stubbed v1 contract, queue, worker, CI) done on 2026-10-06; analysis is a stub until Phase 3. Written 2026-10-05.
+> **Status:** Phases 0–2 built on 2026-10-06 (skeleton, v1 contract, queue, worker, CI, on-chain CA resolution, safe metadata/image fetch with retries). The engine stages (§5) are Phase 3+. Phase 0's smoke test still needs to be *run* from Render. Written 2026-10-05.
 > **Companion material:**
 > - `docs/research/` holds four detailed research reports with sources. This guide is the synthesis; go to the reports for the evidence behind any claim.
 > - `docs/reference/` holds small, **tested** reference implementations: CA validation, the pump.fun bonding-curve address derivation and account decoder, the `CreateEvent` decoder with real captured events, the X URL parser, the tweet-ID date decoder and the syndication token.

@@ -12,6 +12,12 @@ from tokensage.api.schemas import Analysis, Freshness, TokenResponse, UpstreamEr
 from tokensage.config import Settings
 
 DEPTH_RANK = {"basic": 0, "full": 1}
+# analyzer error_code -> (http status, api code)
+DEFINITIVE_CODES = {
+    "token_not_found": (404, "token_not_found"),
+    "not_a_token_mint": (422, "not_a_token_mint"),
+    "not_pumpfun": (422, "not_pumpfun"),
+}
 
 
 def default_max_age(settings: Settings, token_created_at: datetime | None) -> int:
@@ -49,7 +55,8 @@ def _freshness(doc: dict[str, Any], max_age_s: int, from_cache: bool) -> Freshne
 
 
 def _status_for(doc: dict[str, Any]) -> str:
-    return "partial" if doc.get("caveats") and doc.get("_partial") else "complete"
+    caveats = doc.get("caveats") or []
+    return "partial" if any(str(c).startswith("partial:") for c in caveats) else "complete"
 
 
 async def get_or_enqueue(
@@ -107,6 +114,11 @@ async def get_or_enqueue(
                         freshness=_freshness(doc, max_age, from_cache=False),
                         request_id=request_id,
                     )
+            if j and j.status == "failed" and j.error_code in DEFINITIVE_CODES:
+                from tokensage.api import errors
+
+                status, code = DEFINITIVE_CODES[j.error_code]
+                raise errors.ApiError(status, code, j.last_error or code)
             if j and j.status == "failed":
                 return TokenResponse(
                     ca=mint,

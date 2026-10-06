@@ -69,6 +69,8 @@ def settings(migrated_db: str) -> Settings:
         admin_key=ADMIN_KEY,
         inline_analyzer=True,
         default_wait_s=5,
+        solana_rpc_url="https://rpc.test/",
+        ipfs_gateways="https://gw1.test,https://gw2.test",
         worker_poll_interval_s=0.2,
         _env_file=None,  # type: ignore[call-arg]
     )

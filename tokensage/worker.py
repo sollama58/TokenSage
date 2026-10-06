@@ -13,7 +13,8 @@ import traceback
 import asyncpg
 import structlog
 
-from tokensage import analyzer, queue
+from tokensage import queue
+from tokensage.analyzer import AnalyzeFailed, Context, analyze, retry_metadata
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.logging import configure_logging
@@ -29,6 +30,7 @@ class Worker:
         self._wake = asyncio.Event()
         self._current_job_id: int | None = None
         self._listen_conn: asyncpg.Connection | None = None
+        self.ctx = Context.create(settings)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -49,6 +51,7 @@ class Worker:
                     pass
         finally:
             await self._stop_listener()
+            await self.ctx.close()
             log.info("worker.stop")
 
     async def _wait_for_wake(self) -> None:
@@ -101,12 +104,20 @@ class Worker:
         try:
             if job.kind == "analyze":
                 assert job.mint and job.depth
-                version = await analyzer.analyze(conn, job.mint, job.depth)
+                version = await analyze(conn, self.ctx, job.mint, job.depth)
                 await queue.complete(conn, job.id, version)
                 bound.info("job.done", version=version)
+            elif job.kind == "retry_metadata":
+                assert job.mint and job.depth
+                rv = await retry_metadata(conn, self.ctx, job.mint, job.depth)
+                await queue.complete(conn, job.id, rv)
+                bound.info("job.retry_metadata.done", version=rv)
             else:
                 await queue.fail(conn, job.id, f"unknown job kind {job.kind}", max_attempts=1)
                 bound.warning("job.unknown_kind")
+        except AnalyzeFailed as exc:
+            bound.info("job.definitive_failure", code=exc.code, error=str(exc))
+            await queue.fail(conn, job.id, str(exc), max_attempts=1, error_code=exc.code)
         except Exception as exc:  # noqa: BLE001 - a bad token must never kill the loop
             err = "".join(traceback.format_exception_only(type(exc), exc)).strip()
             bound.error("job.error", error=err, attempt=job.attempts)

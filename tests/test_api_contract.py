@@ -6,14 +6,28 @@ import asyncio
 
 import httpx
 import pytest
+import respx
 from pydantic import ValidationError
 
 from tests.conftest import ADMIN_KEY, needs_db
+from tests.fixtures.chain import CID_META, SPL_MINT, FakeChain, install_web, public_resolver
 from tokensage.api.schemas import Analysis, MetaResponse, TokenResponse
+from tokensage.net import safe_fetch
 from tokensage.taxonomy import category_labels, flag_codes
 
-CA = "3arUrpH3nzaRJbbpVgY42dcqSq9A5BFgUxKozZ4npump"
+CA = SPL_MINT
 pytestmark = needs_db
+
+
+@pytest.fixture(autouse=True)
+def _fake_world(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    """The analyzer is real now: give it a fake chain + fake gateways for CA."""
+    monkeypatch.setattr(safe_fetch, "DEFAULT_RESOLVER", public_resolver)
+    chain = FakeChain()
+    chain.add_spl_pump(SPL_MINT, "StreamerCoin", "STREAMER", f"https://ipfs.io/ipfs/{CID_META}")
+    with respx.mock(assert_all_called=False) as router:
+        install_web(router, chain)
+        yield
 
 
 async def test_healthz_no_auth(client: httpx.AsyncClient) -> None:
@@ -40,7 +54,7 @@ async def test_invalid_ca_is_400_before_any_work(client: httpx.AsyncClient, bad:
     assert r.json()["error"]["code"] == "invalid_ca"
 
 
-async def test_full_flow_returns_schema_valid_stub(client: httpx.AsyncClient) -> None:
+async def test_full_flow_returns_schema_valid_analysis(client: httpx.AsyncClient) -> None:
     r = await client.get(f"/v1/tokens/{CA}?wait=5")
     assert r.status_code == 200, r.text
     body = TokenResponse.model_validate(r.json())
@@ -127,9 +141,27 @@ async def test_openapi_exposes_analysis_schema(client: httpx.AsyncClient) -> Non
 
 
 def test_analysis_schema_forbids_unknown_fields() -> None:
-    from tokensage.analyzer import stub_analysis
+    from tokensage.analyzer import build_document
+    from tokensage.resolve.resolver import Resolved
 
-    doc = stub_analysis(CA, "basic").model_dump(mode="json")
+    r = Resolved(
+        mint=CA,
+        token_program="spl-token",
+        is_pumpfun=True,
+        name="n",
+        symbol="s",
+        uri=None,
+        creator=None,
+        bonding_curve=None,
+        complete=False,
+        curve_progress=0.1,
+        is_mayhem=False,
+        quote_mint="SOL",
+        created_at=None,
+        created_at_source=None,
+        onchain_metadata_source="none",
+    )
+    doc = build_document(r, None, "basic").model_dump(mode="json")
     Analysis.model_validate(doc)
     doc["bogus"] = 1
     with pytest.raises(ValidationError):
