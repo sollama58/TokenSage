@@ -52,7 +52,7 @@ services:
   - type: worker
     name: tokensage-analyzer
     runtime: docker
-    plan: starter # -> standard (2 GB) when ENABLE_CLIP=true or on OOM
+    plan: standard # 2 GB: 8 concurrent jobs + RapidOCR (~250 MB) outgrow Starter's 512 MB
     region: oregon
     dockerfilePath: ./Dockerfile
     numInstances: 1
@@ -67,7 +67,7 @@ services:
         value: worker
       - key: WORKER_CONCURRENCY # jobs in flight at once; each holds one DB connection
         value: "8"
-      - key: OCR_CONCURRENCY # RapidOCR is ~250 MB; keep 1 on Starter (512 MB)
+      - key: OCR_CONCURRENCY # RapidOCR is ~250 MB per concurrent read
         value: "1"
       - key: DATABASE_URL
         fromDatabase: { name: tokensage-db, property: connectionString }

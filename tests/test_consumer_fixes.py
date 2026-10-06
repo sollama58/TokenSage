@@ -147,3 +147,39 @@ async def test_include_drops_raw_and_evidence(
         assert raw["analysis"]["evidence"] == [] and raw["analysis"]["raw"]["name"]
         both = (await c.get(f"/v1/tokens/{T22_MINT}", params={"include": "raw, evidence"})).json()
         assert both["analysis"]["evidence"] and both["analysis"]["raw"]["name"]
+
+
+async def test_failed_analysis_is_reported_not_requeued(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    """After a job fails, asking again (single or batch) reports the failure for a while
+    instead of quietly starting a new job and spending quota; refresh=true retries."""
+    install_web(router, _chain())
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        await conn.execute(
+            """insert into job (kind, mint, depth, status, attempts, last_error, finished_at)
+               values ('analyze', $1, 'full', 'failed', 3, 'RpcError: http 503', now())""",
+            T22_MINT,
+        )
+        async with make_client(migrated_db) as c:
+            r = await c.get(f"/v1/tokens/{T22_MINT}", params={"depth": "full", "wait": 2})
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["status"] == "failed" and body["job_id"] is not None
+            assert "RpcError" in body["errors"][0]["detail"]
+            b = await c.post("/v1/tokens:batch", json={"cas": [T22_MINT], "depth": "full"})
+            assert b.status_code == 200, b.text
+            assert b.json()["items"][0]["status"] == "failed"
+            assert await conn.fetchval("select count(*) from job") == 1  # nothing new
+            assert await conn.fetchval("select coalesce(sum(full_calls), 0) from api_usage") == 0
+            r2 = await c.get(
+                f"/v1/tokens/{T22_MINT}", params={"depth": "full", "wait": 10, "refresh": "true"}
+            )
+            assert r2.status_code == 200, r2.text
+            assert r2.json()["status"] == "complete"
+        assert await conn.fetchval("select count(*) from job") >= 2
+    finally:
+        await conn.close()

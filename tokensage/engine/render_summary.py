@@ -28,6 +28,14 @@ def _top_parent(categories: list[tuple[str, float]]) -> tuple[str, float] | None
     return None
 
 
+def _verb(score: float) -> str:
+    if score >= 0.8:
+        return "refers to"
+    if score >= 0.6:
+        return "most likely refers to"
+    return "may refer to"
+
+
 def summarize(
     name: str | None,
     ticker: str | None,
@@ -36,23 +44,51 @@ def summarize(
     extra_caveats: list[str],
     max_bullets: int = 5,
     context: list[str] | None = None,
+    framing: str | None = None,
+    narrative: str | None = None,
+    rival: bool = False,
 ) -> tuple[str, list[str]]:
+    """framing: "a cat coin" when the referent is only the name's modifier. narrative: the
+    X post the coin was launched on, if any. rival: the name sets itself against the
+    referent ("Doge Killer")."""
     head = f"{name or '(unnamed)'} (${ticker or '?'})"
     parts: list[str] = []
-    if agg.referent and agg.referent.score >= 0.45:
-        desc = f": {agg.referent.desc}" if agg.referent.desc else ""
-        parts.append(
-            f"{head} most likely refers to {agg.referent.label}{desc} "
-            f"(confidence {agg.referent.score:.2f})."
-        )
-    else:
+    r = agg.referent
+    if r and r.score >= 0.45:
+        desc = f" ({r.desc})" if r.desc else ""
+        conf = f" (confidence {r.score:.2f})"
+        if rival:
+            parts.append(f"{head} sets itself against {r.label}{desc}{conf}.")
+        elif framing:
+            parts.append(f"{head} is {framing} tied to {r.label}{desc}{conf}.")
+        else:
+            parts.append(f"{head} {_verb(r.score)} {r.label}{desc}{conf}.")
+    elif narrative:
+        # no name anyone knows: the post it was launched on is the story
+        joiner = " was " if narrative.startswith("launched") else ": "
+        parts.append(f"{head}{joiner}{narrative}.")
+        narrative = None
         tp = _top_parent(agg.categories)
+        guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
             parts.append(
-                f"{head} reads as {_CATEGORY_PHRASE.get(tp[0], tp[0])} (confidence {tp[1]:.2f})."
+                f"Beyond that it reads as {_CATEGORY_PHRASE.get(tp[0], tp[0])} "
+                f"(confidence {tp[1]:.2f}){guess}."
+            )
+        elif guess:
+            parts.append(f"No clear reference in the name{guess}.")
+    else:
+        tp = _top_parent(agg.categories)
+        guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
+        if tp:
+            parts.append(
+                f"{head} reads as {_CATEGORY_PHRASE.get(tp[0], tp[0])} "
+                f"(confidence {tp[1]:.2f}){guess}."
             )
         else:
-            parts.append(f"{head}: no clear reference found; see evidence and caveats.")
+            parts.append(f"{head}: no clear reference found; see evidence and caveats{guess}.")
+    if narrative:
+        parts.append(narrative[0].upper() + narrative[1:] + ".")
     subs = [(lbl, s) for lbl, s in agg.categories if "/" in lbl][:4]
     if subs:
         parts.append("Categories: " + ", ".join(f"{lbl} {s:.2f}" for lbl, s in subs) + ".")
@@ -77,9 +113,9 @@ def _why(evidence: list[Ev], n: int) -> list[str]:
         d = e.detail.strip().rstrip(".")
         if d.lower() in seen:
             continue
-        if e.referent is not None and e.label == "referent":
+        if e.referent is not None and e.kind in ("referent", "entity"):
             if e.referent.label in seen_referents:
-                continue  # one line per referent, however many sources agree
+                continue  # one line per referent, however many rows name it
             seen_referents.add(e.referent.label)
         seen.add(d.lower())
         out.append(d)

@@ -152,15 +152,21 @@ def find(text: str, k: Knowledge) -> list[Hit]:
     kept: list[Hit] = []
     covered_until = -1
     last_start = -1
+    last_end = -1
     for h in hits:
         if h.start == last_start:
-            kept.append(h)  # same span, different payloads: keep all
+            # same start: keep other payloads of the same span, but a dictionary word
+            # inside a longer named match ("hawk" in "hawk tuah") says nothing
+            if h.kind == "wordnet" and h.end < last_end:
+                continue
+            kept.append(h)
             continue
         if h.start < covered_until:
             continue
         kept.append(h)
         covered_until = h.end
         last_start = h.start
+        last_end = h.end
     return kept
 
 

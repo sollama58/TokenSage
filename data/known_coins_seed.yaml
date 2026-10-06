@@ -323,7 +323,7 @@ coins:
     chain: solana
     lore: "Chill-guy derivative."
     categories: [meme_template/chill_guy, derivative/template_family]
-    referent: {label: Just a chill guy, kind: meme, desc: "chill guy derivative"}
+    referent: {label: Just a chill guy, kind: meme, desc: "cartoon of a relaxed dog in a sweater, viral 2024"}
   - symbol: PWEASE
     name: pwease
     aliases: [pwease]

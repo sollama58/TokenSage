@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import ahocorasick
 
-from tokensage.engine.context import Ev
+from tokensage.engine.context import Ev, ReferentCandidate
 from tokensage.engine.knowledge import Knowledge
 
 GENERIC_PREFIXES = ("list of", "deaths in", "main page", "special:", "wikipedia:", "portal:")
@@ -113,4 +113,27 @@ def evidence(hits: list[TrendHit], index: TrendIndex) -> list[Ev]:
                 where=h.where,  # type: ignore[arg-type]
             )
         )
+        # A clear spike names what the coin is about even when no gazetteer entry does
+        # (a person or event that broke this week).
+        if t.spike >= 3 and not index.is_generic(t.term) and h.where in ("name", "x"):
+            ref = ReferentCandidate(
+                label=t.term,
+                kind="event",
+                desc=f"in the news: Wikipedia article trending at {t.spike:.0f}x its usual views",
+                source=f"wikipedia:{t.term}",
+                score=0.6 if t.spike >= 10 else 0.45,
+                categories=["news_event"],
+                surface=h.surface,
+            )
+            evs.append(
+                Ev(
+                    kind="referent",
+                    label="referent",
+                    weight=ref.score,
+                    detail=f"{t.term}: {ref.desc}",
+                    source=f"wikipedia:{t.term}",
+                    where=h.where,  # type: ignore[arg-type]
+                    referent=ref,
+                )
+            )
     return evs

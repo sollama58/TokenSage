@@ -129,11 +129,15 @@ def assess(
         text_l = (tweet.text or "").lower()
         mentions = bool(ticker) and (
             f"${ticker.lower()}" in text_l  # type: ignore[union-attr]
-            or mint.lower() in text_l
+            or (len(mint) >= 32 and mint.lower() in text_l)
             or "pump.fun" in text_l
         )
+        # a post naming the ticker or CA is the launch post, even when it predates the
+        # mint by a bit; from a large account it is still someone else's narrative unless
+        # it carries the CA itself
+        is_launch = mentions and (not big or mint.lower() in text_l)
         if a.relation != "spoofed":
-            if gap_days is not None and gap_days > 0:
+            if gap_days is not None and gap_days > 0 and not is_launch:
                 a.relation = "narrative_reference"
                 detail = (
                     f"the linked tweet (by @{tweet.author_handle}) predates the token by "

@@ -18,6 +18,9 @@ DEPTH_RANK = {"basic": 0, "full": 1}
 REUSE_DONE_WITHIN_S = 30.0
 # A partial result (metadata pending, mint not yet on-chain) is re-analysed this soon.
 PARTIAL_MAX_AGE_S = 60
+# A failed analysis is reported as failed (no new job, no quota) for this long; a request
+# with refresh=true tries again at once.
+FAILED_COOLDOWN_S = 600
 # analyzer error_code -> (http status, api code)
 DEFINITIVE_CODES = {
     "token_not_found": (404, "token_not_found"),
@@ -48,6 +51,24 @@ async def latest_analysis(
         if DEPTH_RANK.get(r["depth"], 0) >= DEPTH_RANK[depth]:
             return r["doc"], r["version"]
     return None
+
+
+async def _recent_failure(
+    conn: asyncpg.Connection, mint: str, depth: str
+) -> tuple[int, str | None, str | None] | None:
+    """The newest analyze job for (mint, depth) when it failed within FAILED_COOLDOWN_S and
+    nothing newer is open or done: (job_id, error_code, last_error)."""
+    row = await conn.fetchrow(
+        """select id, status, error_code, last_error, finished_at from job
+           where kind='analyze' and mint=$1 and depth=$2 order by id desc limit 1""",
+        mint,
+        depth,
+    )
+    if not row or row["status"] != "failed" or row["finished_at"] is None:
+        return None
+    if (datetime.now(UTC) - row["finished_at"]).total_seconds() > FAILED_COOLDOWN_S:
+        return None
+    return row["id"], row["error_code"], row["last_error"]
 
 
 async def token_created_at(conn: asyncpg.Connection, mint: str) -> datetime | None:
@@ -132,6 +153,33 @@ async def get_or_enqueue(
                     depth=doc["depth"],
                     analysis=Analysis.model_validate(doc),
                     freshness=fr,
+                    request_id=request_id,
+                )
+
+        if not refresh:
+            failed = await _recent_failure(conn, mint, depth)
+            if failed is not None:
+                fid, code, last_error = failed
+                if code in DEFINITIVE_CODES:
+                    from tokensage.api import errors
+
+                    status, api_code = DEFINITIVE_CODES[code]
+                    raise errors.ApiError(status, api_code, last_error or api_code)
+                return TokenResponse(
+                    ca=mint,
+                    status="failed",
+                    depth=depth,  # type: ignore[arg-type]
+                    stale_analysis=Analysis.model_validate(cached[0]) if cached else None,
+                    errors=[
+                        UpstreamError(
+                            source="analyzer",
+                            code="failed",
+                            detail=(last_error or "analysis failed")
+                            + f"; retried automatically after {FAILED_COOLDOWN_S} s, or now "
+                            "with refresh=true",
+                        )
+                    ],
+                    job_id=fid,
                     request_id=request_id,
                 )
 

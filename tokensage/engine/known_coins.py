@@ -16,6 +16,7 @@ class CopyMatch:
     signals: list[str] = field(default_factory=list)
     score: float = 0.0  # 0..1
     via_template_surface: bool = False
+    surface: str | None = None  # the name surface that matched, if any
 
 
 def _compact(s: str) -> str:
@@ -27,12 +28,22 @@ def _compact(s: str) -> str:
 TEMPLATE_SURFACES = {"wif hat", "wif", "inu", "dogwifhat", "catwifhat"}
 
 
+def _distinctive(surface: str, k: Knowledge) -> bool:
+    """A single word that names the coin's subject on its own ("peanut", "moodeng"), not a
+    dictionary word ("cat") or a short/common one."""
+    w = surface.lower().strip()
+    if " " in w or len(w) < 4 or not w.isalpha():
+        return False
+    return not any(w in words for words in k.wordnet.values())
+
+
 def match_known(
     n: Normalized, k: Knowledge, extra: list[KnownCoin] | None = None
 ) -> list[CopyMatch]:
     coins = list(k.coins) + list(extra or [])
     th = k.scoring.get("fuzzy_threshold", 86)
     out: dict[str, CopyMatch] = {}
+    words = set(n.name_tokens)
 
     def bump(c: KnownCoin, signal: str, score: float) -> None:
         m = out.setdefault(c.symbol + "|" + c.name, CopyMatch(c))
@@ -58,6 +69,8 @@ def match_known(
             cand: tuple[int, str, float, str] | None = None
             if compact == sc:
                 cand = (3, "name", 0.85, s)
+            elif s.lower() in words and _distinctive(s, k):
+                cand = (2, "name_word", 0.55, s)  # "Not Peanut", "Peanut Army"
             elif len(sc) >= 4 and sc in compact and len(compact) <= len(sc) + 12:
                 cand = (2, "name_contains", 0.55, s)
             else:
@@ -68,6 +81,7 @@ def match_known(
                 best = cand
         if best:
             bump(c, best[1], best[2])
+            out[c.symbol + "|" + c.name].surface = best[3]
             if best[1] == "name_contains" and best[3].lower() in TEMPLATE_SURFACES:
                 out[c.symbol + "|" + c.name].via_template_surface = True
     matches = sorted(out.values(), key=lambda m: -m.score)
@@ -78,6 +92,7 @@ def match_known(
             m.score >= 0.7
             or len(m.signals) >= 2
             or "name" in m.signals
+            or "name_word" in m.signals
             or (has_marker and "name_contains" in m.signals)
         ):
             strong.append(m)
@@ -125,6 +140,7 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
             if m.via_template_surface
             else min(0.95, m.score + (0.1 if self_coin else 0.0)),
             categories=list(c.categories),
+            surface=m.surface,
         )
         verb = "matches" if self_coin else "builds on"
         detail = f"{verb} ${c.symbol} ({c.name}) via {', '.join(m.signals)}"
@@ -174,7 +190,8 @@ def family_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
     for fam in k.families:
         if fam.weight <= 0:
             continue
-        if fam.pattern.search(spaced) or fam.pattern.search(n.name_clean):
+        hit = fam.pattern.search(spaced) or fam.pattern.search(n.name_clean)
+        if hit:
             parent = by_sym.get(fam.parent or "", [None])[0] if fam.parent else None
             ref = None
             if parent:
@@ -185,6 +202,7 @@ def family_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
                     source=f"family:{fam.name}",
                     score=fam.weight * 0.7,
                     categories=list(parent.categories),
+                    surface=hit.group(0).strip(),
                 )
             for cat in fam.categories:
                 evs.append(
