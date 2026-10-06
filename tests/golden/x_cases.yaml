@@ -1,0 +1,200 @@
+# Golden cases for the X link vs token comparison (x.match, depth=full). No network, no DB.
+# Images are synthetic: "img:<seed>" is a deterministic pattern, "img:<seed>:edit" the same
+# pattern with a small overlay (an edited copy), so pHash distances behave like real logos.
+#
+# token: name, symbol, description, logo (image spec or null)
+# link: tweet | profile
+# tweet: text, author, followers, verified, hours_before_token (negative = after), media,
+#        quoted: {text, author, followers, hours_before_token, media}
+# profile: name, handle, bio, followers, avatar, banner
+# expect: verdict, fit_min, fit_max, name_how, ticker_how, image_min_score, agrees,
+#         flags_include, flags_exclude
+cases:
+  # ---- the three cases from the consumer brief
+  - id: copies_viral_post_image_and_words
+    token: {name: "Bongo the Skating Hamster", symbol: BONGO, logo: "img:11"}
+    link: tweet
+    tweet:
+      text: "my hamster Bongo just learned to ride a skateboard 🛹"
+      author: hamsterdiaries
+      followers: 812000
+      hours_before_token: 5
+      media: ["img:11"]
+    expect:
+      verdict: about_this_coin
+      fit_min: 0.9
+      name_how: segment
+      image_min_score: 1.0
+      flags_include: [x_image_match]
+      flags_exclude: [x_content_mismatch]
+
+  - id: unrelated_large_account_post
+    token: {name: "Moon Cat", symbol: MCAT, logo: "img:21"}
+    link: tweet
+    tweet:
+      text: "The future of space travel is fully reusable rockets"
+      author: elonmusk
+      followers: 190000000
+      verified: blue
+      hours_before_token: 48
+      media: ["img:22"]
+    expect:
+      verdict: unrelated
+      fit_max: 0.19
+      name_how: none
+      ticker_how: none
+      flags_include: [x_content_mismatch, borrowed_narrative]
+      flags_exclude: [x_image_match]
+
+  - id: post_only_mentions_the_cashtag
+    token: {name: "Zorblax", symbol: ZORB, logo: "img:31"}
+    link: tweet
+    tweet:
+      text: "$ZORB just launched, lfg 🚀"
+      author: zorbdev
+      followers: 40
+      hours_before_token: -0.1
+      media: []
+    expect:
+      verdict: related
+      fit_min: 0.4
+      fit_max: 0.59
+      name_how: none
+      ticker_how: cashtag
+      flags_exclude: [x_content_mismatch, x_image_match]
+
+  # ---- more coverage
+  - id: launch_post_with_name_and_cashtag_and_logo
+    token: {name: "Pepe Wizard", symbol: PWIZ, logo: "img:41"}
+    link: tweet
+    tweet:
+      text: "Pepe Wizard is live. $PWIZ 🧙🐸"
+      author: pwizcoin
+      followers: 120
+      hours_before_token: -0.05
+      media: ["img:41:edit"]
+    expect:
+      verdict: about_this_coin
+      fit_min: 0.95
+      name_how: exact
+      ticker_how: cashtag
+      image_min_score: 0.8
+      flags_include: [x_image_match]
+
+  - id: camelcase_name_normalized_in_post
+    token: {name: "DogWifCrown", symbol: CROWN, logo: null}
+    link: tweet
+    tweet:
+      text: "dog wif crown szn 👑"
+      author: crowndog
+      followers: 300
+      hours_before_token: -0.2
+    expect:
+      verdict: about_this_coin
+      name_how: normalized
+
+  - id: hashtag_ticker
+    token: {name: "Glorp", symbol: GLORP, logo: null}
+    link: tweet
+    tweet:
+      text: "who is ready #GLORP"
+      author: glorper
+      followers: 15
+      hours_before_token: -0.1
+    expect:
+      # the name is the tagged word itself: a strong match on both counts
+      name_how: exact
+      ticker_how: hashtag
+      verdict: about_this_coin
+
+  - id: everyday_word_ticker_lowercase_is_not_a_match
+    token: {name: "Sunny Pup", symbol: DOG, logo: null}
+    link: tweet
+    tweet:
+      text: "walked the dog in the park today"
+      author: someone
+      followers: 900
+      hours_before_token: 30
+    expect:
+      ticker_how: none
+
+  - id: different_referent_disagrees
+    token: {name: "Peanut the Squirrel", symbol: PNUTS, logo: null}
+    link: tweet
+    tweet:
+      text: "Moo Deng the baby pygmy hippo is the cutest thing on the internet"
+      author: zoofan
+      followers: 5000
+      hours_before_token: 10
+    expect:
+      agrees: false
+      verdict: unrelated
+      flags_include: [x_content_mismatch]
+
+  - id: same_referent_in_other_words
+    token: {name: "Peanut the Squirrel", symbol: PNUTS, logo: null}
+    link: tweet
+    tweet:
+      text: "RIP Peanut the squirrel, the pet NY officials seized and put down"
+      author: newsbot
+      followers: 20000
+      hours_before_token: 20
+    expect:
+      agrees: true
+      verdict: about_this_coin
+
+  - id: name_without_its_own_referent_is_only_related
+    # "Justice for Peanut" alone does not say which Peanut; the post does, so the match is
+    # partial (one name word, no referent of the token's own to agree with)
+    token: {name: "Justice for Peanut", symbol: JFP, logo: null}
+    link: tweet
+    tweet:
+      text: "RIP Peanut the squirrel, NY officials took him away"
+      author: newsbot
+      followers: 20000
+      hours_before_token: 20
+    expect:
+      name_how: segment
+      verdict: related
+      flags_exclude: [x_content_mismatch]
+
+  - id: quote_tweet_text_counts
+    token: {name: "Bongo the Skating Hamster", symbol: BONGO, logo: "img:12"}
+    link: tweet
+    tweet:
+      text: "launching this, gm"
+      author: bongodev
+      followers: 30
+      hours_before_token: -0.1
+      quoted:
+        text: "my hamster Bongo learned to skateboard"
+        author: hamsterdiaries
+        followers: 812000
+        hours_before_token: 5
+        media: ["img:12"]
+    expect:
+      verdict: about_this_coin
+      image_min_score: 1.0
+      flags_include: [x_image_match]
+
+  - id: profile_link_avatar_is_the_logo
+    token: {name: "Fwogcito", symbol: FWOGC, logo: "img:51"}
+    link: profile
+    profile:
+      name: "Fwogcito"
+      handle: fwogcito
+      bio: "the smallest fwog on solana"
+      followers: 210
+      avatar: "img:51"
+    expect:
+      verdict: about_this_coin
+      name_how: exact
+      flags_include: [x_image_match]
+
+  - id: deleted_tweet_is_unknown_not_mismatch
+    token: {name: "Ghost Coin", symbol: GHOST, logo: "img:61"}
+    link: tweet
+    tweet: {deleted: true}
+    expect:
+      verdict: unknown
+      flags_exclude: [x_content_mismatch]

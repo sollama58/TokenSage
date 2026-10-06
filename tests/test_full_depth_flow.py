@@ -39,7 +39,7 @@ async def db(migrated_db: str, clean_tables: None) -> AsyncIterator[asyncpg.Conn
     conn = await asyncpg.connect(migrated_db)
     await conn.execute(
         "truncate token_metadata, image, x_ref, x_tweet, x_profile, x_profile_history, "
-        "trend_term, lookup_cache, token_market cascade"
+        "trend_term, lookup_cache, token_market, x_media cascade"
     )
     await conn.execute(
         """insert into trend_term (term, source, score, spike, first_seen, day, views)
@@ -224,3 +224,87 @@ async def test_full_depth_includes_the_quoted_tweet(
     assert len(quoted_calls) == (0 if inline else 1)
     if not inline:
         assert await db.fetchval("select status from x_tweet where tweet_id=$1", QUOTED_TID) == "ok"
+
+
+MEDIA_URL = "https://pbs.twimg.com/media/LOGOCOPY.jpg"
+
+
+async def test_full_depth_compares_post_media_with_the_logo(
+    client: httpx.AsyncClient, db: asyncpg.Connection
+) -> None:
+    from tests.fixtures.chain import PNG
+
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "dog wif cap", "cap", META_URI, progress=0.3)
+    meta = metadata_json(twitter=f"https://x.com/capdev/status/{QUOTE_TID}")
+    post = {
+        "code": 200,
+        "status": {
+            "id": QUOTE_TID,
+            "text": "dog wif cap is live $cap",
+            "created_timestamp": 1727787600,
+            "author": {"id": "9", "screen_name": "capdev", "followers": 40},
+            "media": {"photos": [{"url": MEDIA_URL}]},
+        },
+    }
+    media_calls: list[int] = []
+
+    def media(request: httpx.Request) -> httpx.Response:
+        media_calls.append(1)
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    for attempt in range(2):
+        with respx.mock(assert_all_called=False) as router:
+            router.get(f"{xs.FX}/status/{QUOTE_TID}").mock(
+                return_value=httpx.Response(200, json=post)
+            )
+            router.get(url__startswith=MEDIA_URL).mock(side_effect=media)
+            router.get(url__startswith=f"{xs.FX}/profile/").mock(return_value=httpx.Response(404))
+            router.get(url__startswith=xs.VX).mock(return_value=httpx.Response(404))
+            router.get(url__startswith="https://news.google.com/rss/search").mock(
+                return_value=httpx.Response(200, text=RSS)
+            )
+            install_web(router, chain, meta=meta)
+            extra = "&refresh=true" if attempt else ""
+            r = await client.get(f"/v1/tokens/{T22_MINT}?depth=full&wait=10{extra}")
+        assert r.status_code == 200, r.text
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a is not None and a.x is not None and a.x.match is not None
+    m = a.x.match
+    assert m.image.media_checked == 1 and m.image.best_distance == 0 and m.image.score == 1.0
+    assert m.name.how == "exact" and m.ticker.how == "cashtag"
+    assert m.verdict == "about_this_coin" and m.fit >= 0.95
+    codes = {f.code for f in a.flags}
+    assert "x_image_match" in codes and "x_content_mismatch" not in codes
+    # the media hash is cached by URL: the second analysis did not download it again
+    assert len(media_calls) == 1
+    assert await db.fetchval("select status from x_media where url=$1", MEDIA_URL) == "ok"
+
+
+async def test_unrelated_post_is_flagged(client: httpx.AsyncClient, db: asyncpg.Connection) -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "dog wif cap", "cap", META_URI, progress=0.3)
+    meta = metadata_json(twitter=f"https://x.com/someone/status/{QUOTE_TID}")
+    post = {
+        "code": 200,
+        "status": {
+            "id": QUOTE_TID,
+            "text": "Quarterly earnings call moved to Thursday",
+            "created_timestamp": 1727787600,
+            "author": {"id": "9", "screen_name": "someone", "followers": 400},
+        },
+    }
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"{xs.FX}/status/{QUOTE_TID}").mock(return_value=httpx.Response(200, json=post))
+        router.get(url__startswith=f"{xs.FX}/profile/").mock(return_value=httpx.Response(404))
+        router.get(url__startswith=xs.VX).mock(return_value=httpx.Response(404))
+        router.get(url__startswith="https://news.google.com/rss/search").mock(
+            return_value=httpx.Response(200, text=RSS)
+        )
+        install_web(router, chain, meta=meta)
+        r = await client.get(f"/v1/tokens/{T22_MINT}?depth=full&wait=10")
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a is not None and a.x is not None and a.x.match is not None
+    assert a.x.match.verdict == "unrelated" and a.x.match.fit < 0.2
+    assert a.x.match.image.media_checked == 0
+    assert "x_content_mismatch" in {f.code for f in a.flags}

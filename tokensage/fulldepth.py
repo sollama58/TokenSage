@@ -209,3 +209,99 @@ async def news_for(
         value,
     )
     return value
+
+
+# ----------------------------------------------------------------- X media hashes
+
+MEDIA_FAILED_RETRY = timedelta(hours=6)
+
+
+def media_urls(tweet: TweetData | None, profile: ProfileData | None) -> list[str]:
+    """The images to compare with the token logo: the post's photos and video thumbnails
+    (then the quoted post's), or a linked profile's avatar and banner. At most 4."""
+    from tokensage.sources.x import MAX_MEDIA
+
+    urls: list[str] = []
+    if tweet is not None and tweet.status == "ok":
+        urls += tweet.media_urls
+        if tweet.quoted is not None and tweet.quoted.status == "ok":
+            urls += tweet.quoted.media_urls
+    elif profile is not None and profile.status == "ok":
+        urls += [u for u in (profile.avatar_url, profile.banner_url) if u]
+    seen: list[str] = []
+    for u in urls:
+        if u not in seen:
+            seen.append(u)
+    return seen[:MAX_MEDIA]
+
+
+def _small(url: str) -> str:
+    """X serves several sizes; the small one is plenty for a perceptual hash."""
+    if url.startswith("https://pbs.twimg.com/media/") and "name=" not in url:
+        return url + ("&" if "?" in url else "?") + "name=small"
+    if "pbs.twimg.com/profile_images/" in url:
+        return url.replace("_normal.", "_400x400.")
+    return url
+
+
+async def media_hashes(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, urls: list[str]
+) -> list[Any]:
+    """Fetch (SSRF-guarded, same size/time caps as logos) and hash each media URL. Cached by
+    URL: hashes forever, failures retried after 6 h."""
+    import asyncio
+
+    from tokensage.engine import image as image_stage
+    from tokensage.engine.xmatch import MediaHash
+    from tokensage.net.safe_fetch import FetchError, UnsafeUrl
+    from tokensage.resolve.metadata import fetch_url
+
+    cached: dict[str, MediaHash] = {}
+    for url in urls:
+        row = await conn.fetchrow("select * from x_media where url=$1", url)
+        if row and (
+            row["status"] == "ok" or datetime.now(UTC) - row["fetched_at"] < MEDIA_FAILED_RETRY
+        ):
+            cached[url] = MediaHash(
+                url=url,
+                status=row["status"],
+                phash=row["phash"],
+                phash_mirror=row["phash_mirror"],
+                error=row["error"],
+            )
+
+    async def fetch_one(url: str) -> tuple[MediaHash, int | None]:
+        try:
+            f = await fetch_url(
+                http, _small(url), settings, max_bytes=settings.image_max_bytes, accept="image/*"
+            )
+            feats = await asyncio.to_thread(image_stage.features, f.body)
+            return (
+                MediaHash(url=url, status="ok", phash=feats.phash, phash_mirror=feats.phash_mirror),
+                feats.dhash,
+            )
+        except (UnsafeUrl, FetchError) as e:
+            return MediaHash(url=url, status="failed", error=str(e)[:200]), None
+        except Exception as e:  # noqa: BLE001 - undecodable image etc.
+            return MediaHash(url=url, status="failed", error=f"{type(e).__name__}: {e}"[:200]), None
+
+    # the downloads run concurrently: a cold full analysis should not wait 4x for media
+    missing = [u for u in urls if u not in cached]
+    fetched = await asyncio.gather(*(fetch_one(u) for u in missing))
+    for mh, dhash in fetched:
+        await conn.execute(
+            """insert into x_media (url, status, phash, phash_mirror, dhash, error, fetched_at)
+               values ($1, $2, $3, $4, $5, $6, now())
+               on conflict (url) do update set status=excluded.status, phash=excluded.phash,
+                 phash_mirror=excluded.phash_mirror, dhash=excluded.dhash,
+                 error=excluded.error, fetched_at=now()""",
+            mh.url,
+            mh.status,
+            mh.phash,
+            mh.phash_mirror,
+            dhash,
+            mh.error,
+        )
+        cached[mh.url] = mh
+    out = [cached[u] for u in urls]
+    return out

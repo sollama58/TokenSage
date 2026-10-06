@@ -43,6 +43,8 @@ class TweetData:
     verified_type: str | None = None  # blue | business | government | legacy | None
     author_joined: datetime | None = None
     media_count: int = 0
+    # photo URLs and video thumbnails (https), in post order; compared with the token logo
+    media_urls: list[str] = field(default_factory=list)
     quoted_tweet_id: str | None = None
     likes: int | None = None
     replies: int | None = None
@@ -89,6 +91,8 @@ class ProfileData:
     verified_type: str | None = None
     username_changes: int | None = None
     description: str | None = None
+    avatar_url: str | None = None
+    banner_url: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
@@ -147,6 +151,52 @@ def _verified(v: Any) -> str | None:
     if isinstance(v, str):
         return {"business": "business", "government": "government"}.get(v.lower())
     return None
+
+
+MAX_MEDIA = 4
+
+
+def _https(u: Any) -> str | None:
+    return u if isinstance(u, str) and u.startswith("https://") and len(u) <= 2048 else None
+
+
+def _uniq(urls: list[str | None]) -> list[str]:
+    out: list[str] = []
+    for u in urls:
+        if u and u not in out:
+            out.append(u)
+    return out[:MAX_MEDIA]
+
+
+def _fx_media(st: dict[str, Any]) -> list[str]:
+    media = st.get("media") or {}
+    urls: list[str | None] = [_https(p.get("url")) for p in media.get("photos") or []]
+    urls += [_https(v.get("thumbnail_url")) for v in media.get("videos") or []]
+    for item in media.get("all") or []:
+        urls.append(
+            _https(item.get("thumbnail_url") if item.get("type") != "photo" else item.get("url"))
+        )
+    return _uniq(urls)
+
+
+def _vx_media(j: dict[str, Any]) -> list[str]:
+    urls: list[str | None] = []
+    for m in j.get("media_extended") or []:
+        if m.get("type") == "image":
+            urls.append(_https(m.get("url")))
+        else:
+            urls.append(_https(m.get("thumbnail_url")))
+    if not urls:
+        urls = [
+            _https(u)
+            for u in j.get("mediaURLs") or []
+            if str(u).split("?")[0].endswith((".jpg", ".png", ".jpeg", ".webp"))
+        ]
+    return _uniq(urls)
+
+
+def _synd_media(j: dict[str, Any]) -> list[str]:
+    return _uniq([_https(m.get("media_url_https")) for m in j.get("mediaDetails") or []])
 
 
 async def _get(
@@ -210,6 +260,7 @@ def _fx_status(st: dict[str, Any], tweet_id: str) -> TweetData:
         verified_type=_verified(au.get("verification")),
         author_joined=_dt(au.get("joined")),
         media_count=len(media.get("photos") or []) + len(media.get("videos") or []),
+        media_urls=_fx_media(st),
         quoted_tweet_id=str(quote.get("id")) if quote.get("id") else None,
         likes=_int(st.get("likes")),
         replies=_int(st.get("replies")),
@@ -252,6 +303,7 @@ def _vx_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         author_handle=j.get("user_screen_name"),
         author_name=j.get("user_name"),
         media_count=len(j.get("mediaURLs") or []),
+        media_urls=_vx_media(j),
         quoted_tweet_id=(j.get("qrt") or {}).get("tweetID")
         if isinstance(j.get("qrt"), dict)
         else None,
@@ -306,6 +358,7 @@ def _synd_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         author_name=u.get("name"),
         verified_type=vt,
         media_count=len(j.get("mediaDetails") or []),
+        media_urls=_synd_media(j),
         quoted_tweet_id=q.get("id_str"),
         likes=_int(j.get("favorite_count")),
         replies=_int(j.get("conversation_count")),
@@ -463,6 +516,8 @@ async def fx_profile(http: httpx.AsyncClient, handle: str) -> ProfileData | None
         verified_type=_verified(u.get("verification")),
         username_changes=_int(changes),
         description=u.get("description"),
+        avatar_url=_https(u.get("avatar_url")),
+        banner_url=_https(u.get("banner_url")),
         raw=u,
     )
     if p.username_changes is None:
@@ -502,6 +557,8 @@ async def vx_profile(http: httpx.AsyncClient, handle: str) -> ProfileData | None
         statuses=_int(j.get("tweet_count")),
         joined=_dt(j.get("created_at")),
         description=j.get("description"),
+        avatar_url=_https(j.get("profile_image_url") or j.get("profile_image_url_https")),
+        banner_url=_https(j.get("profile_banner_url")),
         raw=j,
     )
 

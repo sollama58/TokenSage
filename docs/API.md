@@ -101,7 +101,7 @@ Every error has one shape:
 | `ticker_explanation` | Plain-language explanation of the ticker |
 | `copy_of[]` | Coins this one copies or derives from, with the signals that say so |
 | `image` | Hashes, OCR text, palette, near-duplicates, optional visual labels. `source_url` is the gateway URL. **Images are not screened for NSFW content; decide yourself whether to show them** |
-| `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author (handle, followers, verification type, join date, username changes), text, `relation` (`narrative_reference` = the coin is *about* someone else's earlier tweet; `launch_announcement`; `official_account`; `spoofed` = the URL's handle is not the tweet's real author; `search_only`), `status` (`ok`, `deleted`, `suspended`, `not_fetched`, `failed`), `reuse_count` (other tokens linking the same tweet/handle; a Community link has `status: "not_fetched"`, because no free source serves Community name, description or creation time: X's own API and twitterapi.io both charge for it), and `quoted` when the linked tweet is a quote tweet: the quoted post's `id`, `url`, `status`, `author`, `text`, `created_at` and `predates_token_by_s`. A launch post that quotes someone else's earlier post usually takes its meaning from that post, so the quoted text feeds the analysis too, and a large or verified quoted author raises `borrowed_narrative` |
+| `x` | The linked X/Twitter reference, its creation time, whether it predates the token, the fetched author (handle, followers, verification type, join date, username changes), text, `relation` (`narrative_reference` = the coin is *about* someone else's earlier tweet; `launch_announcement`; `official_account`; `spoofed` = the URL's handle is not the tweet's real author; `search_only`), `status` (`ok`, `deleted`, `suspended`, `not_fetched`, `failed`), `match` (post vs token, see below), `reuse_count` (other tokens linking the same tweet/handle; a Community link has `status: "not_fetched"`, because no free source serves Community name, description or creation time: X's own API and twitterapi.io both charge for it), and `quoted` when the linked tweet is a quote tweet: the quoted post's `id`, `url`, `status`, `author`, `text`, `created_at` and `predates_token_by_s`. A launch post that quotes someone else's earlier post usually takes its meaning from that post, so the quoted text feeds the analysis too, and a large or verified quoted author raises `borrowed_narrative` |
 | `trend` | Trending-topic matches (Wikipedia spikes, news headlines) |
 | `flags[]` | `{code, severity, detail}`. Codes and descriptions are listed by `GET /v1/meta` |
 | `summary` | Template-generated plain-language summary |
@@ -113,6 +113,44 @@ Confidences are scores in 0–1. **They are uncalibrated until Phase 6** of the 
 fits them against hand-labelled tokens so that about 80% of "0.8" labels are right. Until then,
 use them to rank and threshold, not as probabilities. Flags and categories are **informational,
 not financial advice**.
+
+### `x.match`: does the linked post match the token? (depth=full)
+
+The blended analysis above folds the post text into the coin's meaning. `x.match` keeps the
+two apart and compares them, so a coin whose link points at an unrelated post no longer looks
+like a perfect match. It is present at `depth=full` for tweet and profile links. For a profile
+link, the display name, handle, bio, avatar and banner stand in for the post.
+
+```json
+"match": {
+  "name":     {"score": 1.0, "how": "exact", "detail": "the post contains the name 'Pepe Wizard'"},
+  "ticker":   {"score": 1.0, "how": "cashtag", "detail": "the post names $PWIZ"},
+  "image":    {"score": 0.8, "best_distance": 9, "media_checked": 1,
+               "detail": "best of 1 post image(s) is an edited copy of the logo (distance 9)"},
+  "referent": {"x_label": null, "x_kind": null, "agrees": null, "confidence": 0.0},
+  "x_categories": [{"label": "animal/frog", "confidence": 0.41}],
+  "fit": 0.987,
+  "verdict": "about_this_coin"
+}
+```
+
+| Part | How it is computed |
+|---|---|
+| `name` | The token name against the post text, with the same folding as names: homoglyphs, leet, emoji keywords, camelCase. `how` is one of: `exact` (the name as written appears in the post), `normalized` (it appears once both are folded and compacted), `segment` (some or all of the name's words appear; `score` is the share found), `fuzzy` (a close spelling), or `none` |
+| `ticker` | `cashtag` (`$TICKER`), `hashtag` (`#TICKER`), `bare` (the ticker as a word, or the profile handle; a lowercase everyday word like "dog" does not count), `fuzzy` (a cashtag one letter off), or `none` |
+| `image` | Up to 4 images are fetched through the same guarded fetch, size caps and time caps as logos, and cached by URL. These are the post's photos, video thumbnails and quoted post media, or a profile's avatar and banner. Each is perceptually hashed and compared with the logo. `best_distance` is the smallest Hamming distance: ≤ 8 is the same image (score 1.0), ≤ 14 an edited copy (0.8), ≤ 20 loosely similar (0.35) |
+| `referent` | The engine is run on the post text alone, and separately on the token's name, ticker and image alone. `x_label` is what the post is about. `agrees` says whether that is the same referent the token points to on its own; it is `null` when either side has no confident referent |
+| `x_categories` | Categories of the post read on its own (not blended) |
+| `fit` | One 0–1 score combining the parts above (noisy-OR). Clear referent disagreement halves it. **Uncalibrated until Phase 6** |
+| `verdict` | `about_this_coin` if `fit ≥ 0.6`, `related` if `0.2 ≤ fit < 0.6`, `unrelated` if `fit < 0.2`, `unknown` when nothing could be fetched (deleted tweet, failed fetch) |
+
+Flags: `x_content_mismatch` (warn) when the post or profile was fetched and `fit < 0.2`.
+`x_image_match` (info) when a post image is within distance 14 of the logo.
+
+Rough guide: a launch post naming the coin and its cashtag with the logo attached scores
+0.95+. A post that only mentions `$TICKER` scores about 0.55 (`related`). A borrowed post by
+a large account about something else scores near 0 (`unrelated`, usually alongside
+`borrowed_narrative`).
 
 ## Other endpoints
 
