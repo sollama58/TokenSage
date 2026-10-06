@@ -129,6 +129,18 @@ class CopyOf(_Model):
         "this is a copy of a live coin (flag copycat). False: an established coin this one "
         "builds on (flag references_known_coin)",
     )
+    rank: int | None = Field(
+        default=None,
+        description="This token's place by launch time among the coins with this name or "
+        "ticker launched within rank_window_hours of it (1 = the earliest); set on the recent "
+        "same-name copy",
+    )
+    rank_of: int | None = Field(
+        default=None,
+        description="How many coins with this name or ticker launched within rank_window_hours "
+        'of it, this one included ("3rd of 41")',
+    )
+    rank_window_hours: int | None = None
 
 
 class ImageLabel(_Model):
