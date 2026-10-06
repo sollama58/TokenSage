@@ -28,6 +28,24 @@ class XAssessment:
     joined: datetime | None = None
     username_changes: int | None = None
     fetch_source: str | None = None
+    quoted: QuotedAssessment | None = None
+
+
+@dataclass
+class QuotedAssessment:
+    """The tweet the linked tweet quotes. Often the real narrative: a launch tweet that
+    quote-tweets someone else's earlier post."""
+
+    id: str
+    status: str  # ok | deleted | failed
+    text: str | None = None
+    created_at: datetime | None = None
+    author_handle: str | None = None
+    author_id: str | None = None
+    author_name: str | None = None
+    followers: int | None = None
+    verified_type: str | None = None
+    joined: datetime | None = None
 
 
 def _days(a: datetime | None, b: datetime | None) -> float | None:
@@ -137,6 +155,8 @@ def assess(
                     "x",
                 )
             )
+        if tweet.quoted is not None:
+            _assess_quoted(a, tweet, token_created)
         if tweet.possibly_sensitive:
             a.evidence.append(
                 Ev(
@@ -208,6 +228,65 @@ def assess(
             )
         )
     return a
+
+
+def _assess_quoted(a: XAssessment, tweet: TweetData, token_created: datetime | None) -> None:
+    q = tweet.quoted
+    assert q is not None
+    qa = QuotedAssessment(id=q.id or (tweet.quoted_tweet_id or ""), status=q.status)
+    a.quoted = qa
+    if q.status != "ok":
+        return
+    qa.text = q.text
+    qa.created_at = q.created_at
+    qa.author_handle = q.author_handle
+    qa.author_id = q.author_id
+    qa.author_name = q.author_name
+    qa.followers = q.followers
+    qa.verified_type = q.verified_type
+    qa.joined = q.author_joined
+    same_author = bool(
+        q.author_handle
+        and tweet.author_handle
+        and q.author_handle.lower() == tweet.author_handle.lower()
+    )
+    gap_days = _days(token_created, q.created_at)
+    if same_author or gap_days is None or gap_days <= 0:
+        return
+    # The linked tweet quotes an earlier post by someone else: that post is the narrative.
+    a.evidence.append(
+        Ev(
+            "x_quote_timing",
+            "news_event",
+            0.4 if gap_days < 3 else 0.2,
+            f"the linked tweet quotes @{q.author_handle or '?'}'s post from "
+            f"{_fmt_days(gap_days)} before the token",
+            "x",
+            "x",
+        )
+    )
+    big = (q.followers or 0) >= BIG_ACCOUNT or q.verified_type in ("business", "government")
+    if big:
+        if not any(code == "borrowed_narrative" for code, _, _ in a.flags):
+            a.flags.append(
+                (
+                    "borrowed_narrative",
+                    "info",
+                    f"the linked tweet quotes @{q.author_handle}, a large/verified account; "
+                    "the coin borrows that narrative",
+                )
+            )
+        a.evidence.append(
+            Ev(
+                "x_quote_author",
+                "celebrity",
+                0.35,
+                f"quoted post by a large account @{q.author_handle} "
+                f"({q.followers or '?'} followers, {q.verified_type or 'unverified'})",
+                "x",
+                "x",
+            )
+        )
 
 
 def _fmt_days(d: float) -> str:

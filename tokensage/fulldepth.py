@@ -122,6 +122,14 @@ async def x_content(
     profile: ProfileData | None = None
     if x.ref.kind == "tweet" and x.ref.tweet_id:
         tweet = await tweet_cached(conn, http, settings, x.ref.tweet_id)
+        if (
+            tweet.status == "ok"
+            and tweet.quoted is None
+            and tweet.quoted_tweet_id
+            and tweet.quoted_tweet_id != tweet.id
+        ):
+            # oEmbed and pre-quote cache rows carry only the quoted id: fetch it (cached too)
+            tweet.quoted = await tweet_cached(conn, http, settings, tweet.quoted_tweet_id)
         if tweet.status == "ok" and tweet.author_handle:
             profile = await profile_cached(conn, http, tweet.author_handle)
     elif x.ref.kind == "profile" and x.ref.handle:

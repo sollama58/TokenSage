@@ -241,3 +241,132 @@ def test_deleted_and_recycled() -> None:
     assert a.relation == "official_account" and "recycled_x_account" in {f[0] for f in a.flags}
     a = xsignals.assess("search", None, None, None, TOKEN_T, None, "m", [])
     assert a.relation == "search_only"
+
+
+# ----------------------------------------------------------------- quote tweets
+
+QTID = "1790000000000000001"
+FX_QUOTE = {
+    "code": 200,
+    "status": {
+        "id": "1850000000000000002",
+        "text": "launching $NUT on pump.fun",
+        "created_timestamp": 1727787600,  # 2024-10-01 13:00 UTC
+        "author": {"id": "9", "screen_name": "nutdev", "name": "nut dev", "followers": 40},
+        "quote": {
+            "id": QTID,
+            "text": "Peanut the squirrel deserved better",
+            "created_timestamp": 1727773200,  # 4 h earlier
+            "author": {
+                "id": "44196397",
+                "screen_name": "elonmusk",
+                "name": "Elon Musk",
+                "followers": 190000000,
+                "verification": {"verified": True, "type": "individual"},
+            },
+        },
+    },
+}
+
+
+@respx.mock
+async def test_fx_quote_is_parsed_and_round_trips(http: httpx.AsyncClient) -> None:
+    respx.get(f"{xs.FX}/status/1850000000000000002").mock(
+        return_value=httpx.Response(200, json=FX_QUOTE)
+    )
+    t = await xs.fetch_tweet(http, "1850000000000000002")
+    assert t.quoted_tweet_id == QTID
+    q = t.quoted
+    assert q is not None and q.status == "ok" and q.id == QTID
+    assert q.author_handle == "elonmusk" and q.followers == 190000000
+    assert q.text == "Peanut the squirrel deserved better"
+    assert q.created_at == datetime(2024, 10, 1, 9, 0, tzinfo=UTC)
+    back = xs.TweetData.from_json(t.to_json())
+    assert back.quoted is not None and back.quoted.author_handle == "elonmusk"
+    assert back.quoted.created_at == q.created_at
+    # old cache rows without the key still load
+    old = t.to_json()
+    old.pop("quoted")
+    assert xs.TweetData.from_json(old).quoted is None
+
+
+@respx.mock
+async def test_vx_and_syndication_quotes_are_parsed(http: httpx.AsyncClient) -> None:
+    vx = dict(VX_OK, qrt={"tweetID": QTID, "text": "quoted via vx", "user_screen_name": "a"})
+    respx.get(f"{xs.FX}/status/{TID}").mock(return_value=httpx.Response(500))
+    respx.get(f"{xs.VX}/i/status/{TID}").mock(return_value=httpx.Response(200, json=vx))
+    t = await xs.fetch_tweet(http, TID)
+    assert t.source == "vxtwitter" and t.quoted is not None
+    assert t.quoted.text == "quoted via vx" and t.quoted.author_handle == "a"
+
+    synd = dict(
+        SYND_OK,
+        quoted_tweet={
+            "id_str": QTID,
+            "text": "quoted via syndication",
+            "created_at": "2024-05-01T00:00:00.000Z",
+            "user": {"screen_name": "b", "id_str": "7", "verified_type": "Business"},
+        },
+    )
+    respx.get(f"{xs.VX}/i/status/{TID}").mock(return_value=httpx.Response(500))
+    respx.get(url__startswith=xs.SYND).mock(return_value=httpx.Response(200, json=synd))
+    t2 = await xs.fetch_tweet(http, TID)
+    assert t2.source == "syndication" and t2.quoted_tweet_id == QTID
+    assert t2.quoted is not None and t2.quoted.author_handle == "b"
+    assert t2.quoted.verified_type == "business"
+
+
+def test_quoting_an_earlier_big_account_post_borrows_its_narrative() -> None:
+    quoted = _tweet(
+        id=QTID,
+        text="Peanut the squirrel deserved better",
+        created_at=TOKEN_T - timedelta(hours=4),
+    )
+    launch = _tweet(
+        author_handle="nutdev",
+        followers=40,
+        verified_type=None,
+        author_joined=TOKEN_T - timedelta(days=200),
+        created_at=TOKEN_T + timedelta(minutes=2),
+        text="launching $NUT",
+        quoted_tweet_id=QTID,
+        quoted=quoted,
+    )
+    a = xsignals.assess("tweet", "nutdev", launch, None, TOKEN_T, "NUT", "mint", ["nut"])
+    assert a.relation == "official_account"  # the linked tweet itself is the launch post
+    assert a.quoted is not None and a.quoted.author_handle == "elonmusk"
+    assert a.quoted.text == "Peanut the squirrel deserved better"
+    kinds = {e.kind for e in a.evidence}
+    assert {"x_quote_timing", "x_quote_author"} <= kinds
+    assert "borrowed_narrative" in {f[0] for f in a.flags}
+
+
+def test_quote_of_own_post_or_later_post_adds_no_narrative() -> None:
+    own = _tweet(
+        id=QTID, author_handle="nutdev", followers=40, created_at=TOKEN_T - timedelta(days=1)
+    )
+    later = _tweet(id=QTID, created_at=TOKEN_T + timedelta(hours=1))
+    for q in (own, later):
+        launch = _tweet(
+            author_handle="nutdev",
+            followers=40,
+            verified_type=None,
+            created_at=TOKEN_T + timedelta(minutes=2),
+            quoted=q,
+        )
+        a = xsignals.assess("tweet", "nutdev", launch, None, TOKEN_T, "NUT", "mint", [])
+        assert a.quoted is not None and a.quoted.text
+        assert not {"x_quote_timing", "x_quote_author"} & {e.kind for e in a.evidence}
+        assert "borrowed_narrative" not in {f[0] for f in a.flags}
+
+
+def test_deleted_quoted_tweet_is_reported_without_signals() -> None:
+    launch = _tweet(
+        author_handle="nutdev",
+        followers=40,
+        created_at=TOKEN_T + timedelta(minutes=2),
+        quoted=xs.TweetData(id=QTID, status="deleted"),
+    )
+    a = xsignals.assess("tweet", "nutdev", launch, None, TOKEN_T, "NUT", "mint", [])
+    assert a.quoted is not None and a.quoted.status == "deleted" and a.quoted.text is None
+    assert not any(e.kind.startswith("x_quote") for e in a.evidence)

@@ -13,6 +13,8 @@ from tokensage.api.schemas import Analysis, Freshness, TokenResponse, UpstreamEr
 from tokensage.config import Settings
 
 DEPTH_RANK = {"basic": 0, "full": 1}
+# A request that misses the cache while an identical job is committing reuses that job.
+REUSE_DONE_WITHIN_S = 30.0
 # analyzer error_code -> (http status, api code)
 DEFINITIVE_CODES = {
     "token_not_found": (404, "token_not_found"),
@@ -111,7 +113,14 @@ async def get_or_enqueue(
         if key is not None:
             await _enforce_quotas(conn, key, depth, refresh)
         job = await queue.enqueue(
-            conn, "analyze", mint, depth, priority=priority, requested_by=requested_by
+            conn,
+            "analyze",
+            mint,
+            depth,
+            priority=priority,
+            requested_by=requested_by,
+            # a refresh always re-analyses; otherwise reuse a job that just finished
+            reuse_done_within_s=0 if refresh else REUSE_DONE_WITHIN_S,
         )
         if callback_url and key is not None:
             from tokensage import callbacks
@@ -120,7 +129,10 @@ async def get_or_enqueue(
                 conn, target_job_id=job.id, callback_url=callback_url, key_digest=key.digest
             )
 
-    finished = await waiter.wait(job.id, wait_s) if wait_s > 0 else False
+    if job.status == "done":
+        finished = True
+    else:
+        finished = await waiter.wait(job.id, wait_s) if wait_s > 0 else False
 
     async with pool.acquire() as conn:
         if finished:

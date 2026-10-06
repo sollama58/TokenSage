@@ -7,6 +7,7 @@ network). Writes are idempotent so overlapping deploys are harmless.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -58,26 +59,72 @@ async def enqueue(
     depth: str | None,
     priority: int = PRIORITY_BACKGROUND,
     requested_by: str | None = None,
+    reuse_done_within_s: float = 0,
 ) -> Job:
     """Insert a job, or return the open one for (kind, mint, depth). Raises the priority
-    of an existing job if the new request is more urgent."""
+    of an existing job if the new request is more urgent.
+
+    With reuse_done_within_s > 0, an identical job that finished that recently is returned
+    instead of a new one. This closes the race where a caller misses the cache just before
+    the running job commits its result and would otherwise enqueue a duplicate."""
+    async with conn.transaction():
+        # Serialise against complete() for the same key, so a caller sees the job either
+        # still open (and joins it) or finished (and reuses it), never the commit in between.
+        await conn.execute("select pg_advisory_xact_lock($1)", _job_lock_key(kind, mint, depth))
+        row = await _enqueue_row(
+            conn, kind, mint, depth, priority, requested_by, reuse_done_within_s
+        )
+    job = Job.from_record(row)
+    if job.status != "done":
+        await conn.execute("select pg_notify($1, $2)", CHANNEL_NEW, str(job.id))
+    return job
+
+
+def _job_lock_key(kind: str, mint: str | None, depth: str | None) -> int:
+    digest = hashlib.blake2b(f"{kind}|{mint}|{depth}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
+
+
+async def _enqueue_row(
+    conn: asyncpg.Connection,
+    kind: str,
+    mint: str | None,
+    depth: str | None,
+    priority: int,
+    requested_by: str | None,
+    reuse_done_within_s: float,
+) -> asyncpg.Record:
     row = await conn.fetchrow(
         """
-        insert into job (kind, mint, depth, priority, requested_by)
-        values ($1, $2, $3, $4, $5)
-        on conflict (kind, mint, depth) where status in ('pending','running')
-        do update set priority = least(job.priority, excluded.priority)
-        returning *
+        with recent as (
+          select * from job
+          where $6 > 0 and kind = $1 and mint is not distinct from $2
+            and depth is not distinct from $3 and status = 'done'
+            and finished_at > now() - make_interval(secs => $6)
+          order by finished_at desc
+          limit 1
+        ), ins as (
+          insert into job (kind, mint, depth, priority, requested_by)
+          select $1, $2, $3, $4, $5
+          where not exists (select 1 from recent)
+          on conflict (kind, mint, depth) where status in ('pending','running')
+          do update set priority = least(job.priority, excluded.priority)
+          returning *
+        )
+        select * from ins
+        union all
+        select * from recent
+        limit 1
         """,
         kind,
         mint,
         depth,
         priority,
         requested_by,
+        float(reuse_done_within_s),
     )
     assert row is not None
-    await conn.execute("select pg_notify($1, $2)", CHANNEL_NEW, str(row["id"]))
-    return Job.from_record(row)
+    return row
 
 
 async def get(conn: asyncpg.Connection, job_id: int) -> Job | None:
@@ -116,12 +163,19 @@ async def claim(
 
 
 async def complete(conn: asyncpg.Connection, job_id: int, result_version: int | None) -> None:
-    await conn.execute(
-        """update job set status='done', finished_at=now(), locked_until=null,
-           result_version=$2, last_error=null where id=$1""",
-        job_id,
-        result_version,
-    )
+    async with conn.transaction():
+        key = await conn.fetchrow("select kind, mint, depth from job where id=$1", job_id)
+        if key is not None:
+            await conn.execute(
+                "select pg_advisory_xact_lock($1)",
+                _job_lock_key(key["kind"], key["mint"], key["depth"]),
+            )
+        await conn.execute(
+            """update job set status='done', finished_at=now(), locked_until=null,
+               result_version=$2, last_error=null where id=$1""",
+            job_id,
+            result_version,
+        )
     await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
 
 

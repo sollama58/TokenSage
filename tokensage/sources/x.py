@@ -50,13 +50,17 @@ class TweetData:
     views: int | None = None
     community: dict[str, Any] | None = None
     possibly_sensitive: bool | None = None
+    # The tweet this one quotes, when the source returns it inline (one level only).
+    quoted: TweetData | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
-        d = {k: v for k, v in self.__dict__.items() if k != "raw"}
+        d = {k: v for k, v in self.__dict__.items() if k not in ("raw", "quoted")}
         for k in ("created_at", "author_joined"):
             if d.get(k) is not None:
                 d[k] = d[k].isoformat()
+        if self.quoted is not None:
+            d["quoted"] = self.quoted.to_json()
         return d
 
     @classmethod
@@ -65,6 +69,8 @@ class TweetData:
         for k in ("created_at", "author_joined"):
             if d.get(k):
                 d[k] = datetime.fromisoformat(d[k])
+        q = d.get("quoted")
+        d["quoted"] = cls.from_json(q) if isinstance(q, dict) else None
         d.setdefault("raw", {})
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
@@ -180,6 +186,14 @@ async def fx_tweet(http: httpx.AsyncClient, tweet_id: str) -> TweetData | None:
         if j.get("code") == 404:
             return TweetData(id=tweet_id, status="deleted", source="fxtwitter")
         return None
+    t = _fx_status(st, tweet_id)
+    quote = st.get("quote")
+    if isinstance(quote, dict) and quote.get("text"):
+        t.quoted = _fx_status(quote, str(quote.get("id") or ""))
+    return t
+
+
+def _fx_status(st: dict[str, Any], tweet_id: str) -> TweetData:
     au = st.get("author") or {}
     media = st.get("media") or {}
     quote = st.get("quote") or {}
@@ -221,6 +235,14 @@ async def vx_tweet(http: httpx.AsyncClient, tweet_id: str) -> TweetData | None:
         return None
     if not j.get("tweetID") and not j.get("text"):
         return None
+    t = _vx_status(j, tweet_id)
+    qrt = j.get("qrt")
+    if isinstance(qrt, dict) and qrt.get("text"):
+        t.quoted = _vx_status(qrt, str(qrt.get("tweetID") or ""))
+    return t
+
+
+def _vx_status(j: dict[str, Any], tweet_id: str) -> TweetData:
     return TweetData(
         id=str(j.get("tweetID") or tweet_id),
         status="ok",
@@ -256,6 +278,14 @@ async def syndication_tweet(http: httpx.AsyncClient, tweet_id: str) -> TweetData
         return TweetData(id=tweet_id, status="deleted", source="syndication")
     if j.get("__typename") not in ("Tweet", None) or not j.get("text"):
         return None
+    t = _synd_status(j, tweet_id)
+    q = j.get("quoted_tweet")
+    if isinstance(q, dict) and q.get("text"):
+        t.quoted = _synd_status(q, str(q.get("id_str") or ""))
+    return t
+
+
+def _synd_status(j: dict[str, Any], tweet_id: str) -> TweetData:
     u = j.get("user") or {}
     vt = None
     if u.get("verified_type"):
@@ -344,7 +374,15 @@ async def paid_tweet(http: httpx.AsyncClient, tweet_id: str, api_key: str) -> Tw
     tweets = j.get("tweets") or []
     if not tweets:
         return TweetData(id=tweet_id, status="deleted", source="twitterapi_io")
-    t = tweets[0]
+    out = _paid_status(tweets[0], tweet_id)
+    q = tweets[0].get("quoted_tweet")
+    if isinstance(q, dict) and q.get("text"):
+        out.quoted = _paid_status(q, str(q.get("id") or ""))
+        out.quoted_tweet_id = out.quoted_tweet_id or out.quoted.id or None
+    return out
+
+
+def _paid_status(t: dict[str, Any], tweet_id: str) -> TweetData:
     au = t.get("author") or {}
     return TweetData(
         id=str(t.get("id") or tweet_id),

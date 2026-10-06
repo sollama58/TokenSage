@@ -96,3 +96,22 @@ async def test_complete_notifies_waiter(migrated_db: str, conn: asyncpg.Connecti
     finally:
         await waiter.stop()
         await pool.close()
+
+
+async def test_enqueue_reuses_a_just_finished_job(conn: asyncpg.Connection) -> None:
+    j = await queue.enqueue(conn, "analyze", MINT, "full")
+    claimed = await queue.claim(conn, lease_s=60)
+    assert claimed and claimed.id == j.id
+    await queue.complete(conn, j.id, result_version=1)
+    # a caller that missed the cache while the job committed gets the finished job back
+    again = await queue.enqueue(conn, "analyze", MINT, "full", reuse_done_within_s=30)
+    assert again.id == j.id and again.status == "done"
+    # other depths, refreshes (no reuse window) and stale finishes create a new job
+    other = await queue.enqueue(conn, "analyze", MINT, "basic", reuse_done_within_s=30)
+    assert other.id != j.id and other.status == "pending"
+    fresh = await queue.enqueue(conn, "analyze", MINT, "full")
+    assert fresh.id != j.id and fresh.status == "pending"
+    await conn.execute("update job set finished_at = now() - interval '1 hour' where id=$1", j.id)
+    await conn.execute("delete from job where id=$1", fresh.id)
+    stale = await queue.enqueue(conn, "analyze", MINT, "full", reuse_done_within_s=30)
+    assert stale.id not in (j.id, fresh.id) and stale.status == "pending"
