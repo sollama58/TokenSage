@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -10,6 +11,8 @@ from tokensage.sources.x import ProfileData, TweetData
 
 BIG_ACCOUNT = 50_000
 FRESH_DAYS = 14
+MAX_MENTIONS = 5
+MENTION = re.compile(r"(?<![\w@])@([A-Za-z0-9_]{1,15})\b")
 
 
 @dataclass
@@ -29,12 +32,24 @@ class XAssessment:
     username_changes: int | None = None
     fetch_source: str | None = None
     quoted: QuotedAssessment | None = None
+    replied_to: QuotedAssessment | None = None  # the post the linked tweet replies to
+    # every account involved: the author, the quoted and replied-to authors, @mentions
+    accounts: list[XAccount] = field(default_factory=list)
+
+
+@dataclass
+class XAccount:
+    role: str  # author | quoted_author | replied_to_author | mentioned
+    handle: str | None
+    name: str | None = None  # display name, when known
+    followers: int | None = None
+    verified_type: str | None = None
 
 
 @dataclass
 class QuotedAssessment:
-    """The tweet the linked tweet quotes. Often the real narrative: a launch tweet that
-    quote-tweets someone else's earlier post."""
+    """A post the linked tweet points at: the one it quotes, or the one it replies to. Often
+    the real narrative: a launch tweet that quotes or answers someone else's earlier post."""
 
     id: str
     status: str  # ok | deleted | failed
@@ -161,7 +176,13 @@ def assess(
                 )
             )
         if tweet.quoted is not None:
-            _assess_quoted(a, tweet, token_created)
+            a.quoted = _assess_related(a, tweet, tweet.quoted, "quote", token_created)
+        if tweet.replied_to is not None:
+            a.replied_to = _assess_related(a, tweet, tweet.replied_to, "reply", token_created)
+        elif tweet.replying_to_id:
+            a.replied_to = QuotedAssessment(
+                id=tweet.replying_to_id, status="failed", author_handle=tweet.replying_to_handle
+            )
         if tweet.possibly_sensitive:
             a.evidence.append(
                 Ev(
@@ -214,6 +235,8 @@ def assess(
         a.status = "not_fetched"  # community details need the paid tier (guide §4.3)
         return a
 
+    a.accounts = _accounts(a, tweet if kind == "tweet" else None)
+
     # ---- account-quality flags (tweet or profile)
     if a.username_changes:
         a.flags.append(
@@ -235,36 +258,51 @@ def assess(
     return a
 
 
-def _assess_quoted(a: XAssessment, tweet: TweetData, token_created: datetime | None) -> None:
-    q = tweet.quoted
-    assert q is not None
-    qa = QuotedAssessment(id=q.id or (tweet.quoted_tweet_id or ""), status=q.status)
-    a.quoted = qa
+_RELATED = {
+    "quote": ("quotes", "quoted post", "x_quote_timing", "x_quote_author"),
+    "reply": ("replies to", "replied-to post", "x_reply_timing", "x_reply_author"),
+}
+
+
+def _assess_related(
+    a: XAssessment,
+    tweet: TweetData,
+    q: TweetData,
+    kind: str,
+    token_created: datetime | None,
+) -> QuotedAssessment:
+    """The quoted or replied-to post: record it and, when it is someone else's earlier post,
+    treat it as the narrative the coin borrows."""
+    verb, noun, timing_kind, author_kind = _RELATED[kind]
+    fallback_id = tweet.quoted_tweet_id if kind == "quote" else tweet.replying_to_id
+    qa = QuotedAssessment(id=q.id or (fallback_id or ""), status=q.status)
+    if kind == "reply":
+        qa.author_handle = tweet.replying_to_handle
     if q.status != "ok":
-        return
+        return qa
     qa.text = q.text
     qa.created_at = q.created_at
-    qa.author_handle = q.author_handle
+    qa.author_handle = q.author_handle or qa.author_handle
     qa.author_id = q.author_id
     qa.author_name = q.author_name
     qa.followers = q.followers
     qa.verified_type = q.verified_type
     qa.joined = q.author_joined
     same_author = bool(
-        q.author_handle
+        qa.author_handle
         and tweet.author_handle
-        and q.author_handle.lower() == tweet.author_handle.lower()
+        and qa.author_handle.lower() == tweet.author_handle.lower()
     )
     gap_days = _days(token_created, q.created_at)
     if same_author or gap_days is None or gap_days <= 0:
-        return
-    # The linked tweet quotes an earlier post by someone else: that post is the narrative.
+        return qa
+    # The linked tweet points at an earlier post by someone else: that post is the narrative.
     a.evidence.append(
         Ev(
-            "x_quote_timing",
+            timing_kind,
             "news_event",
             0.4 if gap_days < 3 else 0.2,
-            f"the linked tweet quotes @{q.author_handle or '?'}'s post from "
+            f"the linked tweet {verb} @{qa.author_handle or '?'}'s post from "
             f"{_fmt_days(gap_days)} before the token",
             "x",
             "x",
@@ -277,21 +315,56 @@ def _assess_quoted(a: XAssessment, tweet: TweetData, token_created: datetime | N
                 (
                     "borrowed_narrative",
                     "info",
-                    f"the linked tweet quotes @{q.author_handle}, a large/verified account; "
+                    f"the linked tweet {verb} @{qa.author_handle}, a large/verified account; "
                     "the coin borrows that narrative",
                 )
             )
         a.evidence.append(
             Ev(
-                "x_quote_author",
+                author_kind,
                 "celebrity",
                 0.35,
-                f"quoted post by a large account @{q.author_handle} "
+                f"{noun} by a large account @{qa.author_handle} "
                 f"({q.followers or '?'} followers, {q.verified_type or 'unverified'})",
                 "x",
                 "x",
             )
         )
+    return qa
+
+
+def _accounts(a: XAssessment, tweet: TweetData | None) -> list[XAccount]:
+    """Every account involved, once each: the author (or linked profile), the quoted and
+    replied-to authors, then accounts @mentioned in any of the posts."""
+    out: list[XAccount] = []
+    seen: set[str] = set()
+
+    def add(role: str, handle: str | None, name: str | None = None, **kw: object) -> None:
+        key = (handle or "").lower() or f"name:{(name or '').lower()}"
+        if key in ("", "name:") or key in seen:
+            return
+        seen.add(key)
+        out.append(XAccount(role, handle, name, **kw))  # type: ignore[arg-type]
+
+    add("author", a.author_handle, a.author_name, followers=a.followers,
+        verified_type=a.verified_type)  # fmt: skip
+    texts = [a.text or ""]
+    for role, r in (("quoted_author", a.quoted), ("replied_to_author", a.replied_to)):
+        if r is not None:
+            add(role, r.author_handle, r.author_name, followers=r.followers,
+                verified_type=r.verified_type)  # fmt: skip
+            texts.append(r.text or "")
+    if tweet is None:
+        return out
+    mentions = 0
+    for t in texts:
+        for m in MENTION.finditer(t):
+            if mentions >= MAX_MENTIONS:
+                return out
+            before = len(out)
+            add("mentioned", m.group(1))
+            mentions += len(out) - before
+    return out
 
 
 def _fmt_days(d: float) -> str:

@@ -24,7 +24,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.segment import common_words
 from tokensage.sources.x import ProfileData, TweetData
 
-MAX_POST_CHARS = 600
+MAX_POST_CHARS = 1000
 REFERENT_MIN = 0.45  # the post's referent must be this confident to count
 TOKEN_REFERENT_MIN = 0.3  # the token's own (name/ticker/image) referent is often weaker
 # Categories too generic to say two things are about the same subject.
@@ -93,13 +93,18 @@ class XMatch:
 
 
 def post_text(tweet: TweetData | None, profile: ProfileData | None) -> str | None:
-    """What the link shows: the post text (plus the post it quotes), or for a profile link
-    the display name, handle and bio."""
+    """What the link shows: the post text, the posts it quotes and replies to, and the
+    display names of their authors; or for a profile link the display name, handle and bio."""
     parts: list[str] = []
     if tweet is not None and tweet.status == "ok":
         parts.append(tweet.text or "")
-        if tweet.quoted is not None and tweet.quoted.status == "ok" and tweet.quoted.text:
-            parts.append(tweet.quoted.text)
+        # names before the related posts' text, so the length cap never cuts them
+        for t in (tweet, tweet.quoted, tweet.replied_to):
+            if t is not None and t.status == "ok" and t.author_name:
+                parts.append(t.author_name)
+        for other in (tweet.quoted, tweet.replied_to):
+            if other is not None and other.status == "ok" and other.text:
+                parts.append(other.text)
     elif profile is not None and profile.status == "ok":
         parts += [profile.name or "", profile.handle or "", profile.description or ""]
     text = "\n".join(p for p in parts if p).strip()
