@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import imagehash
 import numpy as np
@@ -61,6 +62,7 @@ class Candidate:
     mint: str | None = None
     known_coin: str | None = None
     template: str | None = None
+    created_at: datetime | None = None  # when the token behind a mint candidate launched
 
 
 @dataclass

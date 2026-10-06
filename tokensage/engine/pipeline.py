@@ -51,6 +51,7 @@ class DbContext:
     same_name: list[SameNameToken] = field(default_factory=list)
     image_candidates: list[image_stage.Candidate] = field(default_factory=list)
     extra_coins: list[KnownCoin] = field(default_factory=list)
+    copycat_window_days: int = 30
 
 
 @dataclass
@@ -250,55 +251,92 @@ def _lexicon_evidence(
     return evs
 
 
+@dataclass
+class RecentCopy:
+    """A token launched within the copycat window before this one that it copies."""
+
+    what: str  # e.g. "$PNUT (Peanut)" or a mint prefix
+    via: str  # name/ticker | logo
+    age_s: float  # how long before this token it launched
+
+
+def _within_window(inp: EngineInput, other: datetime | None) -> float | None:
+    """Seconds `other` launched before this token, when that is inside the copycat window
+    (and more than 5 min, so a near-simultaneous launch is not a copy); else None."""
+    if other is None or inp.created_at is None:
+        return None
+    gap = (_aware(inp.created_at) - _aware(other)).total_seconds()
+    if 300 < gap <= inp.ctx.copycat_window_days * 86400:
+        return gap
+    return None
+
+
 def _same_name_evidence(
     inp: EngineInput, n: Normalized, is_famous: bool
-) -> tuple[list[Ev], list[dict]]:
+) -> tuple[list[Ev], list[dict], list[RecentCopy]]:
+    """Earlier tokens with this name or ticker. Only those launched within the copycat
+    window count: a namesake from months ago is not the live coin this one copies."""
     evs: list[Ev] = []
     copies: list[dict] = []
+    recent: list[RecentCopy] = []
     if not inp.ctx.same_name or not inp.created_at:
-        return evs, copies
-    earlier = [
-        t
+        return evs, copies, recent
+    in_window = [
+        (t, gap)
         for t in inp.ctx.same_name
-        if t.mint != inp.mint
-        and t.created_at
-        and (_aware(inp.created_at) - _aware(t.created_at)).total_seconds() > 300
+        if t.mint != inp.mint and (gap := _within_window(inp, t.created_at)) is not None
     ]
-    if not earlier:
-        return evs, copies
-    earlier.sort(key=lambda t: t.created_at or inp.created_at)  # type: ignore[arg-type,return-value]
-    first = earlier[0]
+    if not in_window:
+        return evs, copies, recent
+    in_window.sort(key=lambda tg: -tg[1])  # earliest launch first
+    first, gap = in_window[0]
+    days = inp.ctx.copycat_window_days
     if not is_famous:
         evs.append(
             Ev(
                 kind="same_name",
                 label="derivative/copycat",
-                weight=min(0.75, 0.45 + 0.05 * len(earlier)),
+                weight=min(0.75, 0.45 + 0.05 * len(in_window)),
                 detail=(
-                    f"{len(earlier)} earlier token(s) share this name/ticker; the earliest "
-                    f"({first.symbol or '?'}, {first.source}) predates it by "
-                    f"{_dur((_aware(inp.created_at) - _aware(first.created_at)).total_seconds())}"  # type: ignore[arg-type]
+                    f"{len(in_window)} token(s) with this name/ticker launched in the {days} d "
+                    f"before it; the earliest (${first.symbol or '?'}, {first.source}) "
+                    f"{_dur(gap)} earlier"
                 ),
                 source=f"same_name:{first.source}",
                 where="db",
             )
         )
+        recent.append(RecentCopy(f"${first.symbol or '?'}", "name/ticker", gap))
     copies.append(
         {
             "ticker": first.symbol,
             "name": first.name,
             "mint": first.mint,
-            "signals": ["same_name_earlier", f"earlier_count:{len(earlier)}"],
+            "signals": ["same_name_recent", f"recent_count:{len(in_window)}"],
+            "created_at": first.created_at,
+            "recent": True,
         }
     )
-    return evs, copies
+    return evs, copies, recent
 
 
-def _image_evidence(res: image_stage.ImageResult, k: Knowledge) -> list[Ev]:
+def _image_evidence(
+    res: image_stage.ImageResult, k: Knowledge, inp: EngineInput
+) -> tuple[list[Ev], list[RecentCopy]]:
+    """Logo near-duplicates. A token's logo counts as copied only when that token launched
+    before this one (and, by the candidate query, within the copycat window); a famous
+    coin's logo is a reference to it."""
     evs: list[Ev] = []
+    recent: list[RecentCopy] = []
     same = int(k.scoring.get("logo_phash_same", 8))
     for nd in res.near:
         c = nd.candidate
+        if c.mint:
+            gap = _within_window(inp, c.created_at)
+            if gap is None and inp.created_at is not None:
+                continue  # launched after this token, or outside the window: not its source
+            if gap is not None:
+                recent.append(RecentCopy(c.mint[:6] + "…", "logo", gap))
         strength = 0.85 if nd.distance <= same else 0.6
         who = c.known_coin or c.template or c.mint or c.content_key
         label = "derivative/logo_reuse"
@@ -327,7 +365,7 @@ def _image_evidence(res: image_stage.ImageResult, k: Knowledge) -> list[Ev]:
                 referent=ref,
             )
         )
-    return evs
+    return evs, recent
 
 
 def _dur(s: float) -> str:
@@ -343,9 +381,15 @@ def _dur(s: float) -> str:
 # ----------------------------------------------------------------- flags
 
 
-def _flags(inp: EngineInput, n: Normalized, agg: Aggregated, is_famous: bool) -> list[FlagOut]:
+def _flags(
+    inp: EngineInput,
+    n: Normalized,
+    agg: Aggregated,
+    is_famous: bool,
+    recent_copies: list[RecentCopy] | None = None,
+    known: list[known_coins.CopyMatch] | None = None,
+) -> list[FlagOut]:
     flags: list[FlagOut] = []
-    cats = dict(agg.categories)
     if "homoglyph" in n.obfuscation:
         flags.append(
             FlagOut(
@@ -359,30 +403,39 @@ def _flags(inp: EngineInput, n: Normalized, agg: Aggregated, is_famous: bool) ->
         flags.append(FlagOut("obfuscated_text", "info", "name uses " + ", ".join(other_obf)))
     if n.scripts:
         flags.append(FlagOut("regional_script", "info", f"name written in {', '.join(n.scripts)}"))
-    derivative_hit = any(
-        e.kind in ("known_coin", "same_name", "image_hash") and e.label.startswith("derivative/")
-        for e in agg.evidence
-    )
-    if derivative_hit and cats.get("derivative", 0) >= 0.5 and not is_famous:
+    days = inp.ctx.copycat_window_days
+    if recent_copies and not is_famous:
+        # copies of coins launched in the last `days` days: riding a live coin
+        best = min(recent_copies, key=lambda c: c.age_s)
         flags.append(
-            FlagOut("copycat", "warn", "same ticker base, name or logo as an existing coin")
-        )
-    if inp.ctx.same_name and inp.created_at:
-        earlier = [
-            t
-            for t in inp.ctx.same_name
-            if t.mint != inp.mint
-            and t.created_at
-            and (_aware(inp.created_at) - _aware(t.created_at)).total_seconds() > 300
-        ]
-        if earlier and not is_famous:
-            flags.append(
-                FlagOut(
-                    "earlier_same_name",
-                    "warn",
-                    f"{len(earlier)} token(s) with this name/ticker were created earlier",
-                )
+            FlagOut(
+                "copycat",
+                "warn",
+                f"copies {best.what} by {best.via}, launched {_dur(best.age_s)} before it "
+                f"(within {days} d)",
             )
+        )
+    names = [c for c in recent_copies or [] if c.via == "name/ticker"]
+    if names and not is_famous:
+        flags.append(
+            FlagOut(
+                "earlier_same_name",
+                "warn",
+                f"{names[0].what} with this name/ticker launched {_dur(names[0].age_s)} "
+                f"earlier (within {days} d)",
+            )
+        )
+    established = [m for m in known or [] if not known_coins.is_self(m, n)]
+    if established and not is_famous:
+        top = established[0].coin
+        flags.append(
+            FlagOut(
+                "references_known_coin",
+                "info",
+                f"builds on the established coin ${top.symbol} ({top.name}); "
+                "a reference, not a recent copy",
+            )
+        )
     if inp.ctx.x_reuse_count >= 5:
         flags.append(
             FlagOut(
@@ -528,17 +581,24 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
 
     tk = ticker.explain(n, k)
 
-    img = image_stage.analyze(
-        inp.image_bytes, inp.ctx.image_candidates, int(k.scoring.get("logo_phash_edited", 14))
-    )
-    evidence += _image_evidence(img, k)
+    max_dist = int(k.scoring.get("logo_phash_edited", 14))
+    img = image_stage.analyze(inp.image_bytes, inp.ctx.image_candidates, max_dist)
+    if img.features is None and inp.logo_features is not None:
+        # the logo's hashes came from cache: compare those instead of skipping the check
+        img = image_stage.ImageResult(
+            features=inp.logo_features,
+            near=image_stage.near_duplicates(inp.logo_features, inp.ctx.image_candidates, max_dist),
+        )
+    img_evs, recent_copies = _image_evidence(img, k, inp)
+    evidence += img_evs
 
     pair = _pair(inp, n, k)
     if pair is not None:
         evidence += pair.evidence
 
-    same_evs, copies = _same_name_evidence(inp, n, is_famous)
+    same_evs, copies, recent_names = _same_name_evidence(inp, n, is_famous)
     evidence += same_evs
+    recent_copies = (recent_names + recent_copies) if not is_famous else []
     for m in matches:
         if known_coins.is_self(m, n):
             continue
@@ -549,6 +609,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 "name": m.coin.name,
                 "mint": m.coin.mint,
                 "signals": m.signals,
+                "recent": False,  # an established coin: a reference, not a live copy
             },
         )
 
@@ -569,7 +630,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         evidence += trends.evidence(trend_hits, inp.trend_index)
 
     agg = aggregate(evidence, k)
-    flags = _flags(inp, n, agg, is_famous)
+    flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     if pair is not None and pair.meaningful:
         flags.append(
             FlagOut(

@@ -132,3 +132,74 @@ def test_same_name_earlier_token_flags_copycat() -> None:
     assert {"earlier_same_name", "copycat", "x_link_reused", "serial_creator"} <= flags
     assert out.copy_of and out.copy_of[0]["mint"] == "earlier1"
     assert dict(out.agg.categories).get("derivative/copycat", 0) >= 0.5
+
+
+def test_copycat_only_counts_coins_from_the_copycat_window() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from tokensage.engine.pipeline import SameNameToken
+
+    now = datetime(2026, 10, 1, tzinfo=UTC)
+
+    def run(*ages_days: float):  # type: ignore[no-untyped-def]
+        same = [
+            SameNameToken(f"m{i}", "Blorbo", "BLORBO", now - timedelta(days=d), "db")
+            for i, d in enumerate(ages_days)
+        ]
+        ctx = DbContext(same_name=same)
+        return run_basic(EngineInput("mine", "Blorbo", "BLORBO", None, None, now, ctx=ctx))
+
+    old = run(45, 90)  # only months-old namesakes: not a copy of a live coin
+    assert not {"copycat", "earlier_same_name"} & {f.code for f in old.flags}
+    assert "derivative/copycat" not in dict(old.agg.categories)
+    assert old.copy_of == []
+
+    live = run(90, 6)  # a namesake launched 6 days earlier: the copied coin
+    copy = next(f for f in live.flags if f.code == "copycat")
+    assert "within 30 d" in copy.detail
+    assert live.copy_of[0]["mint"] == "m1" and live.copy_of[0]["recent"] is True
+
+    just_now = run(0.001)  # a few minutes apart: launched together, not a copy
+    assert "copycat" not in {f.code for f in just_now.flags}
+
+
+def test_logo_copy_needs_an_earlier_recent_token() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from tests.fixtures.chain import PNG
+    from tokensage.engine import image as image_stage
+
+    now = datetime(2026, 10, 1, tzinfo=UTC)
+    f = image_stage.features(PNG)
+    assert f is not None
+
+    def run(created: datetime):  # type: ignore[no-untyped-def]
+        cand = image_stage.Candidate("ipfs:x", f.phash, mint="OtherMint111", created_at=created)
+        ctx = DbContext(image_candidates=[cand])
+        return run_basic(EngineInput("mine", "Zorp", "ZORP", None, PNG, now, ctx=ctx))
+
+    earlier = run(now - timedelta(days=3))
+    assert "copycat" in {fl.code for fl in earlier.flags}
+    later = run(now + timedelta(hours=2))  # that token copied this one, not the reverse
+    assert "copycat" not in {fl.code for fl in later.flags}
+    assert not any(e.kind == "image_hash" for e in later.evidence)
+
+
+def test_cached_logo_hashes_are_still_compared() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from tests.fixtures.chain import PNG
+    from tokensage.engine import image as image_stage
+
+    now = datetime(2026, 10, 1, tzinfo=UTC)
+    f = image_stage.features(PNG)
+    assert f is not None
+    cand = image_stage.Candidate(
+        "ipfs:x", f.phash, mint="OtherMint111", created_at=now - timedelta(days=1)
+    )
+    inp = EngineInput(
+        "mine", "Zorp", "ZORP", None, None, now, ctx=DbContext(image_candidates=[cand])
+    )
+    inp.logo_features = f  # no image bytes this run: hashes from cache
+    out = run_basic(inp)
+    assert out.image.near and any(e.kind == "image_hash" for e in out.evidence)

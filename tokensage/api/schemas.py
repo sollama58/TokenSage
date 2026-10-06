@@ -109,6 +109,15 @@ class CopyOf(_Model):
     name: str | None = None
     mint: str | None = None
     signals: list[str] = []
+    created_at: datetime | None = Field(
+        default=None, description="When the copied token launched (when known)"
+    )
+    recent: bool | None = Field(
+        default=None,
+        description="True: it launched within the copycat window (30 d) before this token, so "
+        "this is a copy of a live coin (flag copycat). False: an established coin this one "
+        "builds on (flag references_known_coin)",
+    )
 
 
 class ImageLabel(_Model):

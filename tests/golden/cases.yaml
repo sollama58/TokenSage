@@ -57,7 +57,8 @@ cases:
     symbol: BPNUT
     categories_include: [derivative, animal/squirrel]
     copy_of_includes: [PNUT]
-    flags_include: [copycat]
+    flags_include: [references_known_coin]  # PNUT is established: a reference, not a copy
+    flags_exclude: [copycat]
     referent: Peanut
   - name: Peanut the Squirrel 2.0
     symbol: PNUT2
@@ -97,12 +98,12 @@ cases:
     referent: Peanut
   - name: Moo Deng on Sol
     symbol: MOODENG
-    categories_include: [derivative/copycat, animal/hippo]
-    flags_include: [copycat]
+    categories_include: [derivative/reference, animal/hippo]
+    flags_include: [references_known_coin]
   - name: Real Fartcoin
     symbol: FARTCOIN
-    categories_include: [derivative/copycat]
-    flags_include: [copycat]
+    categories_include: [derivative/reference]
+    flags_include: [references_known_coin]
   - name: Floki Inu
     symbol: FLOKI
     categories_include: [animal/dog]
