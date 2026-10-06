@@ -48,6 +48,37 @@ class Normalized(_Model):
     obfuscation: list[str] = []
 
 
+class PairReferent(_Model):
+    label: str
+    kind: ReferentKind
+    desc: str | None = None
+    confidence: float = Field(ge=0, le=1)
+
+
+class Pair(_Model):
+    """The token the coin trades against on its bonding curve. SOL and stablecoins carry no
+    meaning; any other token feeds the analysis (category crypto_native/paired_ecosystem,
+    derivative/pair_family when the name builds on it, flag non_sol_pair)."""
+
+    mint: str
+    symbol: str | None = None
+    name: str | None = None
+    kind: Literal["sol", "stablecoin", "token"]
+    source: str | None = Field(
+        default=None,
+        description="Where the pair token was identified: neutral (SOL/stablecoin), "
+        "known_coin, analysis (a stored TokenSage analysis), db, onchain, none",
+    )
+    builds_on: bool = Field(
+        default=False, description="The coin's name or ticker builds on the pair token's"
+    )
+    builds_on_detail: str | None = None
+    referent: PairReferent | None = Field(
+        default=None, description="What the pair token itself refers to, when known"
+    )
+    categories: list[Category] = []
+
+
 class Market(_Model):
     complete: bool | None = None
     curve_progress: float | None = Field(default=None, ge=0, le=1)
@@ -55,6 +86,9 @@ class Market(_Model):
     creator: str | None = None
     is_mayhem_mode: bool | None = None
     quote_mint: str | None = None
+    pair: Pair | None = Field(
+        default=None, description="The token the coin trades against (from quote_mint)"
+    )
 
 
 class Referent(_Model):

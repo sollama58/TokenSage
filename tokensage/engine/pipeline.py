@@ -7,7 +7,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from tokensage.engine import image as image_stage
-from tokensage.engine import known_coins, lexicon, ocr, ticker, trends, xmatch, xsignals
+from tokensage.engine import (
+    known_coins,
+    lexicon,
+    ocr,
+    pairing,
+    ticker,
+    trends,
+    xmatch,
+    xsignals,
+)
 from tokensage.engine.aggregate import Aggregated, aggregate
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
@@ -15,7 +24,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.6.0-full"
+RULES_VERSION = "0.7.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -55,6 +64,7 @@ class EngineInput:
     x_kind: str | None = None  # from XRef.kind
     x_object_time: datetime | None = None
     ctx: DbContext = field(default_factory=DbContext)
+    pair: pairing.PairInput | None = None  # the bonding curve's quote token
     # full depth only
     x_url_handle: str | None = None
     tweet: TweetData | None = None
@@ -91,6 +101,7 @@ class EngineOutput:
     x: xsignals.XAssessment | None = None
     trend_hits: list[trends.TrendHit] = field(default_factory=list)
     x_match: xmatch.XMatch | None = None
+    pair: pairing.PairAssessment | None = None
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -505,6 +516,10 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     )
     evidence += _image_evidence(img, k)
 
+    pair = _pair(inp, n, k)
+    if pair is not None:
+        evidence += pair.evidence
+
     same_evs, copies = _same_name_evidence(inp, n, is_famous)
     evidence += same_evs
     for m in matches:
@@ -537,6 +552,15 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
 
     agg = aggregate(evidence, k)
     flags = _flags(inp, n, agg, is_famous)
+    if pair is not None and pair.meaningful:
+        flags.append(
+            FlagOut(
+                "non_sol_pair",
+                "info",
+                f"trades against {pair.label()} instead of SOL"
+                + (f"; the name builds on it ({pair.builds_on_detail})" if pair.builds_on else ""),
+            )
+        )
     if xa:
         for code, sev, detail in xa.flags:
             flags.append(FlagOut(code, sev, detail))
@@ -584,7 +608,31 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         ocr_error=ocr_err,
         x=xa,
         trend_hits=trend_hits,
+        pair=pair,
     )
+
+
+def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessment | None:
+    """Read the pair token: a known coin, a stored analysis, or (failing both) the engine's
+    basic read of the pair token's own name and ticker."""
+    if inp.pair is None:
+        return None
+    coin = None
+    pair_meaning = None
+    if inp.pair.kind == "token":
+        coin = pairing.known_coin_for(inp.pair.mint, [*k.coins, *inp.ctx.extra_coins])
+        if coin is None and inp.pair.referent is None and (inp.pair.name or inp.pair.symbol):
+            pair_only = EngineInput(
+                mint=inp.pair.mint,
+                name=inp.pair.name,
+                symbol=inp.pair.symbol,
+                description=None,
+                image_bytes=None,
+                created_at=None,
+                ctx=DbContext(extra_coins=inp.ctx.extra_coins),
+            )
+            pair_meaning = _run(pair_only, "basic").agg
+    return pairing.assess(inp.pair, n, k, pair_meaning, coin)
 
 
 def _x_match(

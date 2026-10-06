@@ -10,6 +10,9 @@ from tokensage.engine.knowledge import Knowledge
 from tokensage.taxonomy import category_labels
 
 _WHERE_FACTOR = {"description": "description_factor", "image": None, "x": None}
+# Labels about the coin's context, not its subject: they score on their own but do not
+# lift their parent (a coin paired against BONK is not thereby a crypto in-joke coin).
+NO_PARENT = {"crypto_native/paired_ecosystem"}
 
 
 @dataclass
@@ -58,7 +61,7 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
         if w <= 0:
             continue
         targets = [ev.label]
-        p = _parent(ev.label)
+        p = _parent(ev.label) if ev.label not in NO_PARENT else None
         if p and p in labels:
             targets.append(p)
         for t in targets:

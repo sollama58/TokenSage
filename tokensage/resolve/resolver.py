@@ -119,6 +119,51 @@ def _quote_label(quote_mint: str | None) -> str | None:
     return quote_mint
 
 
+async def _onchain_metadata(
+    rpc: SolanaRpc, mint: str, token_program: str, info: dict
+) -> tuple[dict[str, str] | None, str]:
+    """name / symbol / uri from the Token-2022 extension, the Metaplex PDA, or DAS."""
+    meta: dict[str, str] | None = None
+    meta_source = "none"
+    if token_program == "token-2022":
+        meta = _token2022_metadata(info)
+        meta_source = "token2022" if meta else "none"
+    if meta is None and token_program == "spl-token":
+        md_acc = await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
+        if md_acc:
+            try:
+                meta = metaplex.decode_metadata(base64.b64decode(md_acc["data"][0]))
+                meta_source = "metaplex"
+            except (ValueError, struct.error):
+                meta = None
+    if meta is None or not meta.get("uri"):
+        asset = await rpc.get_asset(mint)
+        content = (asset or {}).get("content") or {}
+        if content.get("json_uri") or content.get("metadata"):
+            md = content.get("metadata") or {}
+            meta = {
+                "name": str(md.get("name") or (meta or {}).get("name") or "").strip(),
+                "symbol": str(md.get("symbol") or (meta or {}).get("symbol") or "").strip(),
+                "uri": str(content.get("json_uri") or (meta or {}).get("uri") or "").strip(),
+            }
+            meta_source = "das"
+    return meta, meta_source
+
+
+async def read_mint_metadata(rpc: SolanaRpc, mint: str) -> dict[str, str] | None:
+    """Name / symbol / uri of any SPL or Token-2022 mint (e.g. a pair token), or None when
+    the address is not a mint or carries no metadata."""
+    acc = await rpc.get_account_info(mint, encoding="jsonParsed")
+    if acc is None:
+        return None
+    token_program = TOKEN_PROGRAMS.get(acc.get("owner") or "")
+    parsed = acc.get("data") if isinstance(acc.get("data"), dict) else None
+    if token_program is None or not parsed or parsed.get("parsed", {}).get("type") != "mint":
+        return None
+    meta, _ = await _onchain_metadata(rpc, mint, token_program, parsed["parsed"]["info"])
+    return meta
+
+
 # ----------------------------------------------------------------- creation time
 
 
@@ -248,30 +293,7 @@ async def resolve(
                 curve_progress = 1.0
 
     # 3. on-chain name / symbol / uri
-    meta: dict[str, str] | None = None
-    meta_source = "none"
-    if token_program == "token-2022":
-        meta = _token2022_metadata(info)
-        meta_source = "token2022" if meta else "none"
-    if meta is None and token_program == "spl-token":
-        md_acc = await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
-        if md_acc:
-            try:
-                meta = metaplex.decode_metadata(base64.b64decode(md_acc["data"][0]))
-                meta_source = "metaplex"
-            except (ValueError, struct.error):
-                meta = None
-    if meta is None or not meta.get("uri"):
-        asset = await rpc.get_asset(mint)
-        content = (asset or {}).get("content") or {}
-        if content.get("json_uri") or content.get("metadata"):
-            md = content.get("metadata") or {}
-            meta = {
-                "name": str(md.get("name") or (meta or {}).get("name") or "").strip(),
-                "symbol": str(md.get("symbol") or (meta or {}).get("symbol") or "").strip(),
-                "uri": str(content.get("json_uri") or (meta or {}).get("uri") or "").strip(),
-            }
-            meta_source = "das"
+    meta, meta_source = await _onchain_metadata(rpc, mint, token_program, info)
 
     # 4. creation time + creator
     created: datetime | None = None
