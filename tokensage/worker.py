@@ -17,42 +17,54 @@ from tokensage import queue
 from tokensage.analyzer import AnalyzeFailed, Context, analyze, retry_metadata
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
+from tokensage.engine import ocr
 from tokensage.logging import configure_logging
 
 log = structlog.get_logger("worker")
 
 
+class _Deferred(Exception):
+    """A callback job whose target has not finished; it has been put back to wait."""
+
+
 class Worker:
-    def __init__(self, pool: asyncpg.Pool, settings: Settings):
+    def __init__(self, pool: asyncpg.Pool, settings: Settings, concurrency: int | None = None):
         self.pool = pool
         self.settings = settings
+        self.concurrency = max(1, concurrency or settings.worker_concurrency)
         self.stop = asyncio.Event()
         self._wake = asyncio.Event()
-        self._current_job_id: int | None = None
+        self.active_jobs: set[int] = set()
         self._listen_conn: asyncpg.Connection | None = None
         self.ctx = Context.create(settings)
+        ocr.set_concurrency(settings.ocr_concurrency)
 
     # -- lifecycle ---------------------------------------------------------
 
     async def run(self) -> None:
         await self._start_listener()
-        log.info("worker.start")
+        log.info("worker.start", concurrency=self.concurrency)
         try:
-            while not self.stop.is_set():
-                did_work = await self._tick()
-                if did_work:
-                    continue
-                self._wake.clear()
-                try:
-                    await asyncio.wait_for(
-                        self._wait_for_wake(), timeout=self.settings.worker_poll_interval_s
-                    )
-                except TimeoutError:
-                    pass
+            # N independent claim/process loops: one slow IPFS/X fetch no longer holds up
+            # every other coin. Each loop takes its own pool connection per job.
+            await asyncio.gather(*(self._loop(slot) for slot in range(self.concurrency)))
         finally:
             await self._stop_listener()
             await self.ctx.close()
             log.info("worker.stop")
+
+    async def _loop(self, slot: int) -> None:
+        while not self.stop.is_set():
+            did_work = await self._tick()
+            if did_work:
+                continue
+            self._wake.clear()
+            try:
+                await asyncio.wait_for(
+                    self._wait_for_wake(), timeout=self.settings.worker_poll_interval_s
+                )
+            except TimeoutError:
+                pass
 
     async def _wait_for_wake(self) -> None:
         stop_task = asyncio.create_task(self.stop.wait())
@@ -89,11 +101,11 @@ class Worker:
             job = await queue.claim(conn, self.settings.job_lease_s)
             if job is None:
                 return False
-            self._current_job_id = job.id
+            self.active_jobs.add(job.id)
             try:
                 await self._process(conn, job)
             finally:
-                self._current_job_id = None
+                self.active_jobs.discard(job.id)
             return True
 
     async def _callback(self, conn: asyncpg.Connection, job: queue.Job) -> None:
@@ -106,8 +118,10 @@ class Worker:
         if target is None:
             return
         if target.status not in ("done", "failed"):
-            # not finished yet: push this callback back a little
-            raise RuntimeError("target job not finished")
+            # Not finished yet: wait for it without spending a delivery attempt. Finishing
+            # the target releases this job straight away.
+            await queue.defer(conn, job.id, callbacks.CALLBACK_WAIT_S)
+            raise _Deferred
         result = None
         if target.status == "done" and target.mint and target.depth:
             latest = await service.latest_analysis(conn, target.mint, target.depth)
@@ -146,7 +160,11 @@ class Worker:
                 await queue.complete(conn, job.id, version)
                 bound.info("job.done", version=version)
             elif job.kind == "callback":
-                await self._callback(conn, job)
+                try:
+                    await self._callback(conn, job)
+                except _Deferred:
+                    bound.info("job.callback.waiting_for_target")
+                    return
                 await queue.complete(conn, job.id, None)
                 bound.info("job.callback.done")
             elif job.kind == "retry_metadata":
@@ -178,9 +196,12 @@ class Worker:
 
 
 async def run_worker(
-    pool: asyncpg.Pool, settings: Settings, stop: asyncio.Event | None = None
+    pool: asyncpg.Pool,
+    settings: Settings,
+    stop: asyncio.Event | None = None,
+    concurrency: int | None = None,
 ) -> None:
-    w = Worker(pool, settings)
+    w = Worker(pool, settings, concurrency=concurrency)
     if stop is not None:
 
         async def _relay() -> None:
@@ -199,8 +220,10 @@ async def run_worker(
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    pool = await create_pool(settings.database_url, min_size=1, max_size=3)
-    w = Worker(pool, settings)
+    concurrency = max(1, settings.worker_concurrency)
+    # one connection per concurrent job, plus the LISTEN connection and a spare
+    pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 2)
+    w = Worker(pool, settings, concurrency=concurrency)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, w.request_stop)

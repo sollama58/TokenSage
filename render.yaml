@@ -65,6 +65,10 @@ services:
       - fromGroup: tokensage-shared
       - key: TOKENSAGE_ROLE # picks the entrypoint (tokensage/run.py); no dockerCommand
         value: worker
+      - key: WORKER_CONCURRENCY # jobs in flight at once; each holds one DB connection
+        value: "8"
+      - key: OCR_CONCURRENCY # RapidOCR is ~250 MB; keep 1 on Starter (512 MB)
+        value: "1"
       - key: DATABASE_URL
         fromDatabase: { name: tokensage-db, property: connectionString }
       - key: SOLANA_RPC_URL # HTTPS RPC, e.g. Helius free tier (includes the api key)

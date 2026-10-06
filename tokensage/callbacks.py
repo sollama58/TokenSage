@@ -29,6 +29,9 @@ from tokensage.net.safe_fetch import UnsafeUrl, check_url
 log = structlog.get_logger("callbacks")
 CALLBACK_RETRY_S = 30
 CALLBACK_MAX_ATTEMPTS = 3
+# A callback waits for its target job; finishing the target releases it at once (see
+# queue._release_callbacks). This is only the fallback re-check interval.
+CALLBACK_WAIT_S = 60
 
 
 def sign(secret_hex: str, timestamp: int, body: bytes) -> str:
@@ -49,10 +52,16 @@ async def schedule(
     conn: asyncpg.Connection, *, target_job_id: int, callback_url: str, key_digest: str
 ) -> None:
     await conn.execute(
-        """insert into job (kind, mint, depth, priority, payload)
-           values ('callback', null, null, $1, $2)""",
+        """insert into job (kind, mint, depth, priority, payload, run_after)
+           values ('callback', null, null, $1, $2,
+                   case when exists (select 1 from job
+                                     where id = $3 and status in ('done', 'failed'))
+                        then now()
+                        else now() + make_interval(secs => $4) end)""",
         queue.PRIORITY_BACKGROUND,
         {"target_job_id": target_job_id, "callback_url": callback_url, "key_digest": key_digest},
+        target_job_id,
+        float(CALLBACK_WAIT_S),
     )
     await conn.execute("select pg_notify($1, '0')", queue.CHANNEL_NEW)
 

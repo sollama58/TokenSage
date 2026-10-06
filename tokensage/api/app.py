@@ -33,7 +33,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
         app.state.keys = KeyStore(settings)
-        app.state.pool = await create_pool(settings.database_url)
+        inline_n = max(1, settings.inline_worker_concurrency) if settings.inline_analyzer else 0
+        # API requests share the pool with the inline analyzer's job connections
+        app.state.pool = await create_pool(settings.database_url, max_size=5 + inline_n + 1)
         app.state.waiter = queue.DoneWaiter(app.state.pool)
         await app.state.waiter.start()
         stop = asyncio.Event()
@@ -41,7 +43,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.inline_analyzer:
             from tokensage.worker import run_worker
 
-            inline = asyncio.create_task(run_worker(app.state.pool, settings, stop))
+            inline = asyncio.create_task(
+                run_worker(app.state.pool, settings, stop, concurrency=inline_n)
+            )
             log.info("inline_analyzer.started")
         if not settings.api_key_pairs:
             log.warning("auth.no_api_keys_configured")

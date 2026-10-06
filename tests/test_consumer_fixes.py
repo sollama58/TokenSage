@@ -112,7 +112,7 @@ async def test_jobs_and_webhooks_report_partial(
     received: list[httpx.Request] = []
     router.post(HOOK).mock(side_effect=lambda req: (received.append(req), httpx.Response(204))[1])
     install_web(router, _chain(), gateways_ok=False)  # metadata outage -> partial
-    async with make_client(migrated_db) as c:
+    async with make_client(migrated_db, rate_per_min_default=10_000) as c:
         r = await c.post(
             "/v1/tokens:batch", json={"cas": [T22_MINT], "depth": "basic", "callback_url": HOOK}
         )

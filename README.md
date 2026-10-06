@@ -76,6 +76,29 @@ Reference run (2026-10-06, one process, inline analyzer, 200 synthetic tokens): 
 60 s and a cold-cache 600 req/min for 30 s both returned 100% `200`, no 5xx; warm p50 7 ms,
 p95 ≈ 340 ms, max 3.4 s (cold analyses under 32-way concurrency).
 
+**Analyzer throughput (worker, not inline).** `--mode batch` replays a prefetching consumer:
+every 30 s it POSTs the new, never-seen coins as one batch and polls each job until done. The
+fake chain adds latency to every response (`--ipfs-latency`, `--rpc-latency`). API and worker
+ran as separate processes, `depth=basic`, 2026-10-06:
+
+| Worker loops | Cold coins/min | IPFS / RPC latency | Time-to-done p50 | p95 | max |
+|---|---|---|---|---|---|
+| 1 | 30 | 1–4 s / 0.1–0.4 s | 139.7 s | 263.0 s | 275.1 s |
+| 8 | 30 | 1–4 s / 0.1–0.4 s | 9.2 s | 15.3 s | 16.3 s |
+| 8 | 6 (production rate) | 1–4 s / 1–4 s (worst case) | 15.2 s | 21.3 s | 21.3 s |
+| 8 | 60 (stress, 10×) | 1–4 s / 0.1–0.4 s | 15.3 s | 27.5 s | 31.5 s |
+
+All runs: every coin completed, no 5xx. Worker RSS stayed near 200 MB at basic depth; full
+depth adds RapidOCR (~250 MB, one at a time by default), which is why OCR has its own limit.
+
+```bash
+uv run python scripts/fake_chain_server.py --tokens 3000 --ipfs-latency 1-4 --rpc-latency 0.1-0.4
+INLINE_ANALYZER=false TOKENSAGE_ROLE=api ... uv run python -m tokensage.run      # port 10000
+WORKER_CONCURRENCY=8 TOKENSAGE_ROLE=worker ... uv run python -m tokensage.run
+uv run python scripts/load_test.py --base http://127.0.0.1:10000 --key <key> --cas load_cas.txt \
+  --mode batch --rate 30 --duration 120 --scan-s 30 --poll-s 1 --depth basic
+```
+
 ## Layout
 
 ```

@@ -115,3 +115,42 @@ async def test_enqueue_reuses_a_just_finished_job(conn: asyncpg.Connection) -> N
     await conn.execute("delete from job where id=$1", fresh.id)
     stale = await queue.enqueue(conn, "analyze", MINT, "full", reuse_done_within_s=30)
     assert stale.id not in (j.id, fresh.id) and stale.status == "pending"
+
+
+async def test_callback_waits_for_its_target_and_is_released_on_completion(
+    conn: asyncpg.Connection,
+) -> None:
+    from tokensage import callbacks
+    from tokensage.db import _init_connection
+
+    await _init_connection(conn)  # jsonb codec, as the app's pool installs it
+    target = await queue.enqueue(conn, "analyze", MINT, "full")
+    claimed = await queue.claim(conn, lease_s=60)
+    assert claimed and claimed.id == target.id
+    await callbacks.schedule(
+        conn, target_job_id=target.id, callback_url="https://hook.test/x", key_digest="00"
+    )
+    # target still running: the callback is not claimable yet
+    assert await queue.claim(conn, lease_s=60) is None
+    await queue.complete(conn, target.id, result_version=1)
+    cb = await queue.claim(conn, lease_s=60)
+    assert cb is not None and cb.kind == "callback"
+    # deferring gives the attempt back
+    await queue.defer(conn, cb.id, 60)
+    row = await conn.fetchrow("select status, attempts from job where id=$1", cb.id)
+    assert row["status"] == "pending" and row["attempts"] == 0
+
+
+async def test_callback_for_finished_target_is_runnable_at_once(conn: asyncpg.Connection) -> None:
+    from tokensage import callbacks
+    from tokensage.db import _init_connection
+
+    await _init_connection(conn)  # jsonb codec, as the app's pool installs it
+    target = await queue.enqueue(conn, "analyze", MINT, "full")
+    await queue.claim(conn, lease_s=60)
+    await queue.complete(conn, target.id, result_version=1)
+    await callbacks.schedule(
+        conn, target_job_id=target.id, callback_url="https://hook.test/x", key_digest="00"
+    )
+    cb = await queue.claim(conn, lease_s=60)
+    assert cb is not None and cb.kind == "callback"

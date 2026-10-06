@@ -652,12 +652,14 @@ async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str)
         inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
         inp.run_ocr = inp.ocr_lines is None and image_bytes is not None
         inp.trend_index = await fulldepth.trend_index(conn)
-        out = run_full(inp)
+        # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
+        # worker's other concurrent jobs keep making network progress meanwhile.
+        out = await asyncio.to_thread(run_full, inp)
         if inp.run_ocr and m and m.image_content_key and not out.ocr_error:
             await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
         await _attach_news(conn, ctx, out)
     else:
-        out = run_basic(inp)
+        out = await asyncio.to_thread(run_basic, inp)
     if x is not None:
         x.reuse_count = dbc.x_reuse_count
     if cached_feats is not None and out.image.features is None:

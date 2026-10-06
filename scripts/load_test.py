@@ -5,6 +5,9 @@
 
 Each request follows the documented client behaviour: 202 -> poll until 200 (counted as one
 logical request, with end-to-end latency). Exits 1 if any 5xx other than 503 appears.
+
+--mode batch replays a prefetching consumer instead: every --scan-s seconds it POSTs the new
+(cold, never-seen) coins as one batch and polls each job, reporting time-to-done.
 """
 
 from __future__ import annotations
@@ -54,6 +57,85 @@ async def one(
         stats["latency"].append(time.perf_counter() - t0)
 
 
+async def poll_job(
+    client: httpx.AsyncClient, job_id: int, t0: float, poll_s: float, stats: dict
+) -> None:
+    """Follow one batch job to done/failed, the way a prefetching consumer would."""
+    deadline = t0 + 300
+    while time.perf_counter() < deadline:
+        await asyncio.sleep(poll_s)
+        try:
+            r = await client.get(f"/v1/jobs/{job_id}")
+        except httpx.HTTPError as e:
+            stats["final"][f"exc_{type(e).__name__}"] += 1
+            return
+        stats["http"][r.status_code] += 1
+        if r.status_code != 200:
+            continue
+        j = r.json()
+        if j["status"] in ("done", "failed"):
+            outcome = (j.get("result") or {}).get("status") if j["status"] == "done" else "failed"
+            stats["final"][outcome or "done"] += 1
+            stats["latency"].append(time.perf_counter() - t0)
+            return
+    stats["final"]["timeout"] += 1
+
+
+async def batch_mode(args: argparse.Namespace, cas: list[str]) -> int:
+    """TrenchScanner-style traffic: every --scan-s seconds POST the new (cold) coins as one
+    batch, then poll each job until done. Reports time-to-done per coin."""
+    stats: dict = {"http": Counter(), "final": Counter(), "latency": [], "server_errors": 0}
+    per_scan = args.rate * args.scan_s / 60.0
+    carry = 0.0
+    idx = 0
+    tasks: list[asyncio.Task[None]] = []
+    async with httpx.AsyncClient(
+        base_url=args.base, headers={"Authorization": f"Bearer {args.key}"}, timeout=40.0
+    ) as client:
+        t_end = time.perf_counter() + args.duration
+        while time.perf_counter() < t_end and idx < len(cas):
+            carry += per_scan
+            n = int(carry)
+            carry -= n
+            new = cas[idx : idx + n]
+            idx += n
+            if new:
+                t0 = time.perf_counter()
+                r = await client.post("/v1/tokens:batch", json={"cas": new, "depth": args.depth})
+                stats["http"][r.status_code] += 1
+                if r.status_code >= 500 and r.status_code != 503:
+                    stats["server_errors"] += 1
+                if r.status_code == 200:
+                    for it in r.json()["items"]:
+                        if it.get("job_id") and it["status"] == "pending":
+                            tasks.append(
+                                asyncio.create_task(
+                                    poll_job(client, it["job_id"], t0, args.poll_s, stats)
+                                )
+                            )
+                        else:
+                            stats["final"][it["status"]] += 1
+                            if it["status"] in ("complete", "partial"):
+                                stats["latency"].append(time.perf_counter() - t0)
+            await asyncio.sleep(args.scan_s)
+        await asyncio.gather(*tasks)
+
+    lat = sorted(stats["latency"])
+    pct = lambda p: lat[min(len(lat) - 1, int(len(lat) * p))] if lat else 0  # noqa: E731
+    print(
+        f"coins sent: {idx}  (rate {args.rate}/min, one batch every {args.scan_s:.0f}s, "
+        f"depth={args.depth}, poll every {args.poll_s}s)"
+    )
+    print(f"http statuses: {dict(stats['http'])}")
+    print(f"final outcomes: {dict(stats['final'])}")
+    if lat:
+        print(
+            f"time-to-done: p50 {pct(0.5):.1f} s  p95 {pct(0.95):.1f} s  p99 {pct(0.99):.1f} s"
+            f"  max {lat[-1]:.1f} s  mean {statistics.mean(lat):.1f} s"
+        )
+    return 1 if stats["server_errors"] else 0
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
@@ -64,9 +146,19 @@ async def main() -> int:
     ap.add_argument("--depth", default="basic")
     ap.add_argument("--wait", type=int, default=10)
     ap.add_argument("--concurrency", type=int, default=16)
+    ap.add_argument(
+        "--mode",
+        choices=("get", "batch"),
+        default="get",
+        help="get: GET /v1/tokens with zipf-hot CAs; batch: cold coins via batch + job polling",
+    )
+    ap.add_argument("--scan-s", type=float, default=30.0, help="batch mode: seconds per scan")
+    ap.add_argument("--poll-s", type=float, default=1.0, help="batch mode: job poll interval")
     args = ap.parse_args()
 
     cas = [c.strip() for c in Path(args.cas).read_text().splitlines() if c.strip()]
+    if args.mode == "batch":
+        return await batch_mode(args, cas)
     stats: dict = {
         "http": Counter(),
         "final": Counter(),
