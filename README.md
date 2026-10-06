@@ -87,9 +87,13 @@ ran as separate processes, `depth=basic`, 2026-10-06:
 | 8 | 30 | 1–4 s / 0.1–0.4 s | 9.2 s | 15.3 s | 16.3 s |
 | 8 | 6 (production rate) | 1–4 s / 1–4 s (worst case) | 15.2 s | 21.3 s | 21.3 s |
 | 8 | 60 (stress, 10×) | 1–4 s / 0.1–0.4 s | 15.3 s | 27.5 s | 31.5 s |
+| 8 | 24 (`depth=full`, 2× a 700 coins/h feed) | 1–4 s / 0.1–0.4 s | 8.2 s | 18.6 s | 20.6 s |
 
-All runs: every coin completed, no 5xx. Worker RSS stayed near 200 MB at basic depth; full
-depth adds RapidOCR (~250 MB, one at a time by default), which is why OCR has its own limit.
+All runs: every coin completed, no 5xx. The `depth=full` run (2026-10-06, after the Wikidata
+gazetteer) shares one logo across the fake coins, so OCR ran once and was cached; measured
+separately, the engine costs ~13 ms per coin at basic depth and ~0.4 s with OCR on one core,
+so a single OCR slot handles several thousand logos an hour. Worker RSS stayed near 200 MB
+at basic depth; full depth adds RapidOCR (~250 MB, one at a time by default), which is why OCR has its own limit.
 
 ```bash
 uv run python scripts/fake_chain_server.py --tokens 3000 --ipfs-latency 1-4 --rpc-latency 0.1-0.4
