@@ -262,6 +262,16 @@
     const a = body.analysis || body.stale_analysis; if (!a) return;
     $("result").classList.remove("hidden"); setCards(true);
     $("raw").textContent = fmt(body);
+    const quotedRows = (q) => {
+      if (!q) return "";
+      const qa = q.author;
+      const when = q.predates_token_by_s == null ? "" :
+        (q.predates_token_by_s > 0 ? ` · ${Math.round(q.predates_token_by_s / 3600)} h before the token`
+                                   : " · after the token");
+      return `<dt>quotes</dt><dd>${q.url ? `<a href="${esc(q.url)}" target="_blank" rel="noopener">post ${esc(q.id)}</a>` : esc(q.id)} ${badge(q.status)}${esc(when)}</dd>
+        ${qa ? `<dt>quoted author</dt><dd>@${esc(qa.handle)} · ${esc(qa.followers ?? "?")} followers · ${esc(qa.verified_type || "unverified")}</dd>` : ""}
+        ${q.text ? `<dt>quoted text</dt><dd>${esc(q.text)}</dd>` : ""}`;
+    };
     const r = a.raw || {}, m = a.market || {}, x = a.x, img = a.image || {};
     const statusBadge = badge(stale ? "stale (pending refresh)" : body.status, "status-" + (stale ? "pending" : body.status));
 
@@ -306,6 +316,7 @@
           ${x.text ? `<dt>text</dt><dd>${esc(x.text)}</dd>` : ""}
           <dt>relation</dt><dd>${esc(x.relation || "—")}</dd>
           <dt>reused by</dt><dd>${esc(x.reuse_count)} other token(s)</dd>
+          ${quotedRows(x.quoted)}
         </dl>`;
     } else {
       $("cardX").innerHTML = `<h2>X / Twitter</h2><p class="muted">no X link in metadata</p>`;

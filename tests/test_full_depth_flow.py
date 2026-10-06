@@ -151,3 +151,76 @@ async def test_basic_depth_does_not_fetch_x(
     a = TokenResponse.model_validate(r.json()).analysis
     assert a and a.x and a.x.status == "not_fetched" and not fx_calls
     assert not a.trend.matched
+
+
+QUOTE_TID = "1850000000000000002"
+QUOTED_TID = "1790000000000000001"
+
+
+def _launch_quote(inline: bool) -> dict:  # type: ignore[type-arg]
+    quote: dict = {"id": QUOTED_TID}  # type: ignore[type-arg]
+    if inline:
+        quote.update(
+            text="Peanut the squirrel deserved better",
+            created_timestamp=1727773200,
+            author={"id": "44196397", "screen_name": "elonmusk", "followers": 190000000},
+        )
+    return {
+        "code": 200,
+        "status": {
+            "id": QUOTE_TID,
+            "text": "launching $PNUT2",
+            "created_timestamp": 1727787600,
+            "author": {"id": "9", "screen_name": "nutdev", "followers": 40},
+            "quote": quote,
+        },
+    }
+
+
+@pytest.mark.parametrize("inline", [True, False], ids=["inline_quote", "quote_fetched_by_id"])
+async def test_full_depth_includes_the_quoted_tweet(
+    client: httpx.AsyncClient, db: asyncpg.Connection, inline: bool
+) -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "Peanut the Squirrel 2.0", "PNUT2", META_URI, progress=0.3)
+    meta = metadata_json(
+        name="Peanut the Squirrel 2.0",
+        symbol="PNUT2",
+        description="rip peanut",
+        twitter=f"https://x.com/nutdev/status/{QUOTE_TID}",
+    )
+    quoted_calls: list[int] = []
+
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"{xs.FX}/status/{QUOTE_TID}").mock(
+            return_value=httpx.Response(200, json=_launch_quote(inline))
+        )
+        router.get(f"{xs.FX}/status/{QUOTED_TID}").mock(
+            side_effect=lambda req: (
+                quoted_calls.append(1),
+                httpx.Response(
+                    200, json={"code": 200, "status": _launch_quote(True)["status"]["quote"]}
+                ),
+            )[1]
+        )
+        router.get(url__startswith=f"{xs.FX}/profile/").mock(return_value=httpx.Response(404))
+        router.get(url__startswith=xs.VX).mock(return_value=httpx.Response(404))
+        router.get(url__startswith="https://news.google.com/rss/search").mock(
+            return_value=httpx.Response(200, text=RSS)
+        )
+        install_web(router, chain, meta=meta)
+        r = await client.get(f"/v1/tokens/{T22_MINT}?depth=full&wait=10")
+    assert r.status_code == 200, r.text
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a is not None and a.x is not None and a.x.status == "ok"
+    assert a.x.author and a.x.author.handle == "nutdev"
+    q = a.x.quoted
+    assert q is not None and q.status == "ok" and q.id == QUOTED_TID
+    assert q.author and q.author.handle == "elonmusk" and q.author.followers == 190000000
+    assert q.text == "Peanut the squirrel deserved better"
+    assert q.url == f"https://x.com/elonmusk/status/{QUOTED_TID}"
+    assert q.created_at is not None
+    # inline quotes cost no extra request; an id-only quote is fetched once and cached
+    assert len(quoted_calls) == (0 if inline else 1)
+    if not inline:
+        assert await db.fetchval("select status from x_tweet where tweet_id=$1", QUOTED_TID) == "ok"

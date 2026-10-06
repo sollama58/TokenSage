@@ -1510,6 +1510,17 @@
             ],
             "title": "Predates Token By S"
           },
+          "quoted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XQuoted"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present when the linked tweet is a quote tweet (full depth)"
+          },
           "ref": {
             "$ref": "#/components/schemas/XRef"
           },
@@ -1566,6 +1577,87 @@
           "ref"
         ],
         "title": "XInfo",
+        "type": "object"
+      },
+      "XQuoted": {
+        "additionalProperties": false,
+        "description": "The tweet the linked tweet quotes (full depth). Often the real narrative: a launch\npost that quote-tweets someone else's earlier post.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "predates_token_by_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds the quoted post predates the token; negative if after",
+            "title": "Predates Token By S"
+          },
+          "status": {
+            "default": "ok",
+            "enum": [
+              "ok",
+              "deleted",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "XQuoted",
         "type": "object"
       },
       "XRef": {

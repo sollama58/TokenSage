@@ -15,7 +15,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.4.0-full"
+RULES_VERSION = "0.5.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -485,6 +485,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             evidence += xa.evidence
             if xa.text:
                 extra_passes.append(("x", xa.text, 0.8))
+            if xa.quoted and xa.quoted.text:
+                extra_passes.append(("x", xa.quoted.text, 0.7))
     evidence += _lexicon_evidence(n, k, extra_passes)
 
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
@@ -519,6 +521,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         texts = [("name", " ".join(n.name_tokens)), ("description", n.desc_clean)]
         if xa and xa.text:
             texts.append(("x", xa.text))
+        if xa and xa.quoted and xa.quoted.text:
+            texts.append(("x", xa.quoted.text))
         seen_terms: set[str] = set()
         for where, text in texts:
             for h in inp.trend_index.match(text, where):

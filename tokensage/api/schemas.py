@@ -135,6 +135,21 @@ class XAuthor(_Model):
     username_changes: int | None = None
 
 
+class XQuoted(_Model):
+    """The tweet the linked tweet quotes (full depth). Often the real narrative: a launch
+    post that quote-tweets someone else's earlier post."""
+
+    id: str
+    url: str | None = None
+    status: Literal["ok", "deleted", "failed"] = "ok"
+    author: XAuthor | None = None
+    text: str | None = None
+    created_at: datetime | None = None
+    predates_token_by_s: int | None = Field(
+        default=None, description="Seconds the quoted post predates the token; negative if after"
+    )
+
+
 class XInfo(_Model):
     ref: XRef
     object_time: datetime | None = None
@@ -155,6 +170,9 @@ class XInfo(_Model):
     reuse_count: int = 0
     fetch_source: str | None = None
     status: Literal["ok", "deleted", "suspended", "not_fetched", "failed", "none"] = "none"
+    quoted: XQuoted | None = Field(
+        default=None, description="Present when the linked tweet is a quote tweet (full depth)"
+    )
 
 
 class TrendTerm(_Model):

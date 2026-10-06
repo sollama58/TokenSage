@@ -32,6 +32,7 @@ from tokensage.api.schemas import (
     Versions,
     XAuthor,
     XInfo,
+    XQuoted,
     XRef,
 )
 from tokensage.api.schemas import (
@@ -45,6 +46,7 @@ from tokensage.api.schemas import (
 )
 from tokensage.config import Settings
 from tokensage.engine import image as image_stage
+from tokensage.engine import xsignals
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.pipeline import (
     RULES_VERSION,
@@ -297,6 +299,33 @@ async def _cached_image_features(
 # ----------------------------------------------------------------- document
 
 
+def _quoted_out(q: xsignals.QuotedAssessment, token_created: datetime | None) -> XQuoted:
+    status = q.status if q.status in ("ok", "deleted") else "failed"
+    author = None
+    if q.author_handle or q.followers is not None:
+        author = XAuthor(
+            handle=q.author_handle,
+            user_id=q.author_id,
+            name=q.author_name,
+            verified_type=q.verified_type,
+            followers=q.followers,
+            joined=q.joined,
+        )
+    predates = None
+    if token_created and q.created_at:
+        predates = int((token_created - q.created_at).total_seconds())
+    handle = q.author_handle or "i"
+    return XQuoted(
+        id=q.id,
+        url=f"https://x.com/{handle}/status/{q.id}" if q.id else None,
+        status=status,  # type: ignore[arg-type]
+        author=author,
+        text=q.text[:1000] if q.text else None,
+        created_at=q.created_at,
+        predates_token_by_s=predates,
+    )
+
+
 def build_document(
     r: Resolved, m: md.Metadata | None, depth: str, out: EngineOutput | None, x: XInfo | None
 ) -> Analysis:
@@ -416,6 +445,8 @@ def build_document(
                     joined=xa.joined,
                     username_changes=xa.username_changes,
                 )
+            if xa.quoted is not None:
+                x.quoted = _quoted_out(xa.quoted, r.created_at)
         if out.trend_hits:
             doc_trend = TrendOut(
                 matched=True,
