@@ -27,6 +27,10 @@ curl -H "Authorization: Bearer devkey123" \
   "localhost:10000/v1/tokens/3arUrpH3nzaRJbbpVgY42dcqSq9A5BFgUxKozZ4npump?wait=5"
 ```
 
+In the container every service starts through `python -m tokensage.run`; the `TOKENSAGE_ROLE`
+env var (`api`, `worker`, `knowledge`, `maintenance`) picks which one, so `render.yaml` needs no
+start commands.
+
 `INLINE_ANALYZER=true` runs the analyzer inside the web process. In production it runs as the
 separate `tokensage-analyzer` worker (`python -m tokensage.worker`).
 
