@@ -59,7 +59,10 @@ async def tweet_cached(
         age = datetime.now(UTC) - row["fetched_at"] if row["fetched_at"] else None
         if row["status"] == "ok" and row["first_snapshot"]:
             record = TweetData.from_json(row["first_snapshot"])
-            if age is not None and age < TWEET_RECHECK and row["source"] != "oembed":
+            # a copy cached before reply support has no reply fields: re-check it now
+            # rather than serve it for up to TWEET_RECHECK without them
+            current = "replying_to_id" in row["first_snapshot"]
+            if age is not None and age < TWEET_RECHECK and row["source"] != "oembed" and current:
                 return record
         elif row["status"] in ("deleted", "failed") and age is not None and age < DELETED_RETRY:
             return TweetData(id=tweet_id, status=row["status"], source=row["source"])

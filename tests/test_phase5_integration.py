@@ -218,3 +218,30 @@ async def test_failed_callback_is_retried_then_given_up(
             assert row["status"] in ("pending", "failed")
         finally:
             await conn.close()
+
+
+async def test_analysis_from_older_rules_is_rerun(
+    migrated_db: str, clean_tables: None, router: respx.MockRouter
+) -> None:
+    """After a deploy that changes the rules, a cached analysis is re-run on the next
+    request instead of being served until it ages out; an explicit max_age keeps it."""
+    _install_chain(router)
+    async with make_client(migrated_db) as c:
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "wait": 5})
+        assert r.status_code == 200, r.text
+        conn = await asyncpg.connect(migrated_db)
+        try:
+            await conn.execute(
+                """update analysis set doc = jsonb_set(doc, '{versions,rules}', '"0.0.1-old"')
+                   where mint=$1""",
+                MINT,
+            )
+        finally:
+            await conn.close()
+        kept = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "max_age": 3600})
+        assert kept.json()["freshness"]["from_cache"] is True
+        assert kept.json()["analysis"]["versions"]["rules"] == "0.0.1-old"
+        r2 = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "wait": 5})
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["freshness"]["from_cache"] is False
+        assert r2.json()["analysis"]["versions"]["rules"] != "0.0.1-old"

@@ -38,7 +38,8 @@
   .timeline { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; color: var(--muted);
               max-height: 160px; overflow: auto; margin: 0; }
   .timeline b { color: var(--ink); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; }
+  main > *, .grid > * { min-width: 0; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
   h3 { margin: 0 0 6px; font-size: 20px; }
   .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 14px; }
@@ -66,6 +67,16 @@
   .recent button { padding: 4px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
   .summary { font-size: 15px; margin: 6px 0 10px; }
   .hidden { display: none; }
+  .post { border-left: 3px solid var(--line); padding: 6px 10px; margin: 8px 0; }
+  .post .who { font-size: 13px; color: var(--muted); }
+  .post .txt { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+  .verdict-about_this_coin { border-color: var(--ok); color: var(--ok); }
+  .verdict-related { border-color: var(--warn); color: var(--warn); }
+  .verdict-unrelated { border-color: var(--high); color: var(--high); }
+  .tablewrap { overflow-x: auto; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .filters button { padding: 3px 9px; font-size: 12px; }
+  .filters button.on { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -123,6 +134,8 @@
       <div class="panel" id="cardX"></div>
       <div class="panel" id="cardImage"></div>
     </div>
+    <div class="panel" style="margin-top:14px" id="cardPosts"></div>
+    <div class="panel" style="margin-top:14px" id="cardMatch"></div>
     <div class="panel" style="margin-top:14px" id="cardMeaning"></div>
     <div class="panel" style="margin-top:14px" id="cardEvidence"></div>
     <div class="panel" style="margin-top:14px">
@@ -255,22 +268,24 @@
   const linkOrText = (u) => u && /^https:\/\//.test(u)
     ? `<a href="${esc(u)}" target="_blank" rel="noopener nofollow noreferrer ugc">${esc(u)}</a>` : esc(u ?? "—");
 
-  const setCards = (full) => ["cardMarket","cardX","cardImage","cardMeaning","cardEvidence"]
+  const setCards = (full) => ["cardMarket","cardX","cardImage","cardPosts","cardMatch","cardMeaning","cardEvidence"]
     .forEach(id => $(id).classList.toggle("hidden", !full));
 
   function render(ca, body, stale) {
     const a = body.analysis || body.stale_analysis; if (!a) return;
     $("result").classList.remove("hidden"); setCards(true);
     $("raw").textContent = fmt(body);
-    const quotedRows = (q) => {
+    const who = (au) => au ? `${au.name ? esc(au.name) + " " : ""}@${esc(au.handle || "?")}` +
+      ` · ${esc(au.followers ?? "?")} followers · ${esc(au.verified_type || "unverified")}` : "unknown author";
+    const postBlock = (title, q) => {
       if (!q) return "";
-      const qa = q.author;
       const when = q.predates_token_by_s == null ? "" :
-        (q.predates_token_by_s > 0 ? ` · ${Math.round(q.predates_token_by_s / 3600)} h before the token`
-                                   : " · after the token");
-      return `<dt>quotes</dt><dd>${q.url ? `<a href="${esc(q.url)}" target="_blank" rel="noopener">post ${esc(q.id)}</a>` : esc(q.id)} ${badge(q.status)}${esc(when)}</dd>
-        ${qa ? `<dt>quoted author</dt><dd>@${esc(qa.handle)} · ${esc(qa.followers ?? "?")} followers · ${esc(qa.verified_type || "unverified")}</dd>` : ""}
-        ${q.text ? `<dt>quoted text</dt><dd>${esc(q.text)}</dd>` : ""}`;
+        (q.predates_token_by_s > 0 ? ` · ${fmtDur(q.predates_token_by_s)} before the token`
+                                   : ` · ${fmtDur(-q.predates_token_by_s)} after the token`);
+      const link = q.url ? `<a href="${esc(q.url)}" target="_blank" rel="noopener noreferrer nofollow">post ${esc(q.id)}</a>` : esc(q.id || "");
+      return `<div class="post"><div class="who"><b>${esc(title)}</b> ${badge(q.status)} ${link}${esc(when)}</div>
+        <div class="who">${who(q.author)}</div>
+        ${q.text ? `<div class="txt">${esc(q.text)}</div>` : `<div class="muted">${q.status === "ok" ? "(no text)" : "post could not be read"}</div>`}</div>`;
     };
     const r = a.raw || {}, m = a.market || {}, x = a.x, img = a.image || {};
     const statusBadge = badge(stale ? "stale (pending refresh)" : body.status, "status-" + (stale ? "pending" : body.status));
@@ -286,6 +301,12 @@
         <dt>telegram</dt><dd>${linkOrText(r.telegram)}</dd>
         <dt>twitter</dt><dd>${linkOrText(r.twitter)}</dd>
         <dt>analyzed</dt><dd>${dt(a.analyzed_at)} · rules ${esc(a.versions?.rules)} · lexicon ${esc(a.versions?.lexicon)}</dd>
+        <dt>freshness</dt><dd>${body.freshness?.from_cache ? "from cache" : "just analysed"} · age ${esc(body.freshness?.age_s ?? "?")} s / max ${esc(body.freshness?.max_age_s ?? "?")} s</dd>
+        <dt>name tokens</dt><dd>${(a.normalized?.name_tokens || []).map(t => badge(t)).join("") || "—"}</dd>
+        <dt>ticker</dt><dd>${esc(a.normalized?.ticker || "—")}${a.normalized?.ticker_base && a.normalized.ticker_base !== a.normalized.ticker ? ` · base ${esc(a.normalized.ticker_base)}` : ""}</dd>
+        ${(a.normalized?.markers || []).length ? `<dt>markers</dt><dd>${a.normalized.markers.map(t => badge(t)).join("")}</dd>` : ""}
+        ${(a.normalized?.emoji_keywords || []).length ? `<dt>emoji</dt><dd>${a.normalized.emoji_keywords.map(t => badge(t)).join("")}</dd>` : ""}
+        ${(a.normalized?.obfuscation || []).length ? `<dt>obfuscation</dt><dd>${a.normalized.obfuscation.map(t => badge(t, "sev-warn")).join("")}</dd>` : ""}
       </dl>`;
 
     $("cardMarket").innerHTML = `
@@ -294,8 +315,14 @@
         <dt>graduated</dt><dd>${m.complete == null ? "—" : (m.complete ? "yes" : "no")}</dd>
         <dt>progress</dt><dd>${pct(m.curve_progress)}<div class="meter"><div style="width:${Math.round((m.curve_progress || 0) * 100)}%"></div></div></dd>
         <dt>creator</dt><dd class="mono">${m.creator ? `<a href="https://solscan.io/account/${esc(m.creator)}" target="_blank" rel="noopener noreferrer">${esc(m.creator)}</a>` : "—"}</dd>
-        <dt>quote</dt><dd>${esc(m.quote_mint || "—")}</dd>
         <dt>mayhem</dt><dd>${m.is_mayhem_mode == null ? "—" : m.is_mayhem_mode}</dd>
+        <dt>paired with</dt><dd>${pairText(m)}</dd>
+        ${m.pair && m.pair.kind === "token" ? `
+          <dt>pair mint</dt><dd class="mono"><a href="https://solscan.io/token/${esc(m.pair.mint)}" target="_blank" rel="noopener noreferrer">${esc(m.pair.mint)}</a></dd>
+          <dt>builds on it</dt><dd>${m.pair.builds_on ? "yes — " + esc(m.pair.builds_on_detail || "") : "no"}</dd>
+          <dt>pair means</dt><dd>${m.pair.referent ? `<b>${esc(m.pair.referent.label)}</b> <span class="muted">(${esc(m.pair.referent.kind)}, ${pct(m.pair.referent.confidence)})</span>` : "<span class='muted'>no referent</span>"}
+            ${(m.pair.categories || []).map(c => badge(`${c.label} ${pct(c.confidence)}`)).join("")}</dd>
+          <dt>identified via</dt><dd>${esc(m.pair.source || "—")}</dd>` : ""}
       </dl>`;
 
     if (x) {
@@ -312,14 +339,38 @@
           ${ref.query ? `<dt>search</dt><dd>${esc(ref.query)}</dd>` : ""}
           <dt>object time</dt><dd>${dt(x.object_time)}</dd>
           <dt>timing</dt><dd>${esc(rel)}</dd>
-          ${au ? `<dt>author</dt><dd>@${esc(au.handle)} · ${esc(au.followers ?? "?")} followers · ${esc(au.verified_type || "unverified")}</dd>` : ""}
-          ${x.text ? `<dt>text</dt><dd>${esc(x.text)}</dd>` : ""}
+          ${au ? `<dt>author</dt><dd>${who(au)}${au.username_changes ? ` · ${esc(au.username_changes)} username change(s)` : ""}${au.joined ? ` · joined ${dt(au.joined)}` : ""}</dd>` : ""}
           <dt>relation</dt><dd>${esc(x.relation || "—")}</dd>
+          <dt>fetched via</dt><dd>${esc(x.fetch_source || "—")}</dd>
           <dt>reused by</dt><dd>${esc(x.reuse_count)} other token(s)</dd>
-          ${quotedRows(x.quoted)}
+          <dt>is a</dt><dd>${[x.quoted ? "quote tweet" : "", x.replied_to ? "reply" : ""].filter(Boolean).join(" + ") || (ref.kind === "tweet" ? "plain post" : "—")}</dd>
         </dl>`;
+      const accounts = x.accounts || [];
+      $("cardPosts").innerHTML = `
+        <h2>Posts and accounts considered</h2>
+        ${x.text ? postBlock("Linked post", { id: ref.tweet_id, status: x.status === "ok" ? "ok" : x.status, url: ref.tweet_id ? `https://x.com/i/web/status/${ref.tweet_id}` : null, author: au, text: x.text, predates_token_by_s: x.predates_token_by_s }) : ""}
+        ${postBlock("Replies to", x.replied_to)}
+        ${postBlock("Quotes", x.quoted)}
+        ${!x.text && !x.replied_to && !x.quoted ? `<p class="muted">no post text was read (link kind ${esc(ref.kind)}, fetch ${esc(x.status)})</p>` : ""}
+        <h2 style="margin-top:12px">Accounts (${accounts.length})</h2>
+        ${accounts.length ? `<div class="tablewrap"><table><thead><tr><th>role</th><th>account</th><th>name</th><th>followers</th><th>verified</th></tr></thead><tbody>
+          ${accounts.map(c => `<tr><td>${esc(c.role.replaceAll("_", " "))}</td><td>${c.handle ? `<a href="https://x.com/${esc(c.handle)}" target="_blank" rel="noopener noreferrer nofollow">@${esc(c.handle)}</a>` : "—"}</td><td>${esc(c.name || "—")}</td><td>${esc(c.followers ?? "—")}</td><td>${esc(c.verified_type || "—")}</td></tr>`).join("")}
+          </tbody></table></div><p class="muted" style="font-size:12px">Names and handles are read like text, at reduced weight; see evidence rows marked "account".</p>` : `<p class="muted">${a.depth === "full" ? "none" : "accounts are read at depth=full"}</p>`}`;
+      const mt = x.match;
+      $("cardMatch").innerHTML = mt ? `
+        <h2>Does the X post match the coin? ${badge(mt.verdict.replaceAll("_", " "), "verdict-" + mt.verdict)} ${badge("fit " + pct(mt.fit))}</h2>
+        <div class="tablewrap"><table><thead><tr><th>check</th><th>score</th><th>how</th><th>detail</th></tr></thead><tbody>
+          <tr><td>name</td><td>${pct(mt.name.score)}</td><td>${esc(mt.name.how)}</td><td>${esc(mt.name.detail)}</td></tr>
+          <tr><td>ticker</td><td>${pct(mt.ticker.score)}</td><td>${esc(mt.ticker.how)}</td><td>${esc(mt.ticker.detail)}</td></tr>
+          <tr><td>image</td><td>${pct(mt.image.score)}</td><td>${mt.image.best_distance == null ? "—" : "distance " + esc(mt.image.best_distance)}</td><td>${esc(mt.image.detail)} <span class="muted">(${esc(mt.image.media_checked)} image(s) checked)</span></td></tr>
+          <tr><td>subject</td><td>${pct(mt.referent.confidence)}</td><td>${mt.referent.agrees == null ? "n/a" : (mt.referent.agrees ? "agrees" : "disagrees")}</td><td>${mt.referent.x_label ? "post is about " + esc(mt.referent.x_label) + (mt.referent.x_kind ? ` (${esc(mt.referent.x_kind)})` : "") : "no clear subject in the post"}</td></tr>
+        </tbody></table></div>
+        <p class="muted" style="font-size:12px">post read on its own: ${(mt.x_categories || []).map(c => badge(`${c.label} ${pct(c.confidence)}`)).join("") || "no categories"} · scores are uncalibrated</p>`
+        : `<h2>Does the X post match the coin?</h2><p class="muted">${a.depth === "full" ? "only computed for tweet and profile links" : "computed at depth=full"}</p>`;
     } else {
       $("cardX").innerHTML = `<h2>X / Twitter</h2><p class="muted">no X link in metadata</p>`;
+      $("cardPosts").innerHTML = `<h2>Posts and accounts considered</h2><p class="muted">no X link</p>`;
+      $("cardMatch").innerHTML = `<h2>Does the X post match the coin?</h2><p class="muted">no X link</p>`;
     }
 
     const showImg = img.source_url ? `<details><summary>show image (unscreened)</summary><div class="img"><img alt="" loading="lazy" referrerpolicy="no-referrer" src="${esc(img.source_url)}"></div></details>` : "";
@@ -330,7 +381,8 @@
         <dt>phash</dt><dd class="mono">${esc(img.phash || "—")}</dd>
         <dt>ocr</dt><dd>${(img.ocr || []).map(t => badge(t)).join("") || "—"}</dd>
         <dt>palette</dt><dd>${(img.palette || []).map(c => `<span class="badge" style="border-color:${esc(c)}">${esc(c)}</span>`).join("") || "—"}</dd>
-        <dt>near dupes</dt><dd>${(img.near_duplicates || []).length}</dd>
+        <dt>animated</dt><dd>${img.animated == null ? "—" : img.animated}</dd>
+        <dt>near dupes</dt><dd>${(img.near_duplicates || []).map(d => badge(`${d.known_coin ? "$" + d.known_coin : d.template || (d.mint ? d.mint.slice(0, 6) + "…" : "?")} · distance ${d.distance}`)).join("") || "none"}</dd>
         <dt>labels</dt><dd>${(img.labels || []).map(l => badge(`${l.label} ${l.score.toFixed(2)}`)).join("") || "—"}</dd>
       </dl>${showImg}`;
 
@@ -342,18 +394,39 @@
         <dt>referent</dt><dd>${ref ? `<b>${esc(ref.label)}</b> <span class="muted">(${esc(ref.kind)}, ${pct(ref.confidence)})</span> — ${esc(ref.desc || "")}` : "<span class='muted'>none yet</span>"}</dd>
         <dt>categories</dt><dd>${(a.categories || []).map(c => badge(`${c.label} ${pct(c.confidence)}`)).join("") || "<span class='muted'>none yet</span>"}</dd>
         <dt>ticker</dt><dd>${esc(a.ticker_explanation || "—")}</dd>
-        <dt>copy of</dt><dd>${(a.copy_of || []).map(c => badge(`$${c.ticker || "?"} (${(c.signals || []).join(", ")})`)).join("") || "—"}</dd>
-        <dt>trend</dt><dd>${a.trend?.matched ? (a.trend.terms || []).map(t => badge(`${t.term} ×${t.spike ?? "?"}`)).join("") : "no match"}</dd>
+        <dt>copy of</dt><dd>${(a.copy_of || []).map(c => `${badge(`$${c.ticker || "?"}${c.name ? " " + c.name : ""} (${(c.signals || []).join(", ")})`)}${c.mint ? `<a class="mono" href="https://solscan.io/token/${esc(c.mint)}" target="_blank" rel="noopener noreferrer">${esc(c.mint.slice(0, 6))}…</a> ` : ""}`).join("") || "—"}</dd>
+        <dt>trend</dt><dd>${a.trend?.matched ? (a.trend.terms || []).map(t => `${badge(`${t.term} ×${t.spike ?? "?"} (${t.source})`)}${t.headline ? `<span class="muted">${esc(t.headline)}</span> ` : ""}`).join("") : "no match"}</dd>
         <dt>flags</dt><dd>${(a.flags || []).map(f => badge(`${f.code}: ${f.detail}`, "sev-" + f.severity)).join("") || "—"}</dd>
         <dt>caveats</dt><dd>${(a.caveats || []).length ? `<ul class="plain">${a.caveats.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : "—"}</dd>
         <dt>upstream errors</dt><dd>${(body.errors || []).map(e => badge(`${e.source}: ${e.code}`, "sev-warn")).join("") || "—"}</dd>
       </dl>`;
 
-    const ev = a.evidence || [];
-    $("cardEvidence").innerHTML = `<h2>Evidence (${ev.length})</h2>` + (ev.length ? `
-      <table><thead><tr><th>kind</th><th>label</th><th>weight</th><th>detail</th><th>source</th></tr></thead><tbody>
-      ${ev.map(e => `<tr><td>${esc(e.kind)}</td><td>${esc(e.label)}</td><td>${e.weight.toFixed(2)}</td><td>${esc(e.detail)}</td><td class="mono">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(e.source)}</a>` : esc(e.source)}</td></tr>`).join("")}
-      </tbody></table>` : `<p class="muted">none</p>`);
+    renderEvidence(a.evidence || []);
+  }
+
+  let evFilter = "all";
+  let evRows = [];
+  const WHERE_LABEL = { name: "name", symbol: "ticker", description: "description", image: "image", x: "X", trend: "trend", chain: "on-chain", db: "database" };
+  function renderEvidence(ev) {
+    evRows = [...ev].sort((p, q) => q.weight - p.weight);
+    const groups = ["all", ...new Set(evRows.map(e => e.where || "other"))];
+    if (!groups.includes(evFilter)) evFilter = "all";
+    const rows = evRows.filter(e => evFilter === "all" || (e.where || "other") === evFilter);
+    $("cardEvidence").innerHTML = `<h2>Evidence (${ev.length}) · what the analysis considered</h2>
+      <div class="filters">${groups.map(g => `<button type="button" class="secondary ${g === evFilter ? "on" : ""}" data-where="${esc(g)}">${esc(g === "all" ? "all" : (WHERE_LABEL[g] || g))} ${g === "all" ? ev.length : evRows.filter(e => (e.where || "other") === g).length}</button>`).join("")}</div>` + (rows.length ? `
+      <div class="tablewrap"><table><thead><tr><th>from</th><th>kind</th><th>label</th><th>weight</th><th>detail</th><th>source</th></tr></thead><tbody>
+      ${rows.map(e => `<tr><td>${esc(WHERE_LABEL[e.where] || e.where || "—")}</td><td>${esc(e.kind)}</td><td>${esc(e.label)}</td><td>${e.weight.toFixed(2)}</td><td>${esc(e.detail)}</td><td class="mono">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(e.source)}</a>` : esc(e.source)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">none</p>`);
+  }
+  $("cardEvidence").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-where]"); if (!b) return;
+    evFilter = b.dataset.where; renderEvidence(evRows);
+  });
+  function pairText(m) {
+    const p = m.pair;
+    if (!p) return esc(m.quote_mint || "—");
+    if (p.kind !== "token") return `${esc(p.symbol || p.mint)} <span class="muted">(${esc(p.kind)}, no effect on meaning)</span>`;
+    return `<b>$${esc(p.symbol || "?")}</b> ${esc(p.name || "")} ${badge("non-SOL pair", "sev-info")}`;
   }
   function fmtDur(s) {
     if (s < 120) return `${s} s`; if (s < 7200) return `${Math.round(s / 60)} min`;
