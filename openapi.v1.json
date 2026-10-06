@@ -196,6 +196,7 @@
                 "type": "null"
               }
             ],
+            "description": "Why the item has no job: the CA is invalid, or status 'failed' with 'quota_exceeded' / 'overloaded' when that item was rejected (others still queue)",
             "title": "Error"
           },
           "job_id": {
@@ -208,6 +209,18 @@
               }
             ],
             "title": "Job Id"
+          },
+          "retry_after_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a rejected item: seconds to wait before retrying it",
+            "title": "Retry After S"
           },
           "status": {
             "anyOf": [
@@ -1932,7 +1945,7 @@
             }
           },
           {
-            "description": "comma list: evidence,raw",
+            "description": "comma list of optional parts to keep: evidence, raw. Omit to get everything; a part left out of the list is dropped (evidence -> [], raw -> empty)",
             "in": "query",
             "name": "include",
             "required": false,
@@ -1945,7 +1958,7 @@
                   "type": "null"
                 }
               ],
-              "description": "comma list: evidence,raw",
+              "description": "comma list of optional parts to keep: evidence, raw. Omit to get everything; a part left out of the list is dropped (evidence -> [], raw -> empty)",
               "title": "Include"
             }
           }

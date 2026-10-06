@@ -39,7 +39,11 @@ def quota_exceeded(kind: str, retry_after_s: int) -> ApiError:
         429,
         "quota_exceeded",
         f"daily quota for {kind} calls exhausted for this key",
-        headers={"Retry-After": str(retry_after_s)},
+        headers={
+            "Retry-After": str(retry_after_s),
+            **({"X-Quota-Full-Remaining": "0"} if kind == "full-depth" else {}),
+            **({"X-Quota-Refresh-Remaining": "0"} if kind == "refresh" else {}),
+        },
     )
 
 
