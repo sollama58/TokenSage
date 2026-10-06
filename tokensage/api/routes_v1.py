@@ -233,7 +233,14 @@ async def batch(
             )
             continue
         items.append(
-            BatchItem(ca=mint, status=res.status, analysis=res.analysis, job_id=res.job_id)
+            BatchItem(
+                ca=mint,
+                status=res.status,
+                analysis=res.analysis,
+                job_id=res.job_id,
+                # a failed analysis: say why, as the single-CA response does in `errors`
+                error=res.errors[0].detail if res.status == "failed" and res.errors else None,
+            )
         )
     response.headers.update(await service.quota_headers(request.app.state.pool, key))
     return BatchResponse(items=items, request_id=request.state.request_id)

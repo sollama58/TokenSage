@@ -172,7 +172,8 @@ async def test_failed_analysis_is_reported_not_requeued(
             assert "RpcError" in body["errors"][0]["detail"]
             b = await c.post("/v1/tokens:batch", json={"cas": [T22_MINT], "depth": "full"})
             assert b.status_code == 200, b.text
-            assert b.json()["items"][0]["status"] == "failed"
+            item = b.json()["items"][0]
+            assert item["status"] == "failed" and "RpcError" in item["error"]
             assert await conn.fetchval("select count(*) from job") == 1  # nothing new
             assert await conn.fetchval("select coalesce(sum(full_calls), 0) from api_usage") == 0
             r2 = await c.get(
