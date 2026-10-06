@@ -161,7 +161,7 @@ def test_analysis_schema_forbids_unknown_fields() -> None:
         created_at_source=None,
         onchain_metadata_source="none",
     )
-    doc = build_document(r, None, "basic").model_dump(mode="json")
+    doc = build_document(r, None, "basic", None, None).model_dump(mode="json")
     Analysis.model_validate(doc)
     doc["bogus"] = 1
     with pytest.raises(ValidationError):

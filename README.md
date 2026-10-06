@@ -2,7 +2,7 @@
 
 An HTTP API that takes a Solana pump.fun token's **Contract Address (CA)** and explains what the token *means*: its name, ticker, image, description and linked X/Twitter content, with categories, flags, confidence scores and evidence. Built for other applications to call. No external AI APIs; deployed on Render via a Blueprint.
 
-**Status:** Phases 1–2 done. The `/v1` API, job queue, worker and deploy pipeline are tested; a CA is resolved on-chain (mint, pump.fun bonding curve, name/symbol/uri, creation time) and its off-chain metadata and image are fetched safely. The **meaning engine** (categories, referent, copycats, X content) arrives in Phases 3–4; until then `summary` says so. Build plan: [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) §9.
+**Status:** Phases 1–3 done. A CA is resolved on-chain, its metadata and image are fetched safely, and the **basic-depth meaning engine** runs: normalization (homoglyphs, leet, emoji, camelCase, markers), meme-aware segmentation, slang/entity/WordNet gazetteers, ticker explanation, known-coin and same-name copycat detection, image perceptual hashes with near-duplicate matching, evidence scoring with a referent and templated summary. 67 golden cases pass. **Phase 4** (OCR, fetching the linked X content, trend matching) is next. Build plan: [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) §9.
 
 - [`docs/API.md`](docs/API.md): integration guide for the consumer application
 - [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md): full design; [`FABLE_BRIEF.md`](FABLE_BRIEF.md): kickoff brief
@@ -53,11 +53,15 @@ SOLANA_RPC_URL=https://... COINGECKO_API_KEY=... python scripts/smoke_test.py
 ```
 tokensage/api        FastAPI app, /v1 routes, auth, schemas (the contract)
 tokensage/resolve    CA validation, pump.fun PDAs, CreateEvent/BondingCurve decoders
-tokensage/engine     analysis stages (Phase 3+); xref.py = X link parsing
+tokensage/engine     the meaning engine: normalize, segment, lexicon, ticker, known_coins, image,
+                     aggregate, render_summary, pipeline; xref.py = X link parsing
+tokensage/sources    external lookups (pump.fun search, DexScreener) with circuit breakers
 tokensage/queue.py   Postgres job queue (single-flight, leases, LISTEN/NOTIFY)
 tokensage/worker.py  analyzer worker loop
 tokensage/jobs       cron entrypoints (knowledge, maintenance)
 migrations/          Alembic
-data/                taxonomy, lexicons (config, not code)
-scripts/             smoke_test.py, export_openapi.py
+data/                taxonomy, slang, known coins, entities, templates/markers/scoring knobs,
+                     generated CLDR emoji + WordNet class files (config, not code)
+scripts/             smoke_test.py, export_openapi.py, build_cldr.py, build_wordnet_classes.py
+tests/golden/        hand-written meaning cases the engine must satisfy
 ```

@@ -53,9 +53,10 @@ class Metadata:
     error: str | None = None
     image_content_key: str | None = None
     image_mime: str | None = None
-    image_bytes: int | None = None
+    image_size: int | None = None
     image_error: str | None = None
     extra_links: list[str] = field(default_factory=list)
+    image_bytes: bytes | None = None  # transient; never persisted
 
 
 def _sniff_image(body: bytes) -> str | None:
@@ -207,7 +208,8 @@ async def fetch_metadata(client: httpx.AsyncClient, uri: str, settings: Settings
             m.image_error = f"not an image (content-type {img.content_type or 'unknown'})"
         else:
             m.image_mime = mime
-            m.image_bytes = len(img.body)
+            m.image_size = len(img.body)
+            m.image_bytes = img.body
             m.image_content_key = content_key_for(m.image_url, img.body)
     except UnsafeUrl as e:
         m.image_error = f"unsafe image url: {e}"
@@ -279,7 +281,7 @@ async def persist(conn: asyncpg.Connection, mint: str, m: Metadata, attempts: in
             if m.image_content_key.startswith("sha256:")
             else None,
             m.image_mime,
-            m.image_bytes,
+            m.image_size,
         )
     if m.status == "ok" and (m.name or m.symbol):
         await conn.execute(

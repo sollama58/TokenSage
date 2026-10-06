@@ -126,6 +126,15 @@ flags:
   - code: metadata_unresolved
     severity: info
     description: The off-chain metadata could not be fetched; analysis used on-chain fields only.
+  - code: obfuscated_text
+    severity: info
+    description: Name uses full-width, zero-width, small-caps, leetspeak or repeated-letter tricks.
+  - code: earlier_same_name
+    severity: warn
+    description: Other tokens with the same name or ticker existed before this one.
+  - code: regional_script
+    severity: info
+    description: Name is written in a non-Latin script (regional / language meta).
   - code: non_pumpfun
     severity: info
     description: The mint has no pump.fun bonding curve; analysed best-effort.

@@ -20,7 +20,22 @@ RPC = "https://rpc.test/"
 GW1, GW2 = "https://gw1.test", "https://gw2.test"
 CID_META = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
 CID_IMG = "bafkreignns4pa47e6yy3jiw7ua34gl3tagb4k2rmuxgly32zeku4abiukm"
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+
+def _png() -> bytes:
+    """A real 64x64 two-colour PNG so the image stage can hash it."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGB", (64, 64), (200, 120, 40))
+    ImageDraw.Draw(im).ellipse((12, 12, 52, 52), fill=(250, 220, 40))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+PNG = _png()
 
 T22_MINT = "457V2vvjqXTMFzivq9tvBqhDaxfke2523hHDB6brpump"  # token-2022 pump coin
 SPL_MINT = "3arUrpH3nzaRJbbpVgY42dcqSq9A5BFgUxKozZ4npump"  # legacy pump coin, graduated

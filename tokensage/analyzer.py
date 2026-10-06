@@ -1,12 +1,13 @@
 """The analyzer entry point the worker calls per job.
 
-Phase 2: resolve the CA on-chain, fetch the off-chain metadata and image header, parse the
-X link, and write an Analysis with real `raw`, `market`, `x.ref` and flags. The engine
-stages (S1–S10, guide §5) arrive in Phase 3; until then `summary` says so.
+Phase 3: resolve the CA on-chain, fetch metadata + image, gather database context (same-name
+tokens, X link reuse, creator history, image-hash candidates), run the basic-depth engine
+(guide §5), and persist a full Analysis. `full`-depth extras (OCR, X fetch, trends) are Phase 4.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -16,25 +17,57 @@ import structlog
 
 from tokensage.api.schemas import (
     Analysis,
+    Category,
+    CopyOf,
     Evidence,
     Flag,
     ImageInfo,
     Market,
+    NearDuplicate,
     RawFields,
+    Referent,
+    ReferentKind,
+    Severity,
     Versions,
     XInfo,
     XRef,
 )
+from tokensage.api.schemas import (
+    Normalized as NormalizedOut,
+)
 from tokensage.config import Settings
+from tokensage.engine import image as image_stage
+from tokensage.engine.knowledge import KnownCoin, load_knowledge
+from tokensage.engine.pipeline import (
+    RULES_VERSION,
+    DbContext,
+    EngineInput,
+    EngineOutput,
+    SameNameToken,
+    run_basic,
+)
 from tokensage.engine.xref import parse_x_ref, snowflake_time
 from tokensage.resolve import metadata as md
 from tokensage.resolve.resolver import Resolved, ResolveError, resolve
 from tokensage.resolve.rpc import SolanaRpc
+from tokensage.sources import lookups
 
 log = structlog.get_logger("analyzer")
 
-RULES_VERSION = "0.1.0-resolve"  # bumps when stage logic changes
-LEXICON_VERSION = "2026-10-06"
+_REFERENT_KINDS: dict[str, ReferentKind] = {
+    "famous_animal": "famous_animal",
+    "meme": "meme",
+    "person": "person",
+    "coin": "coin",
+    "event": "event",
+    "concept": "concept",
+    "place": "place",
+    "other": "other",
+}
+_SEVERITIES: dict[str, Severity] = {"info": "info", "warn": "warn", "high": "high"}
+
+LEXICON_VERSION = load_knowledge().versions.get("lexicon", "unknown")
+__all__ = ["RULES_VERSION", "LEXICON_VERSION", "AnalyzeFailed", "Context", "analyze"]
 
 
 class AnalyzeFailed(Exception):
@@ -73,7 +106,7 @@ class Context:
         await self.http.aclose()
 
 
-# ----------------------------------------------------------------- building the document
+# ----------------------------------------------------------------- X link (free part)
 
 
 def _x_info(twitter: str | None, token_created: datetime | None) -> XInfo | None:
@@ -109,7 +142,155 @@ def _x_info(twitter: str | None, token_created: datetime | None) -> XInfo | None
     )
 
 
-def build_document(r: Resolved, m: md.Metadata | None, depth: str) -> Analysis:
+# ----------------------------------------------------------------- database context
+
+
+async def _db_context(
+    conn: asyncpg.Connection,
+    ctx: Context,
+    r: Resolved,
+    m: md.Metadata | None,
+    x: XInfo | None,
+    ticker: str | None,
+    name_compact: str,
+) -> DbContext:
+    dbc = DbContext()
+    # X link reuse across other tokens
+    if x is not None and x.ref.kind in ("tweet", "profile", "community"):
+        if x.ref.tweet_id:
+            dbc.x_reuse_count = await conn.fetchval(
+                "select count(*) from x_ref where tweet_id=$1 and mint<>$2", x.ref.tweet_id, r.mint
+            )
+        elif x.ref.community_id:
+            dbc.x_reuse_count = await conn.fetchval(
+                "select count(*) from x_ref where community_id=$1 and mint<>$2",
+                x.ref.community_id,
+                r.mint,
+            )
+        elif x.ref.handle:
+            dbc.x_reuse_count = await conn.fetchval(
+                "select count(*) from x_ref where lower(handle)=lower($1) and mint<>$2",
+                x.ref.handle,
+                r.mint,
+            )
+    # creator history
+    if r.creator:
+        dbc.creator_token_count = await conn.fetchval(
+            "select count(*) from token where creator=$1 and mint<>$2", r.creator, r.mint
+        )
+    # same-name tokens we already know, plus best-effort external searches
+    if ticker or name_compact:
+        rows = await conn.fetch(
+            """select mint, name, symbol, created_at from token
+               where mint<>$1 and (upper(symbol)=$2 or regexp_replace(lower(coalesce(name,'')),
+                     '[^a-z0-9]', '', 'g') = $3)
+               order by created_at nulls last limit 50""",
+            r.mint,
+            (ticker or "").upper(),
+            name_compact,
+        )
+        dbc.same_name = [
+            SameNameToken(x_["mint"], x_["name"], x_["symbol"], x_["created_at"], "db")
+            for x_ in rows
+        ]
+        term = ticker or name_compact
+        try:
+            ext = await asyncio.gather(
+                lookups.pumpfun_search(ctx.http, term),
+                lookups.dexscreener_search(ctx.http, term),
+            )
+            found = lookups.filter_same_name([*ext[0], *ext[1]], ticker, name_compact)
+            known = {t.mint for t in dbc.same_name} | {r.mint}
+            dbc.same_name += [t for t in found if t.mint not in known]
+        except Exception as e:  # noqa: BLE001 - lookups are optional
+            log.info("lookups.failed", error=str(e)[:120])
+    # known coins from the database (seed lives in data/, cron adds more)
+    rows = await conn.fetch(
+        """select id, symbol, name, aliases, lore, categories, mint, logo_phash, source
+           from known_coin"""
+    )
+    for row in rows:
+        dbc.extra_coins.append(
+            KnownCoin(
+                symbol=row["symbol"],
+                name=row["name"],
+                aliases=tuple(row["aliases"] or []),
+                chain="solana",
+                lore=row["lore"] or "",
+                categories=tuple(row["categories"] or []),
+                referent_label=row["name"],
+                referent_kind="coin",
+                referent_desc=row["lore"] or "",
+                source=row["source"] or "db",
+                mint=row["mint"],
+                logo_phash=row["logo_phash"],
+            )
+        )
+    # image hash candidates: known-coin logos + recent token images
+    for c in dbc.extra_coins:
+        if c.logo_phash is not None:
+            dbc.image_candidates.append(
+                image_stage.Candidate(f"known:{c.symbol}", c.logo_phash, known_coin=c.symbol)
+            )
+    this_key = m.image_content_key if m else None
+    rows = await conn.fetch(
+        """select i.content_key, i.phash, tm.mint from image i
+           join token_metadata tm on tm.image_content_key = i.content_key
+           where i.phash is not null and i.content_key <> coalesce($1, '')
+           order by i.analyzed_at desc nulls last limit 20000""",
+        this_key,
+    )
+    for row in rows:
+        dbc.image_candidates.append(
+            image_stage.Candidate(row["content_key"], row["phash"], mint=row["mint"])
+        )
+    return dbc
+
+
+async def _persist_image(conn: asyncpg.Connection, key: str, out: EngineOutput) -> None:
+    f = out.image.features
+    if not f:
+        return
+    await conn.execute(
+        """update image set phash=$2, dhash=$3, phash_mirror=$4, palette=$5, width=$6,
+             height=$7, animated=$8, analyzed_at=now() where content_key=$1""",
+        key,
+        f.phash,
+        f.dhash,
+        f.phash_mirror,
+        f.palette_hex,
+        f.width,
+        f.height,
+        f.animated,
+    )
+
+
+async def _cached_image_features(
+    conn: asyncpg.Connection, key: str
+) -> image_stage.ImageFeatures | None:
+    row = await conn.fetchrow("select * from image where content_key=$1 and phash is not null", key)
+    if not row:
+        return None
+    return image_stage.ImageFeatures(
+        phash=row["phash"],
+        dhash=row["dhash"] or 0,
+        phash_mirror=row["phash_mirror"] or row["phash"],
+        width=row["width"] or 0,
+        height=row["height"] or 0,
+        animated=bool(row["animated"]),
+        frames=1,
+        palette_hex=list(row["palette"] or []),
+        palette_names=[],
+        format=None,
+    )
+
+
+# ----------------------------------------------------------------- document
+
+
+def build_document(
+    r: Resolved, m: md.Metadata | None, depth: str, out: EngineOutput | None, x: XInfo | None
+) -> Analysis:
     now = datetime.now(UTC)
     flags: list[Flag] = []
     caveats: list[str] = []
@@ -125,7 +306,8 @@ def build_document(r: Resolved, m: md.Metadata | None, depth: str) -> Analysis:
         )
     raw = RawFields(name=r.name, symbol=r.symbol)
     image = ImageInfo(status="missing")
-    if m and m.status == "ok":
+    meta_ok = bool(m and m.status == "ok")
+    if m and meta_ok:
         raw.name = m.name or r.name
         raw.symbol = m.symbol or r.symbol
         raw.description = m.description
@@ -135,20 +317,10 @@ def build_document(r: Resolved, m: md.Metadata | None, depth: str) -> Analysis:
         raw.website = m.website
         if m.image_url:
             image = ImageInfo(
-                status="ok" if m.image_content_key else "failed",
-                source_url=m.image_url,
+                status="ok" if m.image_content_key else "failed", source_url=m.image_url
             )
             if not m.image_content_key and m.image_error:
                 caveats.append(f"image could not be fetched: {m.image_error}")
-        evidence.append(
-            Evidence(
-                kind="metadata",
-                label="source",
-                weight=0.0,
-                detail=f"metadata fetched ({m.content_key})",
-                source=f"uri:{r.uri}",
-            )
-        )
     else:
         reason = (m.error if m else "no uri on-chain") or "unknown"
         flags.append(
@@ -176,11 +348,65 @@ def build_document(r: Resolved, m: md.Metadata | None, depth: str) -> Analysis:
         )
     )
 
+    referent = None
+    categories: list[Category] = []
+    copy_of: list[CopyOf] = []
+    ticker_explanation = None
+    summary = f"{raw.name or '?'} (${raw.symbol or '?'}): resolved, but the engine did not run."
+    if out is not None:
+        agg = out.agg
+        if agg.referent:
+            referent = Referent(
+                label=agg.referent.label,
+                kind=_REFERENT_KINDS.get(agg.referent.kind, "other"),
+                desc=agg.referent.desc,
+                source=agg.referent.source,
+                confidence=agg.referent.score,
+            )
+        categories = [Category(label=lbl, confidence=s) for lbl, s in agg.categories]
+        copy_of = [
+            CopyOf(
+                ticker=c.get("ticker"), name=c.get("name"), mint=c.get("mint"), signals=c["signals"]
+            )
+            for c in out.copy_of
+        ]
+        ticker_explanation = out.ticker_explanation
+        for ev in out.evidence:
+            evidence.append(
+                Evidence(
+                    kind=ev.kind,
+                    label=ev.label,
+                    weight=round(ev.weight, 3),
+                    detail=ev.detail,
+                    source=ev.source,
+                    url=ev.url,
+                )
+            )
+        for f in out.flags:
+            flags.append(
+                Flag(code=f.code, severity=_SEVERITIES.get(f.severity, "info"), detail=f.detail)
+            )
+        caveats.extend(out.caveats)
+        summary = out.summary
+        feats = out.image.features
+        if feats:
+            image.phash = f"{feats.phash & ((1 << 64) - 1):016x}"
+            image.palette = feats.palette_hex
+            image.animated = feats.animated
+            image.near_duplicates = [
+                NearDuplicate(
+                    mint=nd.candidate.mint,
+                    known_coin=nd.candidate.known_coin,
+                    template=nd.candidate.template,
+                    distance=nd.distance,
+                )
+                for nd in out.image.near
+            ]
+            image.status = "ok"
+        elif out.image.error and image.status == "ok":
+            image.status = "failed"
+
     partial = (m is None or m.status != "ok") and bool(r.uri)
-    summary = (
-        f"{raw.name or '?'} (${raw.symbol or '?'}): on-chain and metadata resolved. "
-        "Meaning analysis (engine stages) is not implemented yet in this build."
-    )
     doc = Analysis(
         mint=r.mint,
         created_at=r.created_at,
@@ -193,19 +419,42 @@ def build_document(r: Resolved, m: md.Metadata | None, depth: str) -> Analysis:
             quote_mint=r.quote_mint,
         ),
         raw=raw,
+        normalized=_normalized_view(out),
+        referent=referent,
+        categories=categories,
+        ticker_explanation=ticker_explanation,
+        copy_of=copy_of,
         image=image,
-        x=_x_info(raw.twitter, r.created_at),
+        x=x,
         flags=flags,
         summary=summary,
         evidence=evidence,
-        caveats=caveats,
+        caveats=list(dict.fromkeys(caveats)),
         depth=depth,  # type: ignore[arg-type]
         analyzed_at=now,
-        versions=Versions(rules=RULES_VERSION, lexicon=LEXICON_VERSION),
+        versions=Versions(
+            rules=RULES_VERSION,
+            lexicon=LEXICON_VERSION,
+            known_coins=load_knowledge().versions.get("known_coins"),
+        ),
     )
     if partial:
         doc.caveats.append("partial: metadata pending; the next request may be more complete")
     return doc
+
+
+def _normalized_view(out: EngineOutput | None) -> NormalizedOut:
+    if out is None:
+        return NormalizedOut()
+    n = out.normalized
+    return NormalizedOut(
+        name_tokens=n.name_tokens,
+        ticker=n.ticker or None,
+        ticker_base=n.ticker_base or None,
+        markers=[m.code for m in n.markers],
+        emoji_keywords=n.emoji_keywords,
+        obfuscation=n.obfuscation,
+    )
 
 
 # ----------------------------------------------------------------- persistence
@@ -277,7 +526,7 @@ async def _schedule_retry(conn: asyncpg.Connection, mint: str, depth: str) -> No
 
 
 async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str) -> int:
-    """Resolve + fetch + build + persist. Returns the new analysis.version.
+    """Resolve + fetch + engine + persist. Returns the new analysis.version.
     Raises AnalyzeFailed for definitive per-CA failures (404/422 at the API)."""
     if ctx.rpc is None:
         raise RuntimeError("SOLANA_RPC_URL is not configured; the analyzer cannot resolve CAs")
@@ -287,6 +536,8 @@ async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str)
         raise AnalyzeFailed(e.code, str(e)) from e
 
     m: md.Metadata | None = None
+    image_bytes: bytes | None = None
+    cached_feats: image_stage.ImageFeatures | None = None
     if r.uri:
         m = await md.load_cached(conn, r.mint)
         if m is None:
@@ -295,15 +546,49 @@ async def analyze(conn: asyncpg.Connection, ctx: Context, mint: str, depth: str)
             await md.persist(conn, r.mint, m, attempts + (1 if m.status != "ok" else 0))
             if m.status == "unresolved":
                 await _schedule_retry(conn, r.mint, depth)
-            log.info(
-                "metadata.fetched",
-                mint=r.mint,
-                status=m.status,
-                error=m.error,
-                image=m.image_content_key,
-            )
+            log.info("metadata.fetched", mint=r.mint, status=m.status, error=m.error)
+            image_bytes = m.image_bytes
+        elif m.image_content_key:
+            cached_feats = await _cached_image_features(conn, m.image_content_key)
+            if cached_feats is None and m.image_url:
+                # older row without hashes: fetch the image again (cached by CID upstream)
+                refetched = await md.fetch_metadata(ctx.http, r.uri, ctx.settings)
+                image_bytes = refetched.image_bytes
 
-    doc = build_document(r, m, depth)
+    name = (m.name if m and m.status == "ok" and m.name else None) or r.name
+    symbol = (m.symbol if m and m.status == "ok" and m.symbol else None) or r.symbol
+    desc = m.description if m and m.status == "ok" else None
+    x = _x_info(m.twitter if m and m.status == "ok" else None, r.created_at)
+
+    from tokensage.engine.normalize import clean_ticker, normalize
+
+    n0 = normalize(name, symbol, None)
+    dbc = await _db_context(conn, ctx, r, m, x, clean_ticker(symbol or ""), n0.name_compact)
+    inp = EngineInput(
+        mint=r.mint,
+        name=name,
+        symbol=symbol,
+        description=desc,
+        image_bytes=image_bytes,
+        created_at=r.created_at,
+        x_kind=x.ref.kind if x else None,
+        x_object_time=x.object_time if x else None,
+        ctx=dbc,
+    )
+    out = run_basic(inp)
+    if cached_feats is not None and out.image.features is None:
+        out.image = image_stage.ImageResult(
+            features=cached_feats,
+            near=image_stage.near_duplicates(
+                cached_feats,
+                dbc.image_candidates,
+                int(load_knowledge().scoring.get("logo_phash_edited", 14)),
+            ),
+        )
+    if m and m.image_content_key and out.image.features and image_bytes:
+        await _persist_image(conn, m.image_content_key, out)
+
+    doc = build_document(r, m, depth, out, x)
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
 

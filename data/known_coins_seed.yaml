@@ -1,0 +1,375 @@
+# Seed table of famous memecoins (hand-curated; refreshed/extended by the knowledge cron from
+# CoinGecko in Phase 4). Facts here are well known up to 2025; verify when refreshing.
+# Fields: symbol, name, aliases, chain, lore (one line), categories, referent {label, kind, desc}
+coins:
+  - symbol: WIF
+    name: dogwifhat
+    aliases: [dog wif hat, dogwifhat, wif hat]
+    chain: solana
+    lore: "A Shiba Inu puppy wearing a pink knitted hat; the defining Solana dog meme of 2023-24."
+    categories: [animal/dog, meme_template/x_wif_hat]
+    referent: {label: dogwifhat, kind: meme, desc: "photo meme of a Shiba Inu wearing a knitted hat"}
+  - symbol: BONK
+    name: Bonk
+    aliases: [bonk]
+    chain: solana
+    lore: "Solana's first big dog coin (Dec 2022); 'bonk' is the dog-hit-with-bat meme."
+    categories: [animal/dog, meme_template/other]
+    referent: {label: Bonk, kind: coin, desc: "Solana dog coin; 'bonk' meme"}
+  - symbol: POPCAT
+    name: Popcat
+    aliases: [pop cat, popcat]
+    chain: solana
+    lore: "The 'Pop Cat' meme (Oatmeal the cat with an O-shaped mouth)."
+    categories: [animal/cat, meme_template/other]
+    referent: {label: Popcat, kind: meme, desc: "the 'pop cat' mouth-open meme"}
+  - symbol: MEW
+    name: cat in a dogs world
+    aliases: [mew, cat in a dogs world]
+    chain: solana
+    lore: "Cat coin positioned against the dog-coin wave (2024)."
+    categories: [animal/cat]
+    referent: {label: MEW (cat in a dogs world), kind: coin, desc: "cat coin, 2024"}
+  - symbol: MOODENG
+    name: Moo Deng
+    aliases: [moo deng, moodeng, mudeng]
+    chain: solana
+    lore: "Moo Deng, a baby pygmy hippo at Khao Kheow zoo (Thailand) that went viral in Sept 2024."
+    categories: [animal/hippo, news_event]
+    referent: {label: Moo Deng (hippo), kind: famous_animal, desc: "viral baby pygmy hippo at a Thai zoo, Sept 2024"}
+  - symbol: PNUT
+    name: Peanut the Squirrel
+    aliases: [peanut the squirrel, peanut squirrel, pnut, peanut]
+    chain: solana
+    lore: "Peanut, an Instagram-famous pet squirrel seized and euthanised by New York officials in Oct-Nov 2024."
+    categories: [animal/squirrel, news_event]
+    referent: {label: Peanut (squirrel), kind: famous_animal, desc: "pet squirrel seized and euthanised by NY officials, Oct 2024"}
+  - symbol: FRED
+    name: Fred the Raccoon
+    aliases: [fred the raccoon, fred raccoon]
+    chain: solana
+    lore: "Peanut's raccoon companion in the same Nov 2024 news story."
+    categories: [animal/other, news_event]
+    referent: {label: Fred (raccoon), kind: famous_animal, desc: "raccoon seized with Peanut the squirrel"}
+  - symbol: GOAT
+    name: Goatseus Maximus
+    aliases: [goatseus maximus, goatseus, goat]
+    chain: solana
+    lore: "Memecoin tied to the 'Goatse Gospel' of Truth Terminal, an AI bot by Andy Ayrey (Oct 2024)."
+    categories: [ai_agent, meme_template/other]
+    referent: {label: Goatseus Maximus / Truth Terminal, kind: meme, desc: "AI-bot lore coin (Truth Terminal), Oct 2024"}
+  - symbol: FARTCOIN
+    name: Fartcoin
+    aliases: [fartcoin, fart coin]
+    chain: solana
+    lore: "Toilet-humour coin from a Truth Terminal conversation; 'hot air rises'."
+    categories: [humor_crude_offensive, ai_agent, crypto_native/slang]
+    referent: {label: Fartcoin, kind: coin, desc: "toilet-humour coin from AI-bot lore"}
+  - symbol: CHILLGUY
+    name: Just a chill guy
+    aliases: [chill guy, just a chill guy, chillguy]
+    chain: solana
+    lore: "The 'Just a chill guy' cartoon dog in a grey sweater (artist Phillip Banks), viral Nov 2024."
+    categories: [meme_template/chill_guy, animal/dog]
+    referent: {label: Just a chill guy, kind: meme, desc: "cartoon of a relaxed dog in a sweater, viral 2024"}
+  - symbol: AI16Z
+    name: ai16z
+    aliases: [ai16z, eliza]
+    chain: solana
+    lore: "AI-agent DAO parodying a16z; ElizaOS framework."
+    categories: [ai_agent]
+    referent: {label: ai16z, kind: coin, desc: "AI agent DAO (ElizaOS)"}
+  - symbol: ZEREBRO
+    name: Zerebro
+    aliases: [zerebro]
+    chain: solana
+    lore: "AI agent that posts and 'creates art' autonomously (late 2024)."
+    categories: [ai_agent]
+    referent: {label: Zerebro, kind: coin, desc: "autonomous AI agent coin"}
+  - symbol: ACT
+    name: Act I The AI Prophecy
+    aliases: [act i, ai prophecy]
+    chain: solana
+    lore: "AI-agent research community coin (Nov 2024)."
+    categories: [ai_agent]
+    referent: {label: Act I, kind: coin, desc: "AI agent coin"}
+  - symbol: AIXBT
+    name: aixbt
+    aliases: [aixbt]
+    chain: base
+    lore: "AI crypto-analyst agent on X (Virtuals)."
+    categories: [ai_agent]
+    referent: {label: aixbt, kind: coin, desc: "AI analyst agent"}
+  - symbol: GIGA
+    name: Gigachad
+    aliases: [gigachad, giga chad]
+    chain: solana
+    lore: "The Gigachad (Ernest Khalimov) meme."
+    categories: [meme_template/pepe_wojak_chad]
+    referent: {label: Gigachad, kind: meme, desc: "the Gigachad meme"}
+  - symbol: PONKE
+    name: Ponke
+    aliases: [ponke]
+    chain: solana
+    lore: "Degenerate monkey mascot coin."
+    categories: [animal/monkey]
+    referent: {label: Ponke, kind: coin, desc: "monkey mascot coin"}
+  - symbol: MICHI
+    name: michi
+    aliases: [michi]
+    chain: solana
+    lore: "Cat coin; 'michi' is Spanish slang for cat."
+    categories: [animal/cat]
+    referent: {label: michi, kind: coin, desc: "cat coin"}
+  - symbol: FWOG
+    name: FWOG
+    aliases: [fwog]
+    chain: solana
+    lore: "Baby-talk frog coin."
+    categories: [animal/frog]
+    referent: {label: FWOG, kind: coin, desc: "frog coin (baby-talk spelling)"}
+  - symbol: MYRO
+    name: Myro
+    aliases: [myro]
+    chain: solana
+    lore: "Named after Solana co-founder Raj Gokal's dog."
+    categories: [animal/dog]
+    referent: {label: Myro, kind: famous_animal, desc: "Raj Gokal's dog"}
+  - symbol: SLERF
+    name: Slerf
+    aliases: [slerf]
+    chain: solana
+    lore: "Sloth coin famous for the dev accidentally burning the presale (Mar 2024)."
+    categories: [animal/other, news_event]
+    referent: {label: Slerf, kind: coin, desc: "sloth coin, burned-presale incident"}
+  - symbol: BOME
+    name: BOOK OF MEME
+    aliases: [book of meme, bome]
+    chain: solana
+    lore: "Darkfarms' meme-archive coin (Mar 2024)."
+    categories: [meme_template/other, crypto_native/slang]
+    referent: {label: Book of Meme, kind: coin, desc: "meme archive coin"}
+  - symbol: WEN
+    name: Wen
+    aliases: [wen]
+    chain: solana
+    lore: "Jupiter's 'wen' poem fragment airdrop coin."
+    categories: [crypto_native/slang]
+    referent: {label: WEN, kind: coin, desc: "Jupiter airdrop meme coin"}
+  - symbol: RETARDIO
+    name: Retardio
+    aliases: [retardio]
+    chain: solana
+    lore: "Degen slur-humour coin and NFT community."
+    categories: [humor_crude_offensive, crypto_native/slang]
+    referent: {label: Retardio, kind: coin, desc: "degen humour coin"}
+  - symbol: SPX
+    name: SPX6900
+    aliases: [spx6900, spx 6900]
+    chain: ethereum
+    lore: "'Flip the stock market' parody of the S&P 500."
+    categories: [crypto_native/slang, meme_template/other]
+    referent: {label: SPX6900, kind: coin, desc: "S&P 500 parody coin"}
+  - symbol: PEPE
+    name: Pepe
+    aliases: [pepe]
+    chain: ethereum
+    lore: "Pepe the Frog (Matt Furie) memecoin, Apr 2023."
+    categories: [animal/frog, meme_template/pepe_wojak_chad]
+    referent: {label: Pepe the Frog, kind: meme, desc: "Pepe the Frog meme (Matt Furie)"}
+  - symbol: DOGE
+    name: Dogecoin
+    aliases: [dogecoin, doge]
+    chain: dogecoin
+    lore: "The original memecoin (2013), Kabosu the Shiba Inu."
+    categories: [animal/dog, meme_template/other]
+    referent: {label: Doge (Kabosu), kind: meme, desc: "the Doge Shiba Inu meme / Dogecoin"}
+  - symbol: SHIB
+    name: Shiba Inu
+    aliases: [shiba inu, shib]
+    chain: ethereum
+    lore: "'Dogecoin killer' dog coin (2020)."
+    categories: [animal/dog]
+    referent: {label: Shiba Inu (coin), kind: coin, desc: "Ethereum dog coin"}
+  - symbol: FLOKI
+    name: Floki
+    aliases: [floki, floki inu]
+    chain: ethereum
+    lore: "Named after Elon Musk's Shiba Inu puppy."
+    categories: [animal/dog, celebrity/elon]
+    referent: {label: Floki (Musk's dog), kind: famous_animal, desc: "Elon Musk's Shiba Inu"}
+  - symbol: NEIRO
+    name: Neiro
+    aliases: [neiro]
+    chain: ethereum
+    lore: "Kabosu's successor dog adopted by the Doge owner (2024)."
+    categories: [animal/dog, news_event]
+    referent: {label: Neiro (dog), kind: famous_animal, desc: "Doge owner's new Shiba Inu, 2024"}
+  - symbol: BRETT
+    name: Brett
+    aliases: [brett]
+    chain: base
+    lore: "Pepe's friend from Matt Furie's Boy's Club."
+    categories: [meme_template/pepe_wojak_chad]
+    referent: {label: Brett (Boy's Club), kind: meme, desc: "Matt Furie character"}
+  - symbol: ANDY
+    name: Andy
+    aliases: [andy]
+    chain: ethereum
+    lore: "Another Boy's Club character."
+    categories: [meme_template/pepe_wojak_chad]
+    referent: {label: Andy (Boy's Club), kind: meme, desc: "Matt Furie character"}
+  - symbol: TRUMP
+    name: OFFICIAL TRUMP
+    aliases: [official trump, trump]
+    chain: solana
+    lore: "Donald Trump's own memecoin, launched Jan 2025."
+    categories: [political, celebrity/other]
+    referent: {label: Donald Trump, kind: person, desc: "US president; launched $TRUMP Jan 2025"}
+  - symbol: MELANIA
+    name: Melania Meme
+    aliases: [melania]
+    chain: solana
+    lore: "Melania Trump's memecoin, Jan 2025."
+    categories: [political, celebrity/other]
+    referent: {label: Melania Trump, kind: person, desc: "launched $MELANIA Jan 2025"}
+  - symbol: BODEN
+    name: Jeo Boden
+    aliases: [jeo boden, boden]
+    chain: solana
+    lore: "Misspelled-Biden PolitiFi coin (2024)."
+    categories: [political]
+    referent: {label: Joe Biden (parody), kind: person, desc: "PolitiFi parody coin"}
+  - symbol: TREMP
+    name: Doland Tremp
+    aliases: [doland tremp, tremp]
+    chain: solana
+    lore: "Misspelled-Trump PolitiFi coin (2024)."
+    categories: [political]
+    referent: {label: Donald Trump (parody), kind: person, desc: "PolitiFi parody coin"}
+  - symbol: PENGU
+    name: Pudgy Penguins
+    aliases: [pudgy penguins, pengu, pudgy]
+    chain: solana
+    lore: "Token of the Pudgy Penguins NFT brand (Dec 2024)."
+    categories: [animal/bird]
+    referent: {label: Pudgy Penguins, kind: coin, desc: "penguin NFT brand token"}
+  - symbol: HAWK
+    name: Hawk Tuah
+    aliases: [hawk tuah, hawktuah]
+    chain: solana
+    lore: "Haliey Welch's viral 'hawk tuah' interview; disastrous Dec 2024 launch."
+    categories: [celebrity/other, news_event, humor_crude_offensive]
+    referent: {label: Hawk Tuah (Haliey Welch), kind: meme, desc: "viral street-interview meme, 2024"}
+  - symbol: MOTHER
+    name: Mother Iggy
+    aliases: [mother iggy, mother]
+    chain: solana
+    lore: "Iggy Azalea's celebrity coin (2024)."
+    categories: [celebrity/musician]
+    referent: {label: Iggy Azalea, kind: person, desc: "rapper; launched $MOTHER"}
+  - symbol: DADDY
+    name: Daddy Tate
+    aliases: [daddy tate, daddy]
+    chain: solana
+    lore: "Andrew Tate's coin (2024)."
+    categories: [celebrity/other]
+    referent: {label: Andrew Tate, kind: person, desc: "influencer; launched $DADDY"}
+  - symbol: LIBRA
+    name: Libra
+    aliases: [libra]
+    chain: solana
+    lore: "Coin promoted by Argentina's president Milei; collapsed Feb 2025."
+    categories: [political, news_event]
+    referent: {label: LIBRA (Milei scandal), kind: event, desc: "Milei-promoted coin collapse, Feb 2025"}
+  - symbol: GME
+    name: GameStop
+    aliases: [gamestop, gme]
+    chain: solana
+    lore: "GameStop / Roaring Kitty meme-stock revival (May 2024)."
+    categories: [news_event, crypto_native/slang]
+    referent: {label: GameStop (meme stock), kind: event, desc: "meme-stock revival"}
+  - symbol: KITTY
+    name: Roaring Kitty
+    aliases: [roaring kitty, kitty]
+    chain: solana
+    lore: "Keith Gill's return (May 2024)."
+    categories: [celebrity/streamer_kol, news_event]
+    referent: {label: Roaring Kitty (Keith Gill), kind: person, desc: "meme-stock influencer"}
+  - symbol: SIGMA
+    name: Sigma
+    aliases: [sigma]
+    chain: solana
+    lore: "Brainrot 'sigma' coin."
+    categories: [meme_template/brainrot]
+    referent: {label: sigma (brainrot), kind: concept, desc: "sigma-male brainrot slang"}
+  - symbol: SKIBIDI
+    name: Skibidi Toilet
+    aliases: [skibidi, skibidi toilet]
+    chain: solana
+    lore: "Skibidi Toilet animated series brainrot."
+    categories: [meme_template/brainrot]
+    referent: {label: Skibidi Toilet, kind: meme, desc: "animated brainrot series"}
+  - symbol: LUCE
+    name: Luce
+    aliases: [luce]
+    chain: solana
+    lore: "The Vatican's anime Jubilee 2025 mascot (Oct 2024)."
+    categories: [news_event, meme_template/other]
+    referent: {label: Luce (Vatican mascot), kind: meme, desc: "Vatican anime mascot, Oct 2024"}
+  - symbol: CHILLHOUSE
+    name: Chill House
+    aliases: [chill house]
+    chain: solana
+    lore: "Chill-guy derivative."
+    categories: [meme_template/chill_guy, derivative/template_family]
+    referent: {label: Just a chill guy, kind: meme, desc: "chill guy derivative"}
+  - symbol: PWEASE
+    name: pwease
+    aliases: [pwease]
+    chain: solana
+    lore: "Baby-talk 'please' meme coin (Barron Trump 'pwease' meme, 2025)."
+    categories: [meme_template/brainrot, political]
+    referent: {label: pwease (meme), kind: meme, desc: "baby-talk 'please' meme"}
+  - symbol: TITCOIN
+    name: titcoin
+    aliases: [titcoin]
+    chain: solana
+    lore: "Crude humour coin (2025)."
+    categories: [humor_crude_offensive]
+    referent: {label: titcoin, kind: coin, desc: "crude humour coin"}
+  - symbol: HOUSE
+    name: Housecoin
+    aliases: [housecoin, house]
+    chain: solana
+    lore: "'Flip the housing market' joke coin (2025)."
+    categories: [crypto_native/slang, meme_template/other]
+    referent: {label: Housecoin, kind: coin, desc: "housing-market parody coin"}
+  - symbol: USELESS
+    name: Useless Coin
+    aliases: [useless coin, useless]
+    chain: solana
+    lore: "Self-aware 'useless' coin (2025)."
+    categories: [crypto_native/slang]
+    referent: {label: Useless Coin, kind: coin, desc: "self-aware joke coin"}
+  - symbol: PUMP
+    name: Pump
+    aliases: [pump fun, pumpfun, pump]
+    chain: solana
+    lore: "pump.fun's own token (July 2025)."
+    categories: [crypto_native/pumpfun_meta]
+    referent: {label: pump.fun (token), kind: coin, desc: "the launchpad's own token"}
+  - symbol: LABUBU
+    name: Labubu
+    aliases: [labubu]
+    chain: solana
+    lore: "Pop Mart's Labubu plush craze (2025)."
+    categories: [news_event, meme_template/other]
+    referent: {label: Labubu, kind: concept, desc: "Pop Mart plush toy craze, 2025"}
+  - symbol: BALLZ
+    name: Ballz
+    aliases: [ballz]
+    chain: solana
+    lore: "Crude humour coin."
+    categories: [humor_crude_offensive]
+    referent: {label: Ballz, kind: coin, desc: "crude humour coin"}

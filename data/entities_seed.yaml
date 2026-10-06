@@ -1,0 +1,131 @@
+# Seed gazetteer of named entities memecoins attach to. Hand-curated starter set; the
+# knowledge cron extends it from Wikidata in Phase 4. Matching is case-insensitive on
+# label + aliases. kind: person|famous_animal|meme|event|place|concept|coin
+entities:
+  # --- Elon & co
+  - {label: Elon Musk, kind: person, aliases: [elon, musk, elonmusk, elon musk, elons, elon's], categories: [celebrity/elon], desc: "Tesla/SpaceX/X owner; frequent memecoin trigger", popularity: 1.0}
+  - {label: Grok, kind: concept, aliases: [grok, grok ai], categories: [ai_agent, celebrity/elon], desc: "xAI's chatbot", popularity: 0.8}
+  - {label: Floki (Musk's dog), kind: famous_animal, aliases: [floki], categories: [animal/dog, celebrity/elon], desc: "Elon Musk's Shiba Inu", popularity: 0.7}
+  - {label: Kekius Maximus, kind: meme, aliases: [kekius, kekius maximus], categories: [celebrity/elon, meme_template/pepe_wojak_chad], desc: "Musk's Pepe-gladiator X name (Dec 2024)", popularity: 0.7}
+  - {label: DOGE (Dept. of Government Efficiency), kind: concept, aliases: [department of government efficiency, d.o.g.e], categories: [political, celebrity/elon], desc: "Musk-led US government efficiency effort, 2025", popularity: 0.8}
+  - {label: Starship, kind: concept, aliases: [starship, spacex], categories: [celebrity/elon, news_event], desc: "SpaceX rocket", popularity: 0.5}
+  # --- politics
+  - {label: Donald Trump, kind: person, aliases: [trump, donald trump, djt, donald j trump], categories: [political], desc: "US president", popularity: 1.0}
+  - {label: Melania Trump, kind: person, aliases: [melania], categories: [political], desc: "US first lady", popularity: 0.6}
+  - {label: Barron Trump, kind: person, aliases: [barron, barron trump], categories: [political], desc: "Trump's son", popularity: 0.6}
+  - {label: Joe Biden, kind: person, aliases: [biden, joe biden, boden, jeo boden], categories: [political], desc: "former US president", popularity: 0.8}
+  - {label: Kamala Harris, kind: person, aliases: [kamala, harris, kamala harris], categories: [political], desc: "former US vice president", popularity: 0.7}
+  - {label: JD Vance, kind: person, aliases: [vance, jd vance], categories: [political], desc: "US vice president", popularity: 0.6}
+  - {label: RFK Jr., kind: person, aliases: [rfk, rfk jr, kennedy], categories: [political], desc: "Robert F. Kennedy Jr.", popularity: 0.5}
+  - {label: Javier Milei, kind: person, aliases: [milei], categories: [political], desc: "Argentina's president (LIBRA scandal)", popularity: 0.6}
+  - {label: Vladimir Putin, kind: person, aliases: [putin], categories: [political], desc: "Russian president", popularity: 0.6}
+  - {label: Xi Jinping, kind: person, aliases: [xi jinping, xi], categories: [political], desc: "Chinese president", popularity: 0.5}
+  - {label: Kim Jong Un, kind: person, aliases: [kim jong un], categories: [political], desc: "North Korean leader", popularity: 0.5}
+  - {label: Nayib Bukele, kind: person, aliases: [bukele], categories: [political], desc: "El Salvador president (bitcoin)", popularity: 0.4}
+  - {label: Luigi Mangione, kind: person, aliases: [luigi mangione, luigi], categories: [news_event], desc: "suspect in the Dec 2024 UnitedHealthcare CEO killing", popularity: 0.6}
+  - {label: US election 2024, kind: event, aliases: [election 2024, 2024 election], categories: [political, news_event], desc: "US presidential election", popularity: 0.6}
+  - {label: White House, kind: place, aliases: [white house, whitehouse], categories: [political], desc: "US presidency", popularity: 0.5}
+  - {label: Mar-a-Lago, kind: place, aliases: [mar-a-lago, maralago], categories: [political], desc: "Trump's estate", popularity: 0.3}
+  # --- business / tech figures
+  - {label: Vitalik Buterin, kind: person, aliases: [vitalik], categories: [celebrity/other, crypto_native/slang], desc: "Ethereum co-founder", popularity: 0.6}
+  - {label: Anatoly Yakovenko, kind: person, aliases: [toly, anatoly], categories: [celebrity/other, crypto_native/slang], desc: "Solana co-founder", popularity: 0.5}
+  - {label: Raj Gokal, kind: person, aliases: [raj gokal, raj], categories: [celebrity/other], desc: "Solana co-founder", popularity: 0.3}
+  - {label: Changpeng Zhao, kind: person, aliases: [cz, changpeng zhao], categories: [celebrity/other, crypto_native/slang], desc: "Binance founder", popularity: 0.6}
+  - {label: Sam Bankman-Fried, kind: person, aliases: [sbf, sam bankman-fried, bankman], categories: [celebrity/other, crypto_native/slang], desc: "FTX founder (convicted)", popularity: 0.5}
+  - {label: Michael Saylor, kind: person, aliases: [saylor], categories: [celebrity/other, crypto_native/slang], desc: "MicroStrategy bitcoin maximalist", popularity: 0.5}
+  - {label: Jerome Powell, kind: person, aliases: [powell, jpow, jerome powell], categories: [political, news_event], desc: "US Fed chair", popularity: 0.5}
+  - {label: Mark Zuckerberg, kind: person, aliases: [zuck, zuckerberg], categories: [celebrity/other], desc: "Meta CEO", popularity: 0.5}
+  - {label: Jeff Bezos, kind: person, aliases: [bezos], categories: [celebrity/other], desc: "Amazon founder", popularity: 0.4}
+  - {label: Sam Altman, kind: person, aliases: [sam altman, altman], categories: [ai_agent, celebrity/other], desc: "OpenAI CEO", popularity: 0.5}
+  - {label: Jensen Huang, kind: person, aliases: [jensen, jensen huang], categories: [celebrity/other, ai_agent], desc: "Nvidia CEO", popularity: 0.4}
+  - {label: Andy Ayrey, kind: person, aliases: [andy ayrey], categories: [ai_agent], desc: "creator of Truth Terminal", popularity: 0.4}
+  - {label: Marc Andreessen, kind: person, aliases: [pmarca, andreessen], categories: [ai_agent, celebrity/other], desc: "a16z; funded Truth Terminal", popularity: 0.3}
+  - {label: Pump.fun (Alon), kind: person, aliases: [alon, a1lon9], categories: [crypto_native/pumpfun_meta], desc: "pump.fun co-founder", popularity: 0.4}
+  - {label: Murad Mahmudov, kind: person, aliases: [murad], categories: [celebrity/streamer_kol, crypto_native/slang], desc: "memecoin 'supercycle' KOL", popularity: 0.4}
+  - {label: Ansem, kind: person, aliases: [ansem, blknoiz06], categories: [celebrity/streamer_kol], desc: "Solana memecoin KOL", popularity: 0.4}
+  - {label: Faze Banks, kind: person, aliases: [faze banks, banks], categories: [celebrity/streamer_kol], desc: "FaZe Clan figure", popularity: 0.3}
+  - {label: Kai Cenat, kind: person, aliases: [kai cenat, kai], categories: [celebrity/streamer_kol], desc: "streamer", popularity: 0.5}
+  - {label: iShowSpeed, kind: person, aliases: [ishowspeed, speed], categories: [celebrity/streamer_kol], desc: "streamer", popularity: 0.5}
+  - {label: MrBeast, kind: person, aliases: [mrbeast, mr beast], categories: [celebrity/streamer_kol], desc: "YouTuber", popularity: 0.6}
+  - {label: Andrew Tate, kind: person, aliases: [andrew tate, tate, top g], categories: [celebrity/other], desc: "influencer", popularity: 0.6}
+  - {label: Logan Paul, kind: person, aliases: [logan paul], categories: [celebrity/streamer_kol], desc: "YouTuber/wrestler", popularity: 0.4}
+  - {label: Joe Rogan, kind: person, aliases: [rogan, joe rogan], categories: [celebrity/other], desc: "podcaster", popularity: 0.5}
+  # --- musicians / sport
+  - {label: Kanye West, kind: person, aliases: [kanye, ye, kanye west], categories: [celebrity/musician], desc: "rapper", popularity: 0.7}
+  - {label: Taylor Swift, kind: person, aliases: [taylor swift, swift, swiftie], categories: [celebrity/musician], desc: "pop star", popularity: 0.6}
+  - {label: Drake, kind: person, aliases: [drake], categories: [celebrity/musician], desc: "rapper", popularity: 0.5}
+  - {label: Kendrick Lamar, kind: person, aliases: [kendrick, kendrick lamar], categories: [celebrity/musician], desc: "rapper", popularity: 0.5}
+  - {label: Iggy Azalea, kind: person, aliases: [iggy, iggy azalea], categories: [celebrity/musician], desc: "rapper; launched $MOTHER", popularity: 0.5}
+  - {label: Snoop Dogg, kind: person, aliases: [snoop, snoop dogg], categories: [celebrity/musician], desc: "rapper", popularity: 0.4}
+  - {label: Diddy, kind: person, aliases: [diddy, p diddy, puff daddy], categories: [celebrity/musician, news_event], desc: "rapper (2024-25 trials)", popularity: 0.5}
+  - {label: Lionel Messi, kind: person, aliases: [messi], categories: [celebrity/athlete], desc: "footballer", popularity: 0.6}
+  - {label: Cristiano Ronaldo, kind: person, aliases: [ronaldo, cr7], categories: [celebrity/athlete], desc: "footballer", popularity: 0.6}
+  - {label: LeBron James, kind: person, aliases: [lebron], categories: [celebrity/athlete], desc: "basketball player", popularity: 0.5}
+  - {label: Mike Tyson, kind: person, aliases: [tyson, mike tyson], categories: [celebrity/athlete], desc: "boxer", popularity: 0.4}
+  - {label: Jake Paul, kind: person, aliases: [jake paul], categories: [celebrity/athlete, celebrity/streamer_kol], desc: "boxer/YouTuber", popularity: 0.4}
+  - {label: Conor McGregor, kind: person, aliases: [mcgregor, conor mcgregor], categories: [celebrity/athlete], desc: "MMA fighter", popularity: 0.4}
+  # --- famous animals
+  - {label: Moo Deng (hippo), kind: famous_animal, aliases: [moo deng, moodeng, mudeng], categories: [animal/hippo], desc: "viral baby pygmy hippo, Thailand, 2024", popularity: 0.8}
+  - {label: Peanut (squirrel), kind: famous_animal, aliases: [peanut the squirrel, peanut squirrel, pnut the squirrel], categories: [animal/squirrel], desc: "pet squirrel euthanised by NY officials, 2024", popularity: 0.8}
+  - {label: Pesto (penguin), kind: famous_animal, aliases: [pesto, pesto the penguin], categories: [animal/bird], desc: "giant king penguin chick, Melbourne aquarium, 2024", popularity: 0.5}
+  - {label: Doge (Kabosu), kind: famous_animal, aliases: [kabosu], categories: [animal/dog], desc: "the Shiba Inu behind the Doge meme (died 2024)", popularity: 0.7}
+  - {label: Grumpy Cat, kind: famous_animal, aliases: [grumpy cat], categories: [animal/cat], desc: "famous cat meme", popularity: 0.5}
+  - {label: Harambe, kind: famous_animal, aliases: [harambe], categories: [animal/monkey], desc: "gorilla killed at Cincinnati zoo, 2016 meme", popularity: 0.6}
+  - {label: Fred (raccoon), kind: famous_animal, aliases: [fred the raccoon], categories: [animal/other], desc: "raccoon seized with Peanut", popularity: 0.4}
+  - {label: Pepe the Frog, kind: meme, aliases: [pepe the frog], categories: [animal/frog, meme_template/pepe_wojak_chad], desc: "Matt Furie's frog, internet meme", popularity: 0.9}
+  - {label: Nyan Cat, kind: meme, aliases: [nyan cat, nyan], categories: [animal/cat, meme_template/other], desc: "rainbow pop-tart cat", popularity: 0.4}
+  - {label: Keyboard Cat, kind: meme, aliases: [keyboard cat], categories: [animal/cat, meme_template/other], desc: "piano-playing cat video", popularity: 0.3}
+  - {label: Longcat, kind: meme, aliases: [longcat], categories: [animal/cat, meme_template/other], desc: "long cat meme", popularity: 0.3}
+  - {label: Cheems, kind: meme, aliases: [cheems, cheemsburbger], categories: [animal/dog, meme_template/other], desc: "Doge-family Shiba meme", popularity: 0.5}
+  - {label: Big Floppa, kind: meme, aliases: [floppa, big floppa], categories: [animal/cat, meme_template/other], desc: "caracal cat meme", popularity: 0.4}
+  - {label: Banana Cat, kind: meme, aliases: [banana cat, bananacat], categories: [animal/cat, meme_template/brainrot], desc: "crying banana cat meme", popularity: 0.4}
+  - {label: Maxwell the Cat, kind: meme, aliases: [maxwell], categories: [animal/cat, meme_template/other], desc: "spinning cat meme", popularity: 0.3}
+  - {label: Pop Cat, kind: meme, aliases: [pop cat, popcat], categories: [animal/cat, meme_template/other], desc: "mouth-open cat meme", popularity: 0.6}
+  # --- meme templates / internet culture
+  - {label: Wojak, kind: meme, aliases: [wojak, feels guy], categories: [meme_template/pepe_wojak_chad], desc: "feels-guy meme", popularity: 0.7}
+  - {label: Gigachad, kind: meme, aliases: [gigachad], categories: [meme_template/pepe_wojak_chad], desc: "Gigachad meme", popularity: 0.6}
+  - {label: Just a chill guy, kind: meme, aliases: [chill guy, chillguy], categories: [meme_template/chill_guy], desc: "relaxed cartoon dog meme, 2024", popularity: 0.8}
+  - {label: Skibidi Toilet, kind: meme, aliases: [skibidi, skibidi toilet], categories: [meme_template/brainrot], desc: "animated brainrot series", popularity: 0.6}
+  - {label: Rickroll, kind: meme, aliases: [rickroll, rick astley, never gonna give you up], categories: [meme_template/other], desc: "Rick Astley bait-and-switch", popularity: 0.4}
+  - {label: Hawk Tuah, kind: meme, aliases: [hawk tuah, hawktuah, haliey welch], categories: [celebrity/other, humor_crude_offensive], desc: "viral interview meme, 2024", popularity: 0.6}
+  - {label: Very Demure, kind: meme, aliases: [demure, very demure, very mindful], categories: [meme_template/brainrot], desc: "TikTok phrase meme, Aug 2024", popularity: 0.4}
+  - {label: Goatse, kind: meme, aliases: [goatse, goatseus], categories: [meme_template/other, humor_crude_offensive], desc: "shock-site meme referenced by Truth Terminal", popularity: 0.5}
+  - {label: Truth Terminal, kind: concept, aliases: [truth terminal, truth_terminal, terminal of truths], categories: [ai_agent], desc: "Andy Ayrey's autonomous AI bot behind $GOAT", popularity: 0.7}
+  - {label: ChatGPT, kind: concept, aliases: [chatgpt, openai], categories: [ai_agent], desc: "OpenAI chatbot", popularity: 0.7}
+  - {label: Claude, kind: concept, aliases: [claude ai, anthropic], categories: [ai_agent], desc: "Anthropic's AI model", popularity: 0.5}
+  - {label: DeepSeek, kind: concept, aliases: [deepseek], categories: [ai_agent, news_event], desc: "Chinese AI lab (Jan 2025 shock)", popularity: 0.6}
+  - {label: Gemini, kind: concept, aliases: [gemini ai], categories: [ai_agent], desc: "Google's AI model", popularity: 0.4}
+  - {label: Terminator, kind: concept, aliases: [terminator, skynet], categories: [ai_agent, meme_template/other], desc: "AI-apocalypse film reference", popularity: 0.4}
+  - {label: Studio Ghibli, kind: concept, aliases: [ghibli, ghiblification], categories: [ai_agent, news_event, meme_template/other], desc: "AI image-style craze, Mar 2025", popularity: 0.5}
+  - {label: Minecraft, kind: concept, aliases: [minecraft], categories: [meme_template/other], desc: "video game", popularity: 0.4}
+  - {label: Fortnite, kind: concept, aliases: [fortnite], categories: [meme_template/other], desc: "video game", popularity: 0.4}
+  - {label: Pokémon, kind: concept, aliases: [pokemon, pikachu], categories: [meme_template/other], desc: "franchise", popularity: 0.5}
+  - {label: SpongeBob, kind: concept, aliases: [spongebob, patrick star], categories: [meme_template/other], desc: "cartoon", popularity: 0.5}
+  - {label: Shrek, kind: concept, aliases: [shrek], categories: [meme_template/other], desc: "film character meme", popularity: 0.4}
+  - {label: Squid Game, kind: concept, aliases: [squid game], categories: [news_event, meme_template/other], desc: "Netflix series (S2 Dec 2024)", popularity: 0.4}
+  # --- places / regions (regional metas)
+  - {label: China, kind: place, aliases: [china, chinese, cn, zhongguo], categories: [regional_language], desc: "country", popularity: 0.6}
+  - {label: Japan, kind: place, aliases: [japan, japanese, nihon], categories: [regional_language], desc: "country", popularity: 0.4}
+  - {label: Korea, kind: place, aliases: [korea, korean], categories: [regional_language], desc: "country", popularity: 0.4}
+  - {label: India, kind: place, aliases: [india, indian], categories: [regional_language], desc: "country", popularity: 0.4}
+  - {label: Russia, kind: place, aliases: [russia, russian], categories: [regional_language], desc: "country", popularity: 0.4}
+  - {label: Argentina, kind: place, aliases: [argentina], categories: [regional_language], desc: "country", popularity: 0.3}
+  - {label: Brazil, kind: place, aliases: [brazil, brasil], categories: [regional_language], desc: "country", popularity: 0.3}
+  - {label: America, kind: place, aliases: [america, usa, american, murica], categories: [regional_language, political], desc: "United States", popularity: 0.4}
+  - {label: Canada, kind: place, aliases: [canada, canadian], categories: [regional_language], desc: "country", popularity: 0.3}
+  - {label: Greenland, kind: place, aliases: [greenland], categories: [regional_language, political, news_event], desc: "territory in 2025 political news", popularity: 0.4}
+  - {label: Ohio, kind: place, aliases: [ohio], categories: [meme_template/brainrot], desc: "'only in Ohio' meme", popularity: 0.3}
+  # --- events / products
+  - {label: Bitcoin, kind: coin, aliases: [bitcoin, btc, satoshi], categories: [crypto_native/slang], desc: "bitcoin", popularity: 0.5}
+  - {label: Ethereum, kind: coin, aliases: [ethereum, eth], categories: [crypto_native/slang], desc: "ethereum", popularity: 0.4}
+  - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/slang], desc: "solana", popularity: 0.4}
+  - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
+  - {label: Coinbase, kind: concept, aliases: [coinbase], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
+  - {label: Super Bowl, kind: event, aliases: [super bowl, superbowl], categories: [news_event], desc: "annual US football final", popularity: 0.4}
+  - {label: World Cup, kind: event, aliases: [world cup], categories: [news_event], desc: "football world cup", popularity: 0.4}
+  - {label: Olympics, kind: event, aliases: [olympics, olympic], categories: [news_event], desc: "Olympic games", popularity: 0.4}
+  - {label: Halloween, kind: event, aliases: [halloween, spooky], categories: [news_event, meme_template/other], desc: "seasonal", popularity: 0.3}
+  - {label: Christmas, kind: event, aliases: [christmas, xmas, santa], categories: [news_event, meme_template/other], desc: "seasonal", popularity: 0.3}
+  - {label: Thanksgiving, kind: event, aliases: [thanksgiving, turkey day], categories: [news_event], desc: "seasonal", popularity: 0.2}
+  - {label: 4/20, kind: event, aliases: ["420", weed day], categories: [meme_template/other], desc: "cannabis culture number", popularity: 0.3}
+  - {label: 69 (number), kind: concept, aliases: ["69", "6900"], categories: [humor_crude_offensive, meme_template/other], desc: "joke number", popularity: 0.3}

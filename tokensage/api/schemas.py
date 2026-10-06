@@ -16,6 +16,10 @@ SCHEMA_VERSION = "1"
 Depth = Literal["basic", "full"]
 Status = Literal["complete", "partial", "pending", "failed"]
 JobStatus = Literal["pending", "running", "done", "failed"]
+ReferentKind = Literal[
+    "famous_animal", "meme", "person", "coin", "event", "concept", "place", "other"
+]
+Severity = Literal["info", "warn", "high"]
 
 
 class _Model(BaseModel):
@@ -55,7 +59,7 @@ class Market(_Model):
 
 class Referent(_Model):
     label: str
-    kind: Literal["famous_animal", "meme", "person", "coin", "event", "concept", "place", "other"]
+    kind: ReferentKind
     desc: str | None = None
     source: str | None = None
     confidence: float = Field(ge=0, le=1)
@@ -167,7 +171,7 @@ class Trend(_Model):
 
 class Flag(_Model):
     code: str
-    severity: Literal["info", "warn", "high"]
+    severity: Severity
     detail: str
 
 

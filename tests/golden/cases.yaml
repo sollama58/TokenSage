@@ -1,0 +1,301 @@
+# Golden meaning cases (guide §9 Phase 3). Each case runs the engine with no network and no
+# database. Assertions:
+#   categories_include / categories_exclude : labels that must / must not reach min confidence
+#   top_category                            : the highest-scoring label must start with this
+#   referent                                : referent.label must contain this (case-insensitive)
+#   no_referent                             : true -> referent must be null or score < 0.45
+#   flags_include / flags_exclude           : flag codes
+#   ticker_method                           : ticker explanation method
+#   copy_of_includes                        : known-coin tickers that must appear in copy_of
+#   copy_of_excludes                        : tickers that must NOT appear
+#   tokens                                  : exact normalized name tokens
+#   obfuscation_include                     : obfuscation codes
+cases:
+  # ---------------------------------------------------------------- the famous ones (self)
+  - name: dogwifhat
+    symbol: WIF
+    categories_include: [animal/dog, meme_template/x_wif_hat]
+    referent: dogwifhat
+    ticker_method: known_coin
+    copy_of_excludes: [WIF]
+    flags_exclude: [copycat]
+  - name: Peanut the Squirrel
+    symbol: PNUT
+    description: "Justice for Peanut 🐿"
+    categories_include: [animal/squirrel, news_event]
+    referent: Peanut
+    copy_of_excludes: [PNUT]
+    flags_exclude: [copycat]
+  - name: Moo Deng
+    symbol: MOODENG
+    categories_include: [animal/hippo]
+    referent: Moo Deng
+  - name: Goatseus Maximus
+    symbol: GOAT
+    categories_include: [ai_agent]
+    referent: Goatseus
+  - name: Just a chill guy
+    symbol: CHILLGUY
+    categories_include: [meme_template/chill_guy]
+    referent: chill guy
+    tokens: [just, a, chill, guy]
+  - name: cat in a dogs world
+    symbol: MEW
+    categories_include: [animal/cat]
+    referent: MEW
+    ticker_method: known_coin
+  - name: Fartcoin
+    symbol: FARTCOIN
+    categories_include: [humor_crude_offensive]
+    referent: Fartcoin
+  - name: Popcat
+    symbol: POPCAT
+    categories_include: [animal/cat, meme_template]
+    referent: Popcat
+  # ---------------------------------------------------------------- derivatives / copycats
+  - name: Baby PNUT
+    symbol: BPNUT
+    categories_include: [derivative, animal/squirrel]
+    copy_of_includes: [PNUT]
+    flags_include: [copycat]
+    referent: Peanut
+  - name: Peanut the Squirrel 2.0
+    symbol: PNUT2
+    categories_include: [derivative/sequel, animal/squirrel]
+    copy_of_includes: [PNUT]
+    referent: Peanut
+  - name: dogwifhat2.0
+    symbol: WIF2
+    categories_include: [derivative/sequel, animal/dog]
+    copy_of_includes: [WIF]
+  - name: m00 deng classic
+    symbol: MOODENG
+    categories_include: [derivative, animal/hippo]
+    copy_of_includes: [MOODENG]
+    referent: Moo Deng
+  - name: ʙᴀʙʏ ᴘɴᴜᴛ
+    symbol: BPNUT
+    obfuscation_include: [small_caps]
+    categories_include: [derivative, animal/squirrel]
+    copy_of_includes: [PNUT]
+    flags_include: [obfuscated_text]
+  - name: Рepe              # Cyrillic Р
+    symbol: PEPE
+    obfuscation_include: [homoglyph]
+    flags_include: [homoglyph_ticker]
+    categories_include: [derivative/homoglyph_spoof, animal/frog]
+    copy_of_includes: [PEPE]
+  - name: "$Ｐ​ＮＵＴ"
+    symbol: PNUT
+    obfuscation_include: [fullwidth, zero_width]
+    tokens: [pnut]
+    referent: Peanut
+  - name: p3anu7
+    symbol: PNUT
+    obfuscation_include: [leet]
+    tokens: [peanut]
+    referent: Peanut
+  - name: Moo Deng on Sol
+    symbol: MOODENG
+    categories_include: [derivative/copycat, animal/hippo]
+    flags_include: [copycat]
+  - name: Real Fartcoin
+    symbol: FARTCOIN
+    categories_include: [derivative/copycat]
+    flags_include: [copycat]
+  - name: Floki Inu
+    symbol: FLOKI
+    categories_include: [animal/dog]
+    referent: Floki
+  - name: Mini Doge
+    symbol: MDOGE
+    categories_include: [derivative/template_family, animal/dog]
+    copy_of_includes: [DOGE]
+  # ---------------------------------------------------------------- template families
+  - name: catwifhat
+    symbol: CWIF
+    categories_include: [meme_template/x_wif_hat, animal/cat, derivative/template_family]
+    referent: dogwifhat
+    flags_exclude: [copycat]
+  - name: Trump wif Hat
+    symbol: TWIF
+    categories_include: [meme_template/x_wif_hat, political]
+    categories_exclude: [animal/dog]
+    referent: Donald Trump
+  - name: fwog wif hat
+    symbol: FWIF
+    categories_include: [animal/frog, meme_template/x_wif_hat]
+  - name: chill house
+    symbol: CHILLHOUSE
+    categories_include: [meme_template/chill_guy]
+  # ---------------------------------------------------------------- animals via wordnet / emoji
+  - name: Corgi Coin
+    symbol: CORGI
+    categories_include: [animal/dog]
+    ticker_method: equals_token
+  - name: Capybara
+    symbol: CAPY
+    categories_include: [animal/other]
+    top_category: animal
+  - name: "🐿🥜"
+    symbol: NUT
+    categories_include: [animal/squirrel]
+  - name: Penguin
+    symbol: PENG
+    categories_include: [animal/bird]
+  - name: Shark Tank
+    symbol: SHARK
+    categories_include: [animal/fish]
+  - name: Pesto the Penguin
+    symbol: PESTO
+    categories_include: [animal/bird]
+    referent: Pesto
+  - name: Harambe
+    symbol: HARAMBE
+    categories_include: [animal/monkey]
+    referent: Harambe
+  - name: Grumpy Cat
+    symbol: GRUMPY
+    categories_include: [animal/cat]
+    referent: Grumpy Cat
+  - name: Elons Dog
+    symbol: FLOKI
+    categories_include: [animal/dog, celebrity/elon]
+    referent: Floki
+  # ---------------------------------------------------------------- meme culture / brainrot
+  - name: Skibidi Toilet
+    symbol: SKIBIDI
+    categories_include: [meme_template/brainrot]
+    referent: Skibidi
+  - name: Gigachad
+    symbol: GIGA
+    categories_include: [meme_template/pepe_wojak_chad]
+    referent: Gigachad
+  - name: Wojak
+    symbol: WOJAK
+    categories_include: [meme_template/pepe_wojak_chad]
+    referent: Wojak
+  - name: Rizz
+    symbol: RIZZ
+    categories_include: [meme_template/brainrot]
+    ticker_method: equals_token
+  - name: NPC Coin
+    symbol: NPC
+    categories_include: [meme_template/npc]
+  - name: Based Retardio
+    symbol: RETARDIO
+    categories_include: [humor_crude_offensive]
+  # ---------------------------------------------------------------- AI / agents
+  - name: AIAgentSupercycle
+    symbol: AIAS
+    tokens: [ai, agent, super, cycle]
+    categories_include: [ai_agent]
+    ticker_method: subsequence
+  - name: Truth Terminal
+    symbol: TRUTH
+    categories_include: [ai_agent]
+    referent: Truth Terminal
+  - name: DeepSeek
+    symbol: DEEPSEEK
+    categories_include: [ai_agent, news_event]
+    referent: DeepSeek
+  - name: Sentient AGI
+    symbol: AGI
+    categories_include: [ai_agent]
+  # ---------------------------------------------------------------- political / celebrity
+  - name: MAGA
+    symbol: MAGA
+    categories_include: [political]
+  - name: Jeo Boden
+    symbol: BODEN
+    categories_include: [political]
+    referent: Biden
+  - name: Luigi Mangione
+    symbol: LUIGI
+    categories_include: [news_event]
+    referent: Luigi Mangione
+  - name: Kanye West
+    symbol: YE
+    categories_include: [celebrity/musician]
+    referent: Kanye
+  - name: Hawk Tuah
+    symbol: HAWK
+    categories_include: [celebrity, news_event]
+    referent: Hawk Tuah
+  - name: Elon Musk
+    symbol: ELON
+    categories_include: [celebrity/elon]
+    referent: Elon Musk
+  - name: Department of Government Efficiency
+    symbol: DOGE
+    categories_include: [political]
+  # ---------------------------------------------------------------- crypto-native / slang
+  - name: WAGMI
+    symbol: WAGMI
+    categories_include: [crypto_native/slang]
+    ticker_method: equals_token
+  - name: Community Takeover Coin
+    symbol: CTOC
+    categories_include: [crypto_native/cto]
+  - name: Jeet Killer
+    symbol: JEET
+    categories_include: [crypto_native/slang]
+  - name: Community Takeover
+    symbol: CTO
+    categories_include: [crypto_native/cto]
+    ticker_method: slang
+  - name: pump fun
+    symbol: PUMP
+    categories_include: [crypto_native/pumpfun_meta]
+  - name: Fear Of Missing Out
+    symbol: FOMO
+    ticker_method: acronym
+    categories_include: [crypto_native/slang]
+  - name: Diamond Hands
+    symbol: DIAMOND
+    categories_include: [crypto_native/slang]
+  # ---------------------------------------------------------------- regional / scripts
+  - name: 币圈大哥
+    symbol: BQDG
+    categories_include: [regional_language]
+    flags_include: [regional_script]
+  - name: 猫
+    symbol: MAO
+    categories_include: [regional_language]
+  - name: Путин
+    symbol: PUTIN
+    categories_include: [regional_language]
+    flags_include: [regional_script]
+  # ---------------------------------------------------------------- ticker explanations
+  - name: Peanut
+    symbol: PNT
+    ticker_method: vowel_drop
+    referent: Peanut
+  - name: moooon
+    symbol: MOON
+    obfuscation_include: [repeated_letters]
+    tokens: [moon]
+    ticker_method: equals_token
+  - name: Super Bowl Sunday
+    symbol: SBS
+    ticker_method: acronym
+    categories_include: [news_event]
+  - name: Pizza Time
+    symbol: PIZZA
+    categories_include: [food_object_abstract]
+    ticker_method: equals_token
+  - name: Taco Tuesday
+    symbol: TACO
+    categories_include: [food_object_abstract]
+  # ---------------------------------------------------------------- weak / empty cases
+  - name: ""
+    symbol: XYZ
+    no_referent: true
+    caveats_include: ["name is empty"]
+  - name: Zxqv Plorth
+    symbol: ZXQV
+    no_referent: true
+    categories_exclude: [animal, political, ai_agent]
+  - name: Coin
+    symbol: COIN
+    no_referent: true

@@ -1,0 +1,46 @@
+# Markers, template families, ticker affixes, and scoring knobs. Config, not code.
+
+# Version / derivative markers. Detected BEFORE punctuation is stripped. `kind` feeds the
+# derivative sub-label; `weight` is evidence weight for the derivative category.
+markers:
+  - {pattern: '(?i)(?<![\d.])(?:\bv\s?2|2\.0|two point o)(?![\w.])', code: "version:2", kind: sequel, weight: 0.7}
+  - {pattern: '(?i)(?<![\d.])(?:\bv\s?3|3\.0)(?![\w.])', code: "version:3", kind: sequel, weight: 0.7}
+  - {pattern: '(?i)\b(?:ii|iii)\b', code: "version:roman", kind: sequel, weight: 0.4}
+  - {pattern: '(?i)\b(?:classic|og|original|the real|real)\b', code: "marker:original-claim", kind: copycat, weight: 0.45}
+  - {pattern: '(?i)\b(?:baby|lil|little|mini|smol|son of|daughter of)\b', code: "marker:baby", kind: template_family, weight: 0.5}
+  - {pattern: '(?i)\b(?:mother of|father of|king of|queen of|god of)\b', code: "marker:parent", kind: template_family, weight: 0.35}
+  - {pattern: '(?i)\b(?:on sol|on solana|sol edition|solana edition)\b', code: "marker:on-sol", kind: copycat, weight: 0.4}
+  - {pattern: '(?i)\b(?:cto|community takeover)\b', code: "marker:cto", kind: null, weight: 0.0}
+  - {pattern: '(?i)\b(?:ai|agent)\b$', code: "marker:ai-suffix", kind: template_family, weight: 0.3}
+  - {pattern: '(?i)\b(?:inu)\b', code: "marker:inu", kind: template_family, weight: 0.45}
+  - {pattern: '(?i)\b(?:wif)\b', code: "marker:wif", kind: template_family, weight: 0.5}
+
+# Template families: a compact-name regex, the parent coin it derives from, and labels.
+families:
+  - {name: x_wif_hat, pattern: '(?i)wif\s?(?:hat|cap|beanie|helmet|crown)$', parent: WIF, categories: [meme_template/x_wif_hat, derivative/template_family], weight: 0.8}
+  - {name: x_wif_x, pattern: '(?i)\bwif\b', parent: WIF, categories: [meme_template/x_wif_hat, derivative/template_family], weight: 0.5}
+  - {name: baby_x, pattern: '(?i)^(?:baby|lil|mini)\s', parent: null, categories: [derivative/template_family], weight: 0.4}
+  - {name: x_inu, pattern: '(?i)\binu$', parent: SHIB, categories: [animal/dog, derivative/template_family], weight: 0.5}
+  - {name: x_coin, pattern: '(?i)coin$', parent: null, categories: [], weight: 0.0}
+  - {name: chill_x, pattern: '(?i)^(?:just a )?chill\s', parent: CHILLGUY, categories: [meme_template/chill_guy, derivative/template_family], weight: 0.6}
+  - {name: x_the_y, pattern: '(?i)^\w+ the \w+$', parent: null, categories: [], weight: 0.0}
+
+# Ticker affixes stripped before comparing to known tickers (BPNUT -> PNUT, PNUT2 -> PNUT).
+ticker:
+  prefixes: [BABY, B, MINI, LIL, V2, NEW, REAL, OG, THE]
+  suffixes: ["2", "20", "3", "V2", "INU", "AI", "SOL", "X", "COIN", "CTO", "OG"]
+  min_base_len: 3
+
+# Scoring knobs (guide §5.9). Tune after calibration (Phase 6).
+scoring:
+  description_factor: 0.6     # evidence found only in the description is worth 0.6x
+  ocr_factor: 0.7
+  diversity_bonus: 0.08       # per extra independent source agreeing (max 2 extra)
+  cap: 0.97
+  referent_ambiguity_gap: 0.1
+  min_category_confidence: 0.2
+  known_coin_exact_weight: 0.9
+  known_coin_fuzzy_weight: 0.7
+  fuzzy_threshold: 86
+  logo_phash_same: 8
+  logo_phash_edited: 14

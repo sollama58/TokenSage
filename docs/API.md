@@ -4,11 +4,12 @@ For the developer of the application that calls TokenSage. The machine-readable 
 `openapi.v1.json` in the repo root, also served live at `GET /openapi.json`; generate a typed
 client from it.
 
-> **Status:** the contract is final for v1. As of Phase 2 the service returns real on-chain and
-> metadata facts (`raw`, `market`, `launchpad`, `image.source_url`, `x.ref` with the linked
-> tweet's creation time, `flags`). The *meaning* fields (`referent`, `categories`, `copy_of`,
-> `trend`, fetched X content, OCR) are still empty until Phases 3–4; `versions.rules` tells
-> you which build produced a document. Nothing in the shape changes.
+> **Status:** the contract is final for v1. As of Phase 3 the service returns on-chain and
+> metadata facts plus the basic-depth meaning analysis: `referent`, `categories`, `ticker_explanation`,
+> `copy_of`, `normalized`, `image` hashes and near-duplicates, `flags`, a templated `summary`
+> and `evidence`. Still empty until Phase 4: fetched X content (`x.author`, `x.text`, `x.relation`
+> beyond `search_only`), `trend`, `image.ocr` and `image.labels`. `versions.rules` tells you which
+> build produced a document. Nothing in the shape changes.
 
 ## Try it in a browser
 

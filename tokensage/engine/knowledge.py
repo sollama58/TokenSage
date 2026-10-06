@@ -1,0 +1,190 @@
+"""Loads packaged knowledge from data/ once per process (all small files)."""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+@dataclass(frozen=True)
+class SlangTerm:
+    term: str
+    meaning: str
+    categories: tuple[str, ...]
+    weight: float
+    kind: str  # slang | template | marker | character
+
+
+@dataclass(frozen=True)
+class KnownCoin:
+    symbol: str
+    name: str
+    aliases: tuple[str, ...]
+    chain: str
+    lore: str
+    categories: tuple[str, ...]
+    referent_label: str
+    referent_kind: str
+    referent_desc: str
+    source: str = "seed"
+    mint: str | None = None
+    logo_phash: int | None = None
+
+    @property
+    def surfaces(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([self.name.lower(), *(a.lower() for a in self.aliases)]))
+
+
+@dataclass(frozen=True)
+class Entity:
+    label: str
+    kind: str
+    aliases: tuple[str, ...]
+    categories: tuple[str, ...]
+    desc: str
+    popularity: float
+
+    @property
+    def surfaces(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([self.label.lower(), *(a.lower() for a in self.aliases)]))
+
+
+@dataclass(frozen=True)
+class MarkerRule:
+    pattern: re.Pattern[str]
+    code: str
+    kind: str | None
+    weight: float
+
+
+@dataclass(frozen=True)
+class Family:
+    name: str
+    pattern: re.Pattern[str]
+    parent: str | None
+    categories: tuple[str, ...]
+    weight: float
+
+
+@dataclass
+class Knowledge:
+    slang: dict[str, SlangTerm]
+    coins: list[KnownCoin]
+    entities: list[Entity]
+    markers: list[MarkerRule]
+    families: list[Family]
+    ticker_prefixes: list[str]
+    ticker_suffixes: list[str]
+    ticker_min_base: int
+    scoring: dict[str, float]
+    wordnet: dict[str, list[str]]
+    emoji: dict[str, list[str]]
+    versions: dict[str, str] = field(default_factory=dict)
+
+    # -- derived indexes
+    def coin_by_symbol(self) -> dict[str, list[KnownCoin]]:
+        out: dict[str, list[KnownCoin]] = {}
+        for c in self.coins:
+            out.setdefault(c.symbol.upper(), []).append(c)
+        return out
+
+    def vocabulary(self) -> set[str]:
+        """Words worth boosting in the segmenter: slang, coin/entity surface words."""
+        words: set[str] = set()
+        for t in self.slang:
+            words.update(t.lower().split())
+        for c in self.coins:
+            for s in c.surfaces:
+                words.update(s.split())
+            words.add(c.symbol.lower())
+        for e in self.entities:
+            for s in e.surfaces:
+                words.update(s.split())
+        return {w for w in words if w.isalpha() and len(w) >= 2}
+
+
+def _yaml(name: str) -> Any:
+    with (DATA_DIR / name).open(encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _json(name: str) -> Any:
+    with (DATA_DIR / name).open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+@lru_cache
+def load_knowledge() -> Knowledge:
+    slang_raw = _yaml("slang.yaml")["terms"]
+    slang = {
+        str(term).lower(): SlangTerm(
+            term=str(term).lower(),
+            meaning=v.get("meaning", ""),
+            categories=tuple(v.get("categories") or []),
+            weight=float(v.get("weight", 0.5)),
+            kind=v.get("kind", "slang"),
+        )
+        for term, v in slang_raw.items()
+    }
+    coins = [
+        KnownCoin(
+            symbol=str(c["symbol"]).upper(),
+            name=str(c["name"]),
+            aliases=tuple(str(a) for a in c.get("aliases") or []),
+            chain=str(c.get("chain", "")),
+            lore=str(c.get("lore", "")),
+            categories=tuple(c.get("categories") or []),
+            referent_label=str(c["referent"]["label"]),
+            referent_kind=str(c["referent"]["kind"]),
+            referent_desc=str(c["referent"].get("desc", "")),
+        )
+        for c in _yaml("known_coins_seed.yaml")["coins"]
+    ]
+    entities = [
+        Entity(
+            label=str(e["label"]),
+            kind=str(e["kind"]),
+            aliases=tuple(str(a) for a in e.get("aliases") or []),
+            categories=tuple(e.get("categories") or []),
+            desc=str(e.get("desc", "")),
+            popularity=float(e.get("popularity", 0.3)),
+        )
+        for e in _yaml("entities_seed.yaml")["entities"]
+    ]
+    t = _yaml("templates.yaml")
+    markers = [
+        MarkerRule(re.compile(m["pattern"]), m["code"], m.get("kind"), float(m.get("weight", 0.3)))
+        for m in t["markers"]
+    ]
+    families = [
+        Family(
+            f["name"],
+            re.compile(f["pattern"]),
+            f.get("parent"),
+            tuple(f.get("categories") or []),
+            float(f.get("weight", 0.3)),
+        )
+        for f in t["families"]
+    ]
+    return Knowledge(
+        slang=slang,
+        coins=coins,
+        entities=entities,
+        markers=markers,
+        families=families,
+        ticker_prefixes=[str(p).upper() for p in t["ticker"]["prefixes"]],
+        ticker_suffixes=[str(s).upper() for s in t["ticker"]["suffixes"]],
+        ticker_min_base=int(t["ticker"].get("min_base_len", 3)),
+        scoring={k: float(v) for k, v in t["scoring"].items()},
+        wordnet=_json("wordnet_classes.json"),
+        emoji=_json("cldr_emoji_en.json"),
+        versions={"lexicon": "2026-10-06", "known_coins": "seed-2026-10-06"},
+    )
