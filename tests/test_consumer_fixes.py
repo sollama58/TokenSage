@@ -184,3 +184,37 @@ async def test_failed_analysis_is_reported_not_requeued(
         assert await conn.fetchval("select count(*) from job") >= 2
     finally:
         await conn.close()
+
+
+async def test_batch_reports_definitive_failure_as_an_item(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    """A coin whose analysis failed for good recently (token_not_found etc.) comes back as
+    a failed item with its code; the rest of the batch is still answered."""
+    install_web(router, _chain())
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        await conn.execute(
+            """insert into job (kind, mint, depth, status, attempts, error_code, last_error,
+                                finished_at)
+               values ('analyze', $1, 'full', 'failed', 1, 'token_not_found',
+                       'no such account', now())""",
+            T22_MINT,
+        )
+        async with make_client(migrated_db, inline_analyzer=False) as c:
+            r = await c.get(f"/v1/tokens/{T22_MINT}", params={"depth": "full", "wait": 0})
+            assert r.status_code == 404, r.text  # the single-CA call still says 404
+            b = await c.post(
+                "/v1/tokens:batch", json={"cas": [T22_MINT, SPL_MINT], "depth": "full"}
+            )
+            assert b.status_code == 200, b.text
+            failed, other = b.json()["items"]
+            assert failed["ca"] == T22_MINT
+            assert failed["status"] == "failed" and failed["error"] == "token_not_found"
+            assert failed["retry_after_s"] is None
+            assert other["ca"] == SPL_MINT and other["status"] == "pending"
+            assert other["job_id"] is not None
+    finally:
+        await conn.close()

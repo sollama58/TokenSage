@@ -450,7 +450,9 @@ class BatchItem(_Model):
         description=(
             "Why the item has no analysis: the CA is invalid; status 'failed' with "
             "'quota_exceeded' / 'overloaded' when that item was rejected (others still "
-            "queue); or status 'failed' with the analyzer's error when its job failed"
+            "queue); status 'failed' with 'token_not_found' / 'not_a_token_mint' / "
+            "'not_pumpfun' when its analysis failed for good recently; or status "
+            "'failed' with the analyzer's error when its job failed"
         ),
     )
     retry_after_s: int | None = Field(
