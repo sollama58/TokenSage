@@ -196,7 +196,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the item has no job: the CA is invalid, or status 'failed' with 'quota_exceeded' / 'overloaded' when that item was rejected (others still queue)",
+            "description": "Why the item has no analysis: the CA is invalid; status 'failed' with 'quota_exceeded' / 'overloaded' when that item was rejected (others still queue); or status 'failed' with the analyzer's error when its job failed",
             "title": "Error"
           },
           "job_id": {

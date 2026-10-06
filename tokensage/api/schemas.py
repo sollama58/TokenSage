@@ -448,8 +448,9 @@ class BatchItem(_Model):
     error: str | None = Field(
         default=None,
         description=(
-            "Why the item has no job: the CA is invalid, or status 'failed' with "
-            "'quota_exceeded' / 'overloaded' when that item was rejected (others still queue)"
+            "Why the item has no analysis: the CA is invalid; status 'failed' with "
+            "'quota_exceeded' / 'overloaded' when that item was rejected (others still "
+            "queue); or status 'failed' with the analyzer's error when its job failed"
         ),
     )
     retry_after_s: int | None = Field(
