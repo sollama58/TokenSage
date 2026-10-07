@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from tokensage.engine import (
+    embed,
     gazetteer,
     known_coins,
     lexicon,
@@ -86,6 +87,8 @@ class EngineInput:
     logo_features: image_stage.ImageFeatures | None = None
     # Wikipedia articles found for names nothing in the gazetteer knows (full depth)
     wiki_refs: list[wikilookup.WikiRef] | None = None
+    # optional sentence encoder (ENABLE_EMBED); None = no embedding guesses
+    encoder: embed.Encoder | None = None
 
 
 @dataclass
@@ -724,6 +727,17 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 c["signals"].append(f"copycat_rank:{mt.rank.rank}/{mt.rank.of}")
 
     agg = aggregate(evidence, k)
+    if inp.encoder is not None:
+        emb = embed.guesses(
+            inp.encoder,
+            agg.categories,
+            " ".join(n.name_tokens) or n.name_raw,
+            n.description_raw,
+            xa.text if xa else None,
+        )
+        if emb:
+            evidence += emb
+            agg = aggregate(evidence, k)
     _demote_description_only_referent(agg, head)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     if pair is not None and pair.meaningful:
