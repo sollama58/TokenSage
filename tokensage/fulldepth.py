@@ -568,18 +568,25 @@ async def news_for(
     return found.headlines if found is not None else None
 
 
+@dataclass
+class BlueskyLookup:
+    posts: list[dict[str, Any]]
+    as_of: datetime  # when Bluesky was last asked
+    stale: bool  # Bluesky failed just now; these are older cached posts
+
+
 async def bsky_for(
     conn: asyncpg.Connection, http: httpx.AsyncClient, phrase: str
-) -> list[dict[str, Any]] | None:
-    """The newest Bluesky posts with the quoted phrase (cached an hour; a stale copy beats
-    nothing when Bluesky is down)."""
+) -> BlueskyLookup | None:
+    """The newest Bluesky posts with the quoted phrase (cached an hour), with when they were
+    fetched. A stale copy beats nothing when Bluesky is down; None when nothing is cached."""
     key = f"bsky:q:{phrase.lower()}"
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and datetime.now(UTC) - row["fetched_at"] < BLUESKY_TTL:
-        return list(row["value"])
+        return BlueskyLookup(list(row["value"]), row["fetched_at"], stale=False)
     posts = await bluesky.search(http, phrase)
     if posts is None:
-        return list(row["value"]) if row else None
+        return BlueskyLookup(list(row["value"]), row["fetched_at"], stale=True) if row else None
     value = [
         {
             "text": p.text,
@@ -597,7 +604,7 @@ async def bsky_for(
         key,
         value,
     )
-    return value
+    return BlueskyLookup(value, datetime.now(UTC), stale=False)
 
 
 # ----------------------------------------------------------------- Wikipedia lookups

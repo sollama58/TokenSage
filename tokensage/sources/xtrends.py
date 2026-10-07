@@ -25,6 +25,41 @@ _CARD = re.compile(
 )
 _LINK = re.compile(r"class=[\"']?trend-link[\"']?>([^<]+)</a>")
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+# X trends these every day: weekday and greeting topics name no subject, and would match any
+# coin with "Friday" or "Good Morning" in its name
+_EVERYDAY = {
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "weekend",
+    "today",
+    "tonight",
+    "tomorrow",
+    "yesterday",
+    "morning",
+    "night",
+    "good",
+    "happy",
+    "gm",
+    "gn",
+    "new",
+    "week",
+    "day",
+    "month",
+    "year",
+    "motivation",
+    "vibes",
+    "tbt",
+    "fbf",
+    "ff",
+    "throwback",
+    "eve",
+    "thoughts",
+}
 
 
 @dataclass
@@ -56,7 +91,9 @@ def readable(term: str) -> str | None:
     if t.startswith("#"):
         t = _CAMEL.sub(" ", t[1:]).replace("_", " ")
     t = " ".join(t.split())
-    return t or None
+    if not t or all(w in _EVERYDAY for w in re.sub(r"[^\w ]+", " ", t.lower()).split()):
+        return None
+    return t
 
 
 async def trending(http: httpx.AsyncClient, region: str) -> list[TrendList] | None:

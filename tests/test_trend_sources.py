@@ -236,6 +236,10 @@ def test_xtrends_parse_and_readable() -> None:
     assert xtrends.readable("#funtoken") == "funtoken"
     assert xtrends.readable("#GOT7") == "GOT7"
     assert xtrends.readable("$PNUT") is None
+    # everyday topics name no subject
+    for t in ("Good Morning", "#HappyFriday", "#ThursdayThoughts", "Monday", "#GM"):
+        assert xtrends.readable(t) is None, t
+    assert xtrends.readable("Happy Birthday Jungkook") == "Happy Birthday Jungkook"
 
 
 def test_xtrends_merge_keeps_best_rank_hours_and_first_seen() -> None:
@@ -374,3 +378,28 @@ def test_bluesky_hit_needs_three_accounts_in_a_day() -> None:
     ev = trends.bluesky_evidence(h)
     assert ev[0].label == "news_event" and "12 Bluesky post(s)" in ev[0].detail
     assert ev[1].referent is not None and ev[1].referent.source == "bsky:moo deng"
+
+
+@needs_db
+async def test_bluesky_down_serves_cached_posts_as_stale(db: asyncpg.Connection) -> None:
+    from tokensage import fulldepth
+
+    await db.execute(
+        """insert into lookup_cache (key, value, fetched_at)
+           values ('bsky:q:moo deng', $1, now() - interval '3 hours')""",
+        [_post("Moo Deng at the zoo", "a", 4)],
+    )
+    with respx.mock(assert_all_called=False) as router:
+        router.get(url__startswith="https://api.bsky.app/").mock(return_value=httpx.Response(503))
+        async with httpx.AsyncClient() as http:
+            found = await fulldepth.bsky_for(db, http, "Moo Deng")
+    assert found is not None and found.stale and len(found.posts) == 1
+    assert datetime.now(UTC) - found.as_of > timedelta(hours=2)
+    # a fresh answer is cached and not stale
+    with respx.mock(assert_all_called=False) as router:
+        router.get(url__startswith="https://api.bsky.app/").mock(
+            return_value=httpx.Response(200, json={"posts": []})
+        )
+        async with httpx.AsyncClient() as http:
+            found = await fulldepth.bsky_for(db, http, "Moo Deng")
+    assert found is not None and not found.stale and found.posts == []

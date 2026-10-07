@@ -1525,20 +1525,21 @@ async def _name_bluesky(
             "bluesky", "skipped", detail="name not specific enough to search (needs two words)"
         )
     try:
-        posts = await fulldepth.bsky_for(conn, ctx.http, phrase)
+        found = await fulldepth.bsky_for(conn, ctx.http, phrase)
     except Exception as e:  # noqa: BLE001 - an optional enrichment
         log.info("bluesky.lookup_failed", error=str(e)[:120])
         return [], trends.SourceStatus("bluesky", "failed", detail=f"{type(e).__name__}")
-    if posts is None:
+    if found is None:
         return [], trends.SourceStatus("bluesky", "failed", detail="Bluesky unavailable")
-    rel = bluesky.relevant(posts, phrase, inp.symbol)
+    rel = bluesky.relevant(found.posts, phrase, inp.symbol)
     hit = trends.bluesky_hit(phrase, rel)
     st = trends.SourceStatus(
         "bluesky",
-        "ok",
-        as_of=datetime.now(UTC),
+        "stale" if found.stale else "ok",
+        as_of=found.as_of,
         terms=hit.term.views if hit else 0,
-        detail=f"searched '{phrase}'",
+        detail=f"searched '{phrase}'"
+        + ("; Bluesky unavailable, older cached posts" if found.stale else ""),
     )
     return ([hit] if hit else []), st
 
