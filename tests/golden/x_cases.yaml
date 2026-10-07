@@ -5,10 +5,13 @@
 # token: name, symbol, description, logo (image spec or null)
 # link: tweet | profile
 # tweet: text, author, followers, verified, hours_before_token (negative = after), media,
+#        author_joined_days_before (default 900),
 #        quoted: {text, author, followers, hours_before_token, media}
-# profile: name, handle, bio, followers, avatar, banner
+# profile: name, handle, bio, followers, statuses, avatar, banner,
+#          joined_hours_before (default 30 days)
 # expect: verdict, fit_min, fit_max, name_how, ticker_how, image_min_score, agrees,
-#         flags_include, flags_exclude
+#         flags_include, flags_exclude, basis_include, basis_exclude, made_for_coin,
+#         credibility_min, credibility_max
 cases:
   # ---- the three cases from the consumer brief
   - id: copies_viral_post_image_and_words
@@ -78,7 +81,8 @@ cases:
       fit_min: 0.95
       name_how: exact
       ticker_how: cashtag
-      image_min_score: 0.8
+      image_min_score: 0.7
+      basis_include: [post_text, cashtag, post_image]
       flags_include: [x_image_match]
 
   - id: camelcase_name_normalized_in_post
@@ -198,3 +202,89 @@ cases:
     expect:
       verdict: unknown
       flags_exclude: [x_content_mismatch]
+
+  # ---- credibility apart from fit; self-made profiles (brief 2026-10-07 §5)
+  - id: self_made_profile_name_only_is_capped
+    # a profile named after the coin, made minutes before it, with nothing else to say
+    token: {name: "Glimmerdog", symbol: GLIMD, logo: "img:71"}
+    link: profile
+    profile:
+      name: "Glimmerdog"
+      handle: glimmerdog
+      followers: 12
+      statuses: 3
+      joined_hours_before: 0.12
+    expect:
+      verdict: related
+      fit_max: 0.55
+      basis_include: [profile_name]
+      basis_exclude: [profile_bio]
+      made_for_coin: true
+      credibility_max: 0.1
+      flags_include: [x_account_made_for_coin]
+
+  - id: self_made_profile_with_logo_avatar_is_still_capped
+    # the avatar is set by the same person at the same time: no more evidence than the name
+    token: {name: "Glimmerdog", symbol: GLIMD, logo: "img:71"}
+    link: profile
+    profile:
+      name: "Glimmerdog Official"
+      handle: GlimmerdogSol
+      followers: 40
+      statuses: 5
+      avatar: "img:71"
+      joined_hours_before: -0.5
+    expect:
+      verdict: related
+      basis_include: [profile_name, profile_image]
+      made_for_coin: true
+      flags_include: [x_account_made_for_coin, x_image_match]
+
+  - id: self_made_profile_whose_bio_names_the_coin_is_not_capped
+    token: {name: "Glimmerdog", symbol: GLIMD, logo: "img:71"}
+    link: profile
+    profile:
+      name: "Glimmerdog"
+      handle: glimmerdog
+      bio: "$GLIMD, the glimmering dog of solana. CA in pinned"
+      followers: 12
+      joined_hours_before: 2
+    expect:
+      verdict: about_this_coin
+      basis_include: [profile_name, profile_bio, cashtag]
+      made_for_coin: true
+      flags_include: [x_account_made_for_coin]
+
+  - id: established_profile_named_like_the_coin
+    # the account predates the token by over a year: the name match counts in full
+    token: {name: "Glimmerdog", symbol: GLIMD, logo: "img:71"}
+    link: profile
+    profile:
+      name: "Glimmerdog"
+      handle: glimmerdog
+      followers: 52000
+      statuses: 4100
+      joined_hours_before: 9600
+    expect:
+      verdict: about_this_coin
+      fit_min: 0.85
+      made_for_coin: false
+      credibility_min: 0.6
+      flags_exclude: [x_account_made_for_coin, fresh_x_account]
+
+  - id: fresh_author_launch_post
+    # a launch post from an account made for the coin: matches, but is worth little
+    token: {name: "Zorblax", symbol: ZORB, logo: "img:31"}
+    link: tweet
+    tweet:
+      text: "Zorblax is live $ZORB"
+      author: zorblax
+      followers: 9
+      hours_before_token: -0.1
+      author_joined_days_before: 0.01
+    expect:
+      verdict: about_this_coin
+      basis_include: [post_text, cashtag]
+      made_for_coin: true
+      credibility_max: 0.1
+      flags_include: [x_account_made_for_coin]

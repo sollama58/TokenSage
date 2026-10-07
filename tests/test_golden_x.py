@@ -71,7 +71,7 @@ def _tweet(t: dict[str, Any] | None, tid: str = "1") -> TweetData | None:
         author_handle=t.get("author"),
         followers=t.get("followers"),
         verified_type=t.get("verified"),
-        author_joined=TOKEN_T - timedelta(days=900),
+        author_joined=TOKEN_T - timedelta(days=float(t.get("author_joined_days_before", 900))),
         media_urls=[f"https://pbs.twimg.com/media/{m}.jpg" for m in t.get("media", [])],
         quoted=quoted,
         quoted_tweet_id="2" if quoted else None,
@@ -91,7 +91,8 @@ def _run(case: dict[str, Any]):  # type: ignore[no-untyped-def]
             source="fxtwitter",
             name=p.get("name"),
             followers=p.get("followers"),
-            joined=TOKEN_T - timedelta(days=30),
+            statuses=p.get("statuses"),
+            joined=TOKEN_T - timedelta(hours=float(p.get("joined_hours_before", 30 * 24))),
             description=p.get("bio"),
             avatar_url=f"https://pbs.twimg.com/profile_images/{p['avatar']}.jpg"
             if p.get("avatar")
@@ -146,6 +147,18 @@ def test_golden_x_match(case: dict[str, Any]) -> None:
         assert m.image.score >= e["image_min_score"], ctx
     if "agrees" in e:
         assert m.referent.agrees is e["agrees"], ctx
+    for b in e.get("basis_include", []):
+        assert b in m.basis, f"missing basis {b} in {m.basis}{ctx}"
+    for b in e.get("basis_exclude", []):
+        assert b not in m.basis, f"unexpected basis {b} in {m.basis}{ctx}"
+    if "made_for_coin" in e:
+        assert out.x_account is not None, ctx
+        assert out.x_account.made_for_coin is e["made_for_coin"], f"{out.x_account}{ctx}"
+    if "credibility_min" in e:
+        assert (out.x_credibility or 0) >= e["credibility_min"], f"{out.x_credibility}{ctx}"
+    if "credibility_max" in e:
+        assert out.x_credibility is not None, ctx
+        assert out.x_credibility <= e["credibility_max"], f"{out.x_credibility}{ctx}"
     for f in e.get("flags_include", []):
         assert f in flags, f"missing flag {f}{ctx}"
     for f in e.get("flags_exclude", []):
