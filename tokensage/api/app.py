@@ -19,10 +19,12 @@ from tokensage import __version__, queue
 from tokensage.api import errors
 from tokensage.api.auth import KeyStore, require_admin
 from tokensage.api.routes_admin import router as admin
+from tokensage.api.routes_monitor import router as monitor
 from tokensage.api.routes_v1 import router as v1
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.logging import configure_logging
+from tokensage.net import metrics
 
 log = structlog.get_logger("api")
 KEY_RELOAD_S = 30.0  # how soon another instance's key changes reach this one
@@ -48,6 +50,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
         app.state.keys = KeyStore(settings)
+        metrics.meter.configure(
+            rpc_url=settings.solana_rpc_url,
+            ipfs_gateways=settings.ipfs_gateway_list,
+            costs=settings.helius_credit_costs,
+        )
         inline_n = max(1, settings.inline_worker_concurrency) if settings.inline_analyzer else 0
         # API requests share the pool with the inline analyzer's job connections
         app.state.pool = await create_pool(settings.database_url, max_size=5 + inline_n + 1)
@@ -57,6 +64,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await app.state.waiter.start()
         stop = asyncio.Event()
         key_reloader = asyncio.create_task(_reload_keys_forever(app, stop))
+        # outbound call counts (the inline analyzer's) and breaker state for the admin panel
+        flusher = asyncio.create_task(metrics.run_flusher(app.state.pool, stop))
         inline: asyncio.Task[None] | None = None
         if settings.inline_analyzer:
             from tokensage.worker import run_worker
@@ -74,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await key_reloader
             if inline is not None:
                 await inline
+            await flusher
             await app.state.waiter.stop()
             await app.state.pool.close()
 
@@ -150,6 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(v1)
     app.include_router(admin)
+    app.include_router(monitor)
 
     # Test console: a single static page that drives /v1 from the browser. It carries no
     # secrets; the user pastes an API key, which stays in their browser's localStorage.
@@ -159,6 +170,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/console", include_in_schema=False)
     async def console_page() -> FileResponse:
         return FileResponse(console, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    # Admin panel: a static page over /admin/v1. Like the console it carries no secrets and
+    # no data; it asks for the ADMIN_KEY and every number it shows needs that key.
+    admin_page = Path(__file__).resolve().parent / "static" / "admin.html"
+
+    @app.get("/admin", include_in_schema=False)
+    async def admin_panel() -> FileResponse:
+        return FileResponse(
+            admin_page,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Frame-Options": "DENY",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon() -> Response:

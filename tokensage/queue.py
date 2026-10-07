@@ -166,7 +166,7 @@ async def claim(
           for update skip locked
           limit 1
         )
-        update job set status = 'running', attempts = attempts + 1,
+        update job set status = 'running', attempts = attempts + 1, started_at = now(),
                locked_until = now() + make_interval(secs => $1)
         from next_job where job.id = next_job.id
         returning job.*

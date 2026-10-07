@@ -1,4 +1,5 @@
-"""Per-source circuit breaker, in-process, mirrored to source_health for /readyz."""
+"""Per-source circuit breaker, in-process, mirrored to source_health (by the metrics flusher)
+for /readyz and the admin panel."""
 
 from __future__ import annotations
 
@@ -44,18 +45,29 @@ class CircuitBreaker:
         return False
 
     async def persist(self, conn: asyncpg.Connection) -> None:
+        """Mirror this process's failing sources into source_health. Healthy sources hold no
+        state, so a row nobody has refreshed for STALE_S has recovered and is dropped; every
+        process refreshes its own rows, so one process never clears another's open breaker."""
         now = time.monotonic()
-        for source, st in self.states.items():
+        for source, st in list(self.states.items()):
             await conn.execute(
-                """insert into source_health (source, state, failures, open_until)
-                   values ($1, $2, $3, case when $4 > 0 then now() + make_interval(secs => $4) end)
+                """insert into source_health (source, state, failures, open_until, updated_at)
+                   values ($1, $2, $3, case when $4 > 0 then now() + make_interval(secs => $4) end,
+                           now())
                    on conflict (source) do update set state=excluded.state,
-                     failures=excluded.failures, open_until=excluded.open_until""",
+                     failures=excluded.failures, open_until=excluded.open_until,
+                     updated_at=excluded.updated_at""",
                 source,
                 "open" if st.open_until > now else "closed",
                 st.failures,
                 max(0.0, st.open_until - now),
             )
+        await conn.execute(
+            "delete from source_health where updated_at < now() - make_interval(secs => $1)",
+            self.STALE_S,
+        )
+
+    STALE_S = 300.0
 
 
 breaker = CircuitBreaker()

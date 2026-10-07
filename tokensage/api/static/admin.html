@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TokenSage Admin</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #e3e6ea;
+    --accent: #2f6fed; --accent2: #8a63d2; --ok: #1f8f4e; --warn: #b7791f; --high: #c53030;
+    --bar: #2f6fed; --bar2: #c53030; --grid: #eceef1;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --panel: #171b21; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
+      --accent: #6b9bff; --accent2: #b49af0; --ok: #4cc38a; --warn: #e0a84a; --high: #f26d6d;
+      --bar: #6b9bff; --bar2: #f26d6d; --grid: #222831;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14.5px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+           display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 999px; font-size: 13px; }
+  nav a:hover { color: var(--accent); background: var(--bg); }
+  main { max-width: 1240px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input, select, button { font: inherit; color: inherit; }
+  input, select { background: transparent; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-width: 0; }
+  input.key { font-family: var(--mono); width: 280px; max-width: 100%; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button.danger { background: transparent; color: var(--high); border: 1px solid var(--line); }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  h2 .note { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; }
+  h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; min-width: 0; }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .tile .s { font-size: 12px; color: var(--muted); }
+  .tile.warn { border-color: var(--warn); } .tile.warn .v { color: var(--warn); }
+  .tile.bad { border-color: var(--high); } .tile.bad .v { color: var(--high); }
+  .tile.good .v { color: var(--ok); }
+  .meter { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; margin-top: 6px; position: relative; }
+  .meter > div { height: 100%; background: var(--accent); }
+  .meter > div.warn { background: var(--warn); } .meter > div.bad { background: var(--high); }
+  .meter > i { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .5; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .muted { color: var(--muted); }
+  .error { color: var(--high); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); white-space: nowrap; }
+  .badge.ok { border-color: var(--ok); color: var(--ok); }
+  .badge.warn { border-color: var(--warn); color: var(--warn); }
+  .badge.bad { border-color: var(--high); color: var(--high); }
+  .alerts { display: grid; gap: 6px; }
+  .alert { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--bg); border-radius: 4px; font-size: 13.5px; }
+  .alert.bad { border-color: var(--high); }
+  .alert.ok { border-color: var(--ok); }
+  .chart { width: 100%; height: auto; display: block; }
+  .chart text { fill: var(--muted); font-size: 10px; font-family: system-ui, sans-serif; }
+  .chart .gl { stroke: var(--grid); stroke-width: 1; }
+  .chart .b1 { fill: var(--bar); } .chart .b2 { fill: var(--bar2); } .chart .b3 { fill: var(--accent2); }
+  .chart .lim { stroke: var(--warn); stroke-dasharray: 4 3; stroke-width: 1.5; }
+  .chart rect:hover { opacity: .75; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  details > summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  .hidden { display: none !important; }
+  .secret { font-family: var(--mono); background: var(--bg); padding: 8px; border-radius: 6px; overflow-wrap: anywhere; border: 1px dashed var(--warn); }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .filters button.on { background: var(--accent); color: #fff; }
+  .ell { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 600px) { main { padding: 10px; } header { position: static; } input.key { width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>TokenSage Admin</h1>
+  <span class="sub" id="svc"></span>
+  <span class="spacer"></span>
+  <label>Admin key
+    <input class="key" id="key" type="password" placeholder="ADMIN_KEY" autocomplete="off">
+  </label>
+  <label style="flex-direction:row;display:flex;align-items:center;gap:6px;margin-top:16px">
+    <input id="remember" type="checkbox"> remember
+  </label>
+  <label>Refresh
+    <select id="every"><option value="0">off</option><option value="15">15 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="300">5 min</option></select>
+  </label>
+  <button id="reload" type="button">Refresh</button>
+  <span class="sub" id="updated"></span>
+</header>
+<nav>
+  <a href="#alerts">Alerts</a><a href="#helius">Helius</a><a href="#queue">Queue &amp; jobs</a>
+  <a href="#upstreams">Upstreams</a><a href="#signals">Signals</a><a href="#keys">API keys</a>
+  <a href="#jobs">Recent jobs</a><a href="/console">Console</a><a href="/docs">API docs</a>
+</nav>
+<main>
+  <section class="panel hidden" id="login">
+    <p>Paste the <span class="mono">ADMIN_KEY</span> above to load the panel. It is kept in this tab only, or in this browser if you tick <em>remember</em>. Every number here comes from <span class="mono">/admin/v1</span>.</p>
+    <p class="error" id="loginErr"></p>
+  </section>
+
+  <section class="panel" id="alerts"><h2>Alerts</h2><div class="alerts" id="alertList"><span class="muted">loading…</span></div></section>
+
+  <section class="panel" id="helius">
+    <h2>Helius credits <span class="note muted" id="hPlan"></span></h2>
+    <div class="tiles" id="hTiles"></div>
+    <div class="grid" style="margin-top:14px">
+      <div><h3>Credits per hour, last 48 h</h3><div id="hHourly"></div>
+        <div class="legend"><span><i style="background:var(--bar)"></i>credits</span><span><i style="background:var(--bar2)"></i>429s / errors</span></div></div>
+      <div><h3>Credits per day, last 30 days</h3><div id="hDaily"></div>
+        <div class="legend"><span><i style="background:var(--bar)"></i>credits</span><span><i style="background:var(--warn)"></i>daily budget (plan ÷ cycle days)</span></div></div>
+    </div>
+    <h3>By method</h3>
+    <div class="tablewrap"><table id="hMethods"></table></div>
+    <details style="margin-top:8px"><summary>Credit price table</summary><div id="hCosts" class="mono muted" style="margin-top:6px"></div></details>
+  </section>
+
+  <section class="panel" id="queue">
+    <h2>Queue &amp; jobs <span class="note muted" id="qNote"></span></h2>
+    <div class="tiles" id="qTiles"></div>
+    <div class="grid" style="margin-top:14px">
+      <div><h3>Jobs per hour, last 24 h</h3><div id="qHourly"></div>
+        <div class="legend"><span><i style="background:var(--bar)"></i>done</span><span><i style="background:var(--bar2)"></i>failed</span></div></div>
+      <div><h3>Timing by depth (seconds)</h3><div class="tablewrap"><table id="qDepth"></table></div>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">wait = queued until a worker took it; run = processing; total = request to result.</p></div>
+    </div>
+    <div class="grid" style="margin-top:6px">
+      <div><h3>Failures by error code</h3><div class="tablewrap"><table id="qErrors"></table></div></div>
+      <div><h3>By kind</h3><div class="tablewrap"><table id="qKinds"></table></div>
+        <h3>Who asked</h3><div class="tablewrap"><table id="qWho"></table></div></div>
+    </div>
+  </section>
+
+  <section class="panel" id="upstreams">
+    <h2>Upstreams <span class="note muted">calls, errors and latency per source, last <select id="uHours" style="padding:1px 4px"><option>1</option><option>6</option><option selected>24</option><option>72</option><option>168</option></select> h</span></h2>
+    <div class="tablewrap"><table id="uTable"></table></div>
+    <h3>Calls per hour by source</h3><div id="uChart"></div><div class="legend" id="uLegend"></div>
+    <h3>Circuit breakers</h3><div id="uBreakers"></div>
+  </section>
+
+  <section class="panel" id="signals">
+    <h2>Signals &amp; knowledge <span class="note muted">last 6 h of reads</span></h2>
+    <div class="grid">
+      <div><h3>Trend sources (as full reads saw them)</h3><div class="tablewrap"><table id="sTrend"></table></div>
+        <h3>Paid X</h3><div id="sPaid"></div></div>
+      <div><h3>Knowledge tables</h3><div class="tablewrap"><table id="sKnow"></table></div></div>
+    </div>
+    <div class="grid" style="margin-top:6px">
+      <div><h3>Analyses per depth</h3><div class="tablewrap"><table id="sAnalyses"></table></div></div>
+      <div><h3>Referent recall, last 24 h</h3><div class="tablewrap"><table id="sRecall"></table></div></div>
+    </div>
+  </section>
+
+  <section class="panel" id="keys">
+    <h2>API keys <span class="note muted">limits and today's usage (UTC)</span></h2>
+    <div class="tablewrap"><table id="kTable"></table></div>
+    <div id="kSecret" class="hidden" style="margin-top:10px"></div>
+    <details style="margin-top:10px"><summary>Create a key</summary>
+      <form id="kForm" class="row" style="margin-top:8px">
+        <label>name<input id="kName" required pattern="[A-Za-z0-9_.\-]{1,64}" placeholder="app-server"></label>
+        <label>req/min<input id="kRate" type="number" min="1" placeholder="default" style="width:100px"></label>
+        <label>full/day<input id="kFull" type="number" min="1" placeholder="default" style="width:110px"></label>
+        <label>refresh/day<input id="kRefresh" type="number" min="1" placeholder="default" style="width:110px"></label>
+        <button type="submit">Create</button>
+      </form>
+    </details>
+    <h3>Requests per day, last 14 days</h3><div id="kChart"></div><div class="legend" id="kLegend"></div>
+  </section>
+
+  <section class="panel" id="jobs">
+    <h2>Recent jobs</h2>
+    <div class="filters" id="jFilters"></div>
+    <div class="tablewrap"><table id="jTable"></table></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const LS_KEY = "tokensage.adminKey";
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const nf = new Intl.NumberFormat();
+const num = (v) => (v == null ? "–" : nf.format(Math.round(v)));
+const compact = (v) => (v == null ? "–" : Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(v));
+const pct = (v, d = 1) => (v == null ? "–" : `${Number(v).toFixed(d)}%`);
+const secs = (v) => (v == null ? "–" : v < 1 ? `${Math.round(v * 1000)} ms` : v < 120 ? `${v.toFixed(1)} s` : `${(v / 60).toFixed(1)} min`);
+const ms = (v) => (v == null ? "–" : v < 1000 ? `${Math.round(v)} ms` : `${(v / 1000).toFixed(2)} s`);
+const ago = (iso) => {
+  if (!iso) return "–";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 0) return `in ${secs(-s)}`;
+  if (s < 90) return `${Math.round(s)} s ago`;
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 172800) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+};
+const hhmm = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const md = (iso) => new Date(iso + (iso.length === 10 ? "T00:00:00Z" : "")).toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
+
+function storedKey() {
+  try { return sessionStorage.getItem(LS_KEY) || localStorage.getItem(LS_KEY) || ""; } catch { return ""; }
+}
+function saveKey(k) {
+  try {
+    sessionStorage.setItem(LS_KEY, k);
+    if ($("remember").checked) localStorage.setItem(LS_KEY, k); else localStorage.removeItem(LS_KEY);
+  } catch { /* storage blocked: the key lives in the input only */ }
+}
+
+async function api(path, opts = {}) {
+  const key = $("key").value.trim();
+  const r = await fetch(path, {
+    ...opts,
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  let body = null;
+  try { body = await r.json(); } catch { /* empty */ }
+  if (!r.ok) {
+    const err = new Error(body?.error?.message || `${r.status} ${r.statusText}`);
+    err.status = r.status;
+    throw err;
+  }
+  return body;
+}
+
+// ------------------------------------------------------------------ charts (inline SVG)
+
+function bars(series, { width = 640, height = 150, stacks = ["b1"], limit = null, labelEvery = 6, label = (p) => "", tip = (p) => "" } = {}) {
+  // series: [{ values: [n, n2…], label, tip }]
+  const W = width, H = height, L = 44, B = 18, T = 6;
+  const n = series.length || 1;
+  const max = Math.max(1, limit || 0, ...series.map((p) => p.values.reduce((a, b) => a + b, 0)));
+  const nice = niceMax(max);
+  const bw = (W - L) / n;
+  const y = (v) => T + (H - T - B) * (1 - v / nice);
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = (nice / 4) * i, yy = y(v);
+    g += `<line class="gl" x1="${L}" x2="${W}" y1="${yy}" y2="${yy}"/><text x="${L - 4}" y="${yy + 3}" text-anchor="end">${compact(v)}</text>`;
+  }
+  series.forEach((p, i) => {
+    let base = 0;
+    p.values.forEach((v, j) => {
+      if (!v) return;
+      const y0 = y(base), y1 = y(base + v);
+      g += `<rect class="${stacks[j] || "b1"}" x="${L + i * bw + 0.5}" y="${y1}" width="${Math.max(1, bw - 1.5)}" height="${Math.max(0.5, y0 - y1)}"><title>${esc(tip(p))}</title></rect>`;
+      base += v;
+    });
+    if (i % labelEvery === 0) g += `<text x="${L + i * bw + bw / 2}" y="${H - 4}" text-anchor="middle">${esc(label(p))}</text>`;
+  });
+  if (limit) g += `<line class="lim" x1="${L}" x2="${W}" y1="${y(limit)}" y2="${y(limit)}"/>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`;
+}
+function niceMax(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+const PALETTE = ["#2f6fed", "#e07b39", "#1f8f4e", "#8a63d2", "#c53030", "#0f9fb0", "#b7791f", "#d1478e", "#5d6673", "#7aa83a"];
+
+// ------------------------------------------------------------------ render
+
+function tile(k, v, s = "", cls = "", meter = null) {
+  let m = "";
+  if (meter) {
+    const w = Math.min(100, Math.max(0, meter.value));
+    const c = meter.value >= 100 ? "bad" : meter.value >= (meter.warn ?? 80) ? "warn" : "";
+    m = `<div class="meter"><div class="${c}" style="width:${w}%"></div>${meter.mark != null ? `<i style="left:${Math.min(100, meter.mark)}%"></i>` : ""}</div>`;
+  }
+  return `<div class="tile ${cls}"><div class="k">${esc(k)}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}${m}</div>`;
+}
+function table(el, head, rows, empty = "nothing yet") {
+  const th = head.map((h) => (h.startsWith("#") ? `<th class="n">${esc(h.slice(1))}</th>` : `<th>${esc(h)}</th>`)).join("");
+  el.innerHTML = `<thead><tr>${th}</tr></thead><tbody>${rows.length ? rows.join("") : `<tr><td colspan="${head.length}" class="muted">${esc(empty)}</td></tr>`}</tbody>`;
+}
+
+let state = {};
+
+function renderHelius(h) {
+  const c = h.credits, p = h.plan, k = h.calls;
+  $("hPlan").textContent = h.rpc_configured
+    ? `${h.provider || "Solana RPC"} · plan ${num(p.credits_per_cycle)} credits / cycle · ${p.rps_limit} req/s · cycle ${md(p.cycle_start)} → ${md(p.cycle_end)}`
+    : "SOLANA_RPC_URL is not set: no RPC calls are made";
+  const cycleDays = (new Date(p.cycle_end) - new Date(p.cycle_start)) / 86400000;
+  const elapsed = 100 * (1 - c.days_left_in_cycle / cycleDays);
+  const exhaust = c.days_until_exhausted;
+  const exhaustCls = exhaust == null ? "good" : exhaust === 0 ? "bad" : exhaust < c.days_left_in_cycle ? "bad" : "good";
+  $("hTiles").innerHTML = [
+    tile("Credits this hour", num(c.this_hour), `last hour ${num(c.last_hour)}`),
+    tile("Credits today (UTC)", num(c.today), `${num(k.today)} calls`),
+    tile("Last 24 h", num(c.last_24h), `pace ${compact(c.per_day_now)}/day · 7 d ${compact(c.last_7d)}`),
+    tile("Cycle to date", num(c.cycle_to_date), `${pct(c.cycle_pct)} of plan · marker = time elapsed`, c.cycle_pct >= 100 ? "bad" : c.cycle_pct >= 80 ? "warn" : "", { value: c.cycle_pct, mark: elapsed }),
+    tile("Projected this cycle", num(c.projected_cycle), `${pct(c.projected_pct)} of plan at today's pace`, c.projected_pct >= 100 ? "bad" : c.projected_pct >= 80 ? "warn" : "good", { value: c.projected_pct }),
+    tile("Credits run out", exhaust == null ? "never" : exhaust === 0 ? "now" : `${exhaust.toFixed(1)} d`, `${c.days_left_in_cycle.toFixed(1)} d left in cycle`, exhaustCls),
+    tile("Peak req/s (24 h)", num(k.peak_rps_24h), `limit ${p.rps_limit}/s (per process)`, k.peak_rps_24h >= p.rps_limit ? "bad" : k.peak_rps_24h >= p.rps_limit * 0.7 ? "warn" : "", { value: (100 * k.peak_rps_24h) / Math.max(1, p.rps_limit), warn: 70 }),
+    tile("429s (24 h)", num(k.rate_limited_24h), `today ${num(k.rate_limited_today)}`, k.rate_limited_24h ? "bad" : "good"),
+    tile("Errors (24 h)", num(k.errors_24h), k.last_24h ? `${pct((100 * k.errors_24h) / k.last_24h, 2)} of ${num(k.last_24h)} calls` : "no calls", k.errors_24h ? "warn" : "good"),
+    tile("Avg latency (24 h)", ms(k.avg_ms_24h)),
+  ].join("");
+  $("hHourly").innerHTML = bars(
+    h.hourly.map((p) => ({ ...p, values: [p.credits, p.rate_limited + p.errors] })),
+    { stacks: ["b1", "b2"], labelEvery: 6, label: (p) => hhmm(p.hour), tip: (p) => `${hhmm(p.hour)} · ${num(p.credits)} credits · ${num(p.calls)} calls · ${p.errors} errors · ${p.rate_limited} 429s · peak ${p.peak_rps}/s` }
+  );
+  const budget = p.credits_per_cycle / cycleDays;
+  $("hDaily").innerHTML = bars(
+    h.daily.map((d) => ({ ...d, values: [d.credits] })),
+    { limit: budget, labelEvery: 5, label: (d) => md(d.day), tip: (d) => `${md(d.day)} · ${num(d.credits)} credits · ${num(d.calls)} calls · ${d.errors} errors` }
+  );
+  table($("hMethods"), ["method", "#credits each", "#calls today", "#credits today", "#errors today", "#calls 24 h", "#credits 24 h", "#avg latency", "#calls cycle", "#credits cycle", "#share of cycle"],
+    h.methods.map((m) => `<tr><td class="mono">${esc(m.method)}</td><td class="n">${m.credit_cost}</td><td class="n">${num(m.calls_today)}</td><td class="n">${num(m.credits_today)}</td><td class="n ${m.errors_today ? "error" : ""}">${num(m.errors_today)}</td><td class="n">${num(m.calls_24h)}</td><td class="n">${num(m.credits_24h)}</td><td class="n">${ms(m.avg_ms_24h)}</td><td class="n">${num(m.calls_cycle)}</td><td class="n">${num(m.credits_cycle)}</td><td class="n">${c.cycle_to_date ? pct((100 * m.credits_cycle) / c.cycle_to_date) : "–"}</td></tr>`),
+    "no RPC calls recorded yet");
+  $("hCosts").innerHTML = Object.entries(h.credit_costs).map(([m, n]) => `${esc(m)}: ${n}`).join(" · ") + ` · everything else: ${h.default_credit_cost}`;
+}
+
+function renderQueue(st, q) {
+  const qs = st.queue;
+  $("svc").textContent = `v${st.service_version} · rules ${st.rules_version} · lexicon ${st.lexicon_version} · default depth ${st.default_depth}${st.inline_analyzer ? " · inline analyzer" : ""}`;
+  $("qNote").textContent = `last ${q.hours} h`;
+  const done = q.by_depth.reduce((a, d) => a + d.done, 0), failed = q.by_depth.reduce((a, d) => a + d.failed, 0);
+  $("qTiles").innerHTML = [
+    tile("Pending", num(qs.pending), "", qs.pending > 200 ? "bad" : qs.pending > 50 ? "warn" : ""),
+    tile("Running", num(qs.running)),
+    tile("Oldest pending", secs(qs.oldest_pending_s), "", qs.oldest_pending_s > 120 ? "bad" : qs.oldest_pending_s > 30 ? "warn" : ""),
+    tile("Done (24 h)", num(qs.done_24h)),
+    tile("Failed (24 h)", num(qs.failed_24h), qs.done_24h + qs.failed_24h ? `${pct((100 * qs.failed_24h) / (qs.done_24h + qs.failed_24h), 2)} of finished` : "", qs.failed_24h ? "warn" : "good"),
+    tile("Retried", num(q.retried), "jobs needing >1 attempt"),
+    tile("Stuck running", num(q.stuck_running), "lease expired", q.stuck_running ? "bad" : "good"),
+    tile("Analyze done/failed", `${num(done)}/${num(failed)}`, `last ${q.hours} h`),
+  ].join("");
+  $("qHourly").innerHTML = bars(
+    q.hourly.map((h) => ({ ...h, values: [h.done, h.failed] })),
+    { stacks: ["b1", "b2"], labelEvery: 4, label: (h) => hhmm(h.hour), tip: (h) => `${hhmm(h.hour)} · created ${h.created} · done ${h.done} · failed ${h.failed}` }
+  );
+  table($("qDepth"), ["depth", "#done", "#failed", "#wait p50", "#wait p95", "#run p50", "#run p95", "#total p50", "#total p95", "#max"],
+    q.by_depth.map((d) => `<tr><td>${esc(d.depth)}</td><td class="n">${num(d.done)}</td><td class="n">${num(d.failed)}</td><td class="n">${secs(d.wait_p50_s)}</td><td class="n">${secs(d.wait_p95_s)}</td><td class="n">${secs(d.run_p50_s)}</td><td class="n">${secs(d.run_p95_s)}</td><td class="n">${secs(d.total_p50_s)}</td><td class="n">${secs(d.total_p95_s)}</td><td class="n">${secs(d.total_max_s)}</td></tr>`));
+  table($("qErrors"), ["code", "#count", "last error", "when"],
+    q.errors.map((e) => `<tr><td class="mono">${esc(e.error_code || "(transient)")}</td><td class="n">${num(e.count)}</td><td class="ell mono" title="${esc(e.last_error)}">${esc(e.last_error)}</td><td class="muted">${ago(e.last_at)}</td></tr>`), "no failures");
+  table($("qKinds"), ["kind", "#pending", "#running", "#done", "#failed"],
+    q.by_kind.map((k) => `<tr><td>${esc(k.kind)}</td><td class="n">${num(k.pending)}</td><td class="n">${num(k.running)}</td><td class="n">${num(k.done)}</td><td class="n">${num(k.failed)}</td></tr>`));
+  table($("qWho"), ["requested by", "#jobs"], q.requesters.map((w) => `<tr><td>${esc(w.requested_by || "(none)")}</td><td class="n">${num(w.jobs)}</td></tr>`));
+}
+
+function renderUpstreams(u) {
+  table($("uTable"), ["source", "#calls", "#errors", "#error rate", "#429s", "#avg", "#max", "#peak/s", "breaker", "last call", "methods"],
+    u.sources.map((s) => {
+      const er = s.error_rate * 100;
+      const b = s.breaker ? `<span class="badge ${s.breaker.state === "open" ? "bad" : "warn"}">${esc(s.breaker.state)} · ${s.breaker.failures}</span>` : `<span class="badge ok">closed</span>`;
+      const meth = Object.entries(s.methods).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([m, n]) => `${esc(m)} ${compact(n)}`).join(", ");
+      return `<tr><td><b>${esc(s.source)}</b></td><td class="n">${num(s.calls)}</td><td class="n">${num(s.errors)}</td><td class="n ${er >= 20 ? "error" : ""}">${pct(er, 1)}</td><td class="n ${s.rate_limited ? "error" : ""}">${num(s.rate_limited)}</td><td class="n">${ms(s.avg_ms)}</td><td class="n">${ms(s.max_ms)}</td><td class="n">${num(s.peak_rps)}</td><td>${b}</td><td class="muted">${ago(s.last_seen)}</td><td class="mono muted ell">${meth}</td></tr>`;
+    }), "no upstream calls recorded in this window");
+  const sources = [...new Set(u.hourly.map((h) => h.source))].sort((a, b) => (a === "solana_rpc" ? -1 : b === "solana_rpc" ? 1 : a.localeCompare(b)));
+  const hours = [...new Set(u.hourly.map((h) => h.hour))].sort();
+  const idx = Object.fromEntries(u.hourly.map((h) => [`${h.hour}|${h.source}`, h.calls]));
+  const css = sources.map((s, i) => `.chart .u${i}{fill:${PALETTE[i % PALETTE.length]}}`).join("");
+  $("uChart").innerHTML = hours.length
+    ? `<style>${css}</style>` + bars(hours.map((h) => ({ hour: h, values: sources.map((s) => idx[`${h}|${s}`] || 0) })),
+      { width: 1200, height: 200, stacks: sources.map((_, i) => `u${i}`), labelEvery: Math.max(1, Math.round(hours.length / 8)), label: (p) => hhmm(p.hour), tip: (p) => `${hhmm(p.hour)} · ` + sources.map((s, i) => `${s} ${p.values[i]}`).filter((_, i) => p.values[i]).join(", ") })
+    : `<p class="muted">no calls yet</p>`;
+  $("uLegend").innerHTML = sources.map((s, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${esc(s)}</span>`).join("");
+  const open = u.breakers;
+  $("uBreakers").innerHTML = open.length
+    ? `<div class="tablewrap"><table><thead><tr><th>source</th><th>state</th><th class="n">failures</th><th>open until</th><th>updated</th></tr></thead><tbody>${open.map((b) => `<tr><td class="mono">${esc(b.source)}</td><td><span class="badge ${b.state === "open" ? "bad" : "warn"}">${esc(b.state)}</span></td><td class="n">${b.failures}</td><td>${b.open_until ? ago(b.open_until) : "–"}</td><td class="muted">${ago(b.updated_at)}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted" style="margin:0">every breaker is closed (sources only appear here while failing)</p>`;
+}
+
+function renderSignals(s, st) {
+  table($("sTrend"), ["source", "status", "#reads", "newest data"],
+    s.trend_sources.map((t) => `<tr><td>${esc(t.source)}</td><td><span class="badge ${t.status === "ok" ? "ok" : t.status === "failed" ? "bad" : "warn"}">${esc(t.status)}</span></td><td class="n">${num(t.reads)}</td><td class="muted">${ago(t.newest_as_of)}</td></tr>`), "no full reads in this window");
+  const px = s.paid_x;
+  $("sPaid").innerHTML = `<div class="tiles">${tile("Paid X spend today", `$${px.spend_today_usd.toFixed(3)}`, px.enabled ? `${num(px.calls_today)} calls · cap $${px.cap_usd}` : "disabled (ENABLE_PAID_X)", "", px.enabled ? { value: (100 * px.spend_today_usd) / Math.max(0.0001, px.cap_usd) } : null)}</div>`;
+  table($("sKnow"), ["table", "#rows", "newest"],
+    s.knowledge.map((k) => `<tr><td class="mono">${esc(k.name)}</td><td class="n">${num(k.rows)}</td><td class="muted">${k.newest ? (k.newest.length === 10 ? esc(k.newest) : ago(k.newest)) : "–"}</td></tr>`));
+  table($("sAnalyses"), ["depth", "#analyses", "#tokens", "#with referent", "#share"],
+    s.analyses.map((a) => `<tr><td>${esc(a.depth)}</td><td class="n">${num(a.analyses)}</td><td class="n">${num(a.tokens)}</td><td class="n">${num(a.with_referent)}</td><td class="n">${a.analyses ? pct((100 * a.with_referent) / a.analyses) : "–"}</td></tr>`), "no analyses in this window");
+  const rec = st.recall_24h?.depths || {};
+  table($("sRecall"), ["depth", "#total", "#resolved", "#weak", "#guess", "#none", "#resolved share"],
+    Object.entries(rec).map(([d, r]) => `<tr><td>${esc(d)}</td><td class="n">${num(r.total)}</td><td class="n">${num(r.resolved)}</td><td class="n">${num(r.weak)}</td><td class="n">${num(r.guess)}</td><td class="n">${num(r.none)}</td><td class="n">${r.resolved_share == null ? "–" : pct(100 * r.resolved_share)}</td></tr>`));
+}
+
+function renderKeys(keys, usage) {
+  const meter = (used, lim) => `<div class="meter" style="min-width:70px"><div class="${used >= lim ? "bad" : used >= 0.8 * lim ? "warn" : ""}" style="width:${Math.min(100, (100 * used) / Math.max(1, lim))}%"></div></div>`;
+  table($("kTable"), ["name", "source", "#req/min", "#requests today", "full today / limit", "refresh today / limit", "created", ""],
+    keys.keys.map((k) => {
+      const u = k.usage_today;
+      const actions = k.source === "db" && !k.revoked_at
+        ? `<button class="small secondary" data-act="edit" data-name="${esc(k.name)}">limits</button> <button class="small secondary" data-act="rotate" data-name="${esc(k.name)}">rotate</button> <button class="small danger" data-act="revoke" data-name="${esc(k.name)}">revoke</button>`
+        : k.revoked_at ? `<span class="badge bad">revoked</span>` : `<span class="muted" title="set in the API_KEYS env var">env</span>`;
+      return `<tr><td><b>${esc(k.name)}</b></td><td>${esc(k.source)}</td><td class="n">${num(k.rate_per_min)}</td><td class="n">${num(u.requests)}</td><td>${num(u.full_calls)} / ${num(k.full_per_day)}${meter(u.full_calls, k.full_per_day)}</td><td>${num(u.refreshes)} / ${num(k.refresh_per_day)}${meter(u.refreshes, k.refresh_per_day)}</td><td class="muted">${k.created_at ? ago(k.created_at) : "–"}</td><td style="white-space:nowrap">${actions}</td></tr>`;
+    }), "no keys");
+  const names = [...new Set(usage.rows.map((r) => r.key_name))].filter((n) => !n.startsWith("_")).sort(); // _paid_x is a counter, not a key
+  const days = [...new Set(usage.rows.map((r) => r.day))].sort();
+  const idx = Object.fromEntries(usage.rows.map((r) => [`${r.day}|${r.key_name}`, r.requests]));
+  const css = names.map((s, i) => `.chart .k${i}{fill:${PALETTE[i % PALETTE.length]}}`).join("");
+  $("kChart").innerHTML = days.length
+    ? `<style>${css}</style>` + bars(days.map((d) => ({ day: d, values: names.map((n) => idx[`${d}|${n}`] || 0) })),
+      { width: 1200, height: 180, stacks: names.map((_, i) => `k${i}`), labelEvery: 2, label: (p) => md(p.day), tip: (p) => `${md(p.day)} · ` + names.map((n, i) => `${n} ${p.values[i]}`).filter((_, i) => p.values[i]).join(", ") })
+    : `<p class="muted">no usage yet</p>`;
+  $("kLegend").innerHTML = names.map((n, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${esc(n)}</span>`).join("");
+}
+
+let jobFilter = "";
+function renderJobs(jobs) {
+  table($("jTable"), ["id", "kind", "depth", "status", "#tries", "mint", "by", "error", "created", "took", ""],
+    jobs.jobs.map((j) => {
+      const took = j.finished_at ? (new Date(j.finished_at) - new Date(j.created_at)) / 1000 : null;
+      const cls = j.status === "failed" ? "bad" : j.status === "done" ? "ok" : "warn";
+      return `<tr><td class="n">${j.id}</td><td>${esc(j.kind)}</td><td>${esc(j.depth)}</td><td><span class="badge ${cls}">${esc(j.status)}</span></td><td class="n">${j.attempts}</td><td class="mono ell" title="${esc(j.mint)}">${esc(j.mint)}</td><td class="muted">${esc(j.requested_by)}</td><td class="mono ell" title="${esc(j.last_error)}">${esc(j.error_code || j.last_error || "")}</td><td class="muted">${ago(j.created_at)}</td><td class="n">${secs(took)}</td><td>${j.status === "failed" ? `<button class="small secondary" data-act="retry" data-id="${j.id}">retry</button>` : ""}</td></tr>`;
+    }));
+}
+$("jFilters").innerHTML = ["", "pending", "running", "done", "failed"].map((s) => `<button type="button" class="small secondary ${s === "" ? "on" : ""}" data-f="${s}">${s || "all"}</button>`).join("");
+$("jFilters").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-f]"); if (!b) return;
+  jobFilter = b.dataset.f;
+  [...$("jFilters").children].forEach((x) => x.classList.toggle("on", x === b));
+  renderJobs(await api(`/admin/v1/jobs?limit=30${jobFilter ? `&status=${jobFilter}` : ""}`));
+});
+
+function renderAlerts(st, h, q, u, s) {
+  const a = [];
+  const c = h.credits;
+  if (h.rpc_configured) {
+    if (c.cycle_pct >= 100) a.push(["bad", `Helius credits are used up for this cycle (${num(c.cycle_to_date)} of ${num(h.plan.credits_per_cycle)}).`]);
+    else if (c.projected_pct >= 100) a.push(["bad", `At the last 24 hours' pace, Helius credits run out in ${c.days_until_exhausted?.toFixed(1)} days, before the cycle resets (projected ${pct(c.projected_pct, 0)} of plan).`]);
+    else if (c.projected_pct >= 80) a.push(["warn", `Helius usage is projected at ${pct(c.projected_pct, 0)} of the plan this cycle.`]);
+    if (h.calls.rate_limited_24h) a.push(["bad", `Helius returned ${num(h.calls.rate_limited_24h)} rate-limit (429) responses in the last 24 h.`]);
+    if (h.calls.peak_rps_24h >= h.plan.rps_limit) a.push(["warn", `Helius peaked at ${h.calls.peak_rps_24h} req/s in one process, at the plan's ${h.plan.rps_limit}/s limit.`]);
+  } else a.push(["warn", "SOLANA_RPC_URL is not set, so on-chain resolution is off."]);
+  const qs = st.queue;
+  if (qs.oldest_pending_s > 120) a.push(["bad", `The oldest pending job has waited ${secs(qs.oldest_pending_s)}.`]);
+  if (q.stuck_running) a.push(["bad", `${q.stuck_running} running job(s) have an expired lease; is a worker down?`]);
+  const fin = qs.done_24h + qs.failed_24h;
+  if (fin && qs.failed_24h / fin > 0.05) a.push(["warn", `${pct((100 * qs.failed_24h) / fin)} of jobs failed in the last 24 h.`]);
+  for (const b of u.breakers.filter((b) => b.state === "open")) a.push(["bad", `Circuit breaker open for ${b.source} (${b.failures} failures).`]);
+  for (const src of u.sources.filter((x) => x.calls >= 20 && x.error_rate >= 0.25 && x.source !== "other")) a.push(["warn", `${src.source} is failing ${pct(src.error_rate * 100, 0)} of calls.`]);
+  for (const t of s.trend_sources.filter((t) => t.status === "failed" || t.status === "stale")) a.push(["warn", `Trend source ${t.source} was ${t.status} on ${t.reads} recent read(s).`]);
+  const px = s.paid_x;
+  if (px.enabled && px.spend_today_usd >= 0.8 * px.cap_usd) a.push(["warn", `Paid X spend is $${px.spend_today_usd.toFixed(2)} of the $${px.cap_usd} daily cap.`]);
+  $("alertList").innerHTML = a.length
+    ? a.map(([cls, msg]) => `<div class="alert ${cls}">${esc(msg)}</div>`).join("")
+    : `<div class="alert ok">All clear: credits on track, queue moving, no open breakers.</div>`;
+}
+
+// ------------------------------------------------------------------ load
+
+let loading = false;
+async function load() {
+  if (loading) return;
+  if (!$("key").value.trim()) { $("login").classList.remove("hidden"); return; }
+  loading = true;
+  $("reload").disabled = true;
+  try {
+    const uh = $("uHours").value;
+    const [st, h, q, u, s, keys, usage, jobs] = await Promise.all([
+      api("/admin/v1/status"), api("/admin/v1/helius"), api("/admin/v1/queue"),
+      api(`/admin/v1/upstreams?hours=${uh}`), api("/admin/v1/signals"),
+      api("/admin/v1/keys?include_revoked=true"), api("/admin/v1/usage?days=14"),
+      api(`/admin/v1/jobs?limit=30${jobFilter ? `&status=${jobFilter}` : ""}`),
+    ]);
+    state = { st, h, q, u, s };
+    $("login").classList.add("hidden");
+    renderHelius(h); renderQueue(st, q); renderUpstreams(u); renderSignals(s, st);
+    renderKeys(keys, usage); renderJobs(jobs); renderAlerts(st, h, q, u, s);
+    $("updated").textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    if (e.status === 403 || e.status === 401) {
+      $("login").classList.remove("hidden");
+      $("loginErr").textContent = "That admin key was refused.";
+    } else {
+      $("updated").innerHTML = `<span class="error">${esc(e.message)}</span>`;
+    }
+  } finally {
+    loading = false;
+    $("reload").disabled = false;
+  }
+}
+
+$("kForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { name: $("kName").value.trim() };
+  for (const [id, f] of [["kRate", "rate_per_min"], ["kFull", "full_per_day"], ["kRefresh", "refresh_per_day"]]) {
+    if ($(id).value) body[f] = Number($(id).value);
+  }
+  try {
+    const k = await api("/admin/v1/keys", { method: "POST", body: JSON.stringify(body) });
+    showSecret(k);
+    $("kForm").reset();
+    load();
+  } catch (err) { alert(err.message); }
+});
+function showSecret(k) {
+  $("kSecret").classList.remove("hidden");
+  $("kSecret").innerHTML = `<p style="margin:0 0 6px">Key for <b>${esc(k.name)}</b>. Copy it now; it is not shown again.</p><div class="secret">${esc(k.key)}</div> <button class="small secondary" type="button" id="kHide" style="margin-top:6px">done</button>`;
+  $("kHide").onclick = () => { $("kSecret").classList.add("hidden"); $("kSecret").innerHTML = ""; };
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const name = b.dataset.name;
+  try {
+    if (b.dataset.act === "retry") {
+      const j = await api(`/admin/v1/jobs/${b.dataset.id}/retry`, { method: "POST" });
+      b.textContent = `→ #${j.id}`; b.disabled = true;
+    } else if (b.dataset.act === "revoke") {
+      if (!confirm(`Revoke ${name}? It stops working at once.`)) return;
+      await api(`/admin/v1/keys/${encodeURIComponent(name)}`, { method: "DELETE" }); load();
+    } else if (b.dataset.act === "rotate") {
+      if (!confirm(`Rotate ${name}? The current key stops working at once.`)) return;
+      showSecret(await api(`/admin/v1/keys/${encodeURIComponent(name)}/rotate`, { method: "POST" })); load();
+    } else if (b.dataset.act === "edit") {
+      const body = {};
+      for (const f of ["rate_per_min", "full_per_day", "refresh_per_day"]) {
+        const v = prompt(`${name}: new ${f} (blank keeps it)`);
+        if (v === null) return;
+        if (v.trim()) body[f] = Number(v);
+      }
+      if (Object.keys(body).length) { await api(`/admin/v1/keys/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify(body) }); load(); }
+    }
+  } catch (err) { alert(err.message); }
+});
+
+let timer = null;
+function schedule() {
+  clearInterval(timer);
+  const s = Number($("every").value);
+  if (s) timer = setInterval(() => { if (!document.hidden) load(); }, s * 1000);
+}
+$("key").value = storedKey();
+try { $("remember").checked = !!localStorage.getItem(LS_KEY); } catch { /* blocked */ }
+$("key").addEventListener("change", () => { saveKey($("key").value.trim()); $("loginErr").textContent = ""; load(); });
+$("remember").addEventListener("change", () => saveKey($("key").value.trim()));
+$("every").addEventListener("change", schedule);
+$("uHours").addEventListener("change", load);
+$("reload").addEventListener("click", load);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+schedule();
+load();
+</script>
+</body>
+</html>

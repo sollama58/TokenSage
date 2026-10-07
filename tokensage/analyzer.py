@@ -79,6 +79,7 @@ from tokensage.engine.pipeline import (
     run_full,
 )
 from tokensage.engine.xref import parse_x_ref, snowflake_time
+from tokensage.net import metrics
 from tokensage.resolve import metadata as md
 from tokensage.resolve import pair as pair_lookup
 from tokensage.resolve.resolver import Resolved, ResolveError, curve_now, resolve
@@ -137,7 +138,16 @@ class Context:
                 pool=settings.fetch_connect_timeout_s,
             ),
             follow_redirects=False,
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            # the transport meters every upstream call for the admin panel; the pool limits
+            # live on it, since httpx ignores `limits` when a transport is passed
+            transport=metrics.MeteredTransport(
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
+            ),
+        )
+        metrics.meter.configure(
+            rpc_url=settings.solana_rpc_url,
+            ipfs_gateways=settings.ipfs_gateway_list,
+            costs=settings.helius_credit_costs,
         )
         rpc = SolanaRpc(settings.solana_rpc_url, http) if settings.solana_rpc_url else None
         return cls(settings=settings, http=http, rpc=rpc)
