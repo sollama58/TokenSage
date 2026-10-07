@@ -129,6 +129,44 @@ def test_crypto_native_comes_from_the_coins_own_content() -> None:
     assert not any(c.startswith("tradfi") for c in cats) and "crypto_native" in cats
 
 
+def test_crypto_native_lands_on_a_specific_sub_label() -> None:
+    # every crypto_native rule names a child, so the parent always says which kind it is
+    from tokensage.engine.render_summary import _CRYPTO_PHRASE
+
+    data = Path(__file__).resolve().parents[1] / "data"
+    taxonomy = yaml.safe_load((data / "taxonomy.yaml").read_text())
+    labels = {c["label"] for c in taxonomy["categories"]}
+    children = {lbl for lbl in labels if lbl.startswith("crypto_native/")}
+    assert children - {"crypto_native/paired_ecosystem"} == set(_CRYPTO_PHRASE)
+    for f in ("slang.yaml", "entities_seed.yaml", "stocks.yaml", "known_coins_seed.yaml"):
+        assert "[crypto_native]" not in (data / f).read_text(), f
+        assert "crypto_native," not in (data / f).read_text(), f
+    assert "crypto_native/person" in _cats("Vitalik Fudderin", "VITALIK")
+    assert "crypto_native/slang" not in _cats("Vitalik Fudderin", "VITALIK")
+    assert "crypto_native/chain_or_coin" in _cats("Soltag", "SOLTAG")
+    assert "crypto_native/trading" in _cats("2D Hedge Fund", "2DHF", "Trading desk for traders")
+    assert "crypto_native/launchpad" in _cats("EsportPad", "ESPAD")
+    assert "crypto_native/company" in _cats("Coinbase", "COIN")
+    assert "crypto_native/slang" in _cats("Launch Ape Rug Profit", "LARP")
+
+
+def test_crypto_native_summary_names_the_kind() -> None:
+    assert "a coin about a blockchain or established coin" in _run("zCash", "ZCASH").summary
+    assert "a launchpad / launch-platform coin" in _run("VOLUMEPAD", "VOLUMEPAD").summary
+
+
+def test_wikipedia_crypto_descriptions_pick_a_sub_label() -> None:
+    from tokensage.engine.wikiclass import classify
+
+    assert classify("Canadian programmer, co-founder of Ethereum") == (
+        "person",
+        ["celebrity/other", "crypto_native/person"],
+    )
+    assert classify("American cryptocurrency exchange") == ("concept", ["crypto_native/company"])
+    assert classify("privacy-focused cryptocurrency") == ("coin", ["crypto_native/chain_or_coin"])
+    assert classify("American actress (born 1997)") == ("person", ["celebrity/other"])
+
+
 def test_two_agreeing_inputs_read_higher_than_one() -> None:
     one = _run("Dog Think", "DTHINK")
     two = _run("Dog Think", "DTHINK", "What do dogs think about? A dog coin.")

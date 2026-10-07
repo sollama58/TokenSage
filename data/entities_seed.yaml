@@ -28,12 +28,12 @@ entities:
   - {label: White House, kind: place, aliases: [white house, whitehouse], categories: [political], desc: "US presidency", popularity: 0.5}
   - {label: Mar-a-Lago, kind: place, aliases: [mar-a-lago, maralago], categories: [political], desc: "Trump's estate", popularity: 0.3}
   # --- business / tech figures
-  - {label: Vitalik Buterin, kind: person, aliases: [vitalik, buterin, butterin, vitadik, vitaldik, vitaldick, vitalcock, dihtalik], categories: [celebrity/other, crypto_native/slang], desc: "Ethereum co-founder", popularity: 0.6}
-  - {label: Anatoly Yakovenko, kind: person, aliases: [toly, anatoly], categories: [celebrity/other, crypto_native/slang], desc: "Solana co-founder", popularity: 0.5}
+  - {label: Vitalik Buterin, kind: person, aliases: [vitalik, buterin, butterin, vitadik, vitaldik, vitaldick, vitalcock, dihtalik], categories: [celebrity/other, crypto_native/person], desc: "Ethereum co-founder", popularity: 0.6}
+  - {label: Anatoly Yakovenko, kind: person, aliases: [toly, anatoly], categories: [celebrity/other, crypto_native/person], desc: "Solana co-founder", popularity: 0.5}
   - {label: Raj Gokal, kind: person, aliases: [raj gokal, raj], categories: [celebrity/other], desc: "Solana co-founder", popularity: 0.3}
-  - {label: Changpeng Zhao, kind: person, aliases: [cz, changpeng zhao], categories: [celebrity/other, crypto_native/slang], desc: "Binance founder", popularity: 0.6}
-  - {label: Sam Bankman-Fried, kind: person, aliases: [sbf, sam bankman-fried, bankman], categories: [celebrity/other, crypto_native/slang], desc: "FTX founder (convicted)", popularity: 0.5}
-  - {label: Michael Saylor, kind: person, aliases: [saylor], categories: [celebrity/other, crypto_native/slang], desc: "MicroStrategy bitcoin maximalist", popularity: 0.5}
+  - {label: Changpeng Zhao, kind: person, aliases: [cz, changpeng zhao], categories: [celebrity/other, crypto_native/person], desc: "Binance founder", popularity: 0.6}
+  - {label: Sam Bankman-Fried, kind: person, aliases: [sbf, sam bankman-fried, bankman], categories: [celebrity/other, crypto_native/person], desc: "FTX founder (convicted)", popularity: 0.5}
+  - {label: Michael Saylor, kind: person, aliases: [saylor], categories: [celebrity/other, crypto_native/person], desc: "MicroStrategy bitcoin maximalist", popularity: 0.5}
   - {label: Jerome Powell, kind: person, aliases: [powell, jpow, jerome powell], categories: [political, news_event], desc: "US Fed chair", popularity: 0.5}
   - {label: Mark Zuckerberg, kind: person, aliases: [zuck, zuckerberg], categories: [celebrity/other], desc: "Meta CEO", popularity: 0.5}
   - {label: Jeff Bezos, kind: person, aliases: [bezos], categories: [celebrity/other], desc: "Amazon founder", popularity: 0.4}
@@ -41,8 +41,8 @@ entities:
   - {label: Jensen Huang, kind: person, aliases: [jensen, jensen huang], categories: [celebrity/other, ai_agent], desc: "Nvidia CEO", popularity: 0.4}
   - {label: Andy Ayrey, kind: person, aliases: [andy ayrey], categories: [ai_agent], desc: "creator of Truth Terminal", popularity: 0.4}
   - {label: Marc Andreessen, kind: person, aliases: [pmarca, andreessen], categories: [ai_agent, celebrity/other], desc: "a16z; funded Truth Terminal", popularity: 0.3}
-  - {label: Pump.fun (Alon), kind: person, aliases: [alon, a1lon9], categories: [crypto_native/pumpfun_meta], desc: "pump.fun co-founder", popularity: 0.4}
-  - {label: Murad Mahmudov, kind: person, aliases: [murad], categories: [celebrity/streamer_kol, crypto_native/slang], desc: "memecoin 'supercycle' KOL", popularity: 0.4}
+  - {label: Pump.fun (Alon), kind: person, aliases: [alon, a1lon9], categories: [crypto_native/person, crypto_native/pumpfun_meta], desc: "pump.fun co-founder", popularity: 0.4}
+  - {label: Murad Mahmudov, kind: person, aliases: [murad], categories: [celebrity/streamer_kol, crypto_native/person], desc: "memecoin 'supercycle' KOL", popularity: 0.4}
   - {label: Ansem, kind: person, aliases: [ansem, blknoiz06], categories: [celebrity/streamer_kol], desc: "Solana memecoin KOL", popularity: 0.4}
   - {label: Faze Banks, kind: person, aliases: [faze banks, banks], categories: [celebrity/streamer_kol], desc: "FaZe Clan figure", popularity: 0.3}
   - {label: Kai Cenat, kind: person, aliases: [kai cenat, kai], categories: [celebrity/streamer_kol], desc: "streamer", popularity: 0.5}
@@ -121,13 +121,14 @@ entities:
   - {label: Greenland, kind: place, aliases: [greenland], categories: [regional_language, political, news_event], desc: "territory in 2025 political news", popularity: 0.4}
   - {label: Ohio, kind: place, aliases: [ohio], categories: [meme_template/brainrot], desc: "'only in Ohio' meme", popularity: 0.3}
   # --- events / products
-  - {label: Bitcoin, kind: coin, aliases: [bitcoin, btc, satoshi], categories: [crypto_native/slang], desc: "bitcoin", popularity: 0.5}
-  - {label: Robinhood Chain, kind: concept, aliases: [robinhood chain], categories: [crypto_native/slang], desc: "Robinhood's blockchain", popularity: 0.4}
-  - {label: Ethereum, kind: coin, aliases: [ethereum, eth, ether], categories: [crypto_native/slang], desc: "ethereum", popularity: 0.4}
-  - {label: Zcash, kind: coin, aliases: [zcash], categories: [crypto_native/slang], desc: "privacy coin", popularity: 0.4}
-  - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/slang], desc: "solana", popularity: 0.4}
-  - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
-  - {label: Coinbase, kind: concept, aliases: [coinbase], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
+  - {label: Bitcoin, kind: coin, aliases: [bitcoin, btc], categories: [crypto_native/chain_or_coin], desc: "bitcoin", popularity: 0.5}
+  - {label: Satoshi Nakamoto, kind: person, aliases: [satoshi, satoshi nakamoto, nakamoto], categories: [crypto_native/person], desc: "Bitcoin's pseudonymous creator", popularity: 0.5}
+  - {label: Robinhood Chain, kind: coin, aliases: [robinhood chain], categories: [crypto_native/chain_or_coin], desc: "Robinhood's blockchain", popularity: 0.4}
+  - {label: Ethereum, kind: coin, aliases: [ethereum, eth, ether], categories: [crypto_native/chain_or_coin], desc: "ethereum", popularity: 0.4}
+  - {label: Zcash, kind: coin, aliases: [zcash], categories: [crypto_native/chain_or_coin], desc: "privacy coin", popularity: 0.4}
+  - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/chain_or_coin], desc: "solana", popularity: 0.4}
+  - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/company, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
+  - {label: Coinbase, kind: concept, aliases: [coinbase], categories: [crypto_native/company, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
   - {label: Super Bowl, kind: event, aliases: [super bowl, superbowl], categories: [news_event, pop_culture], desc: "annual US football final", popularity: 0.4}
   - {label: World Cup, kind: event, aliases: [world cup], categories: [news_event, pop_culture], desc: "football world cup", popularity: 0.4}
   - {label: Olympics, kind: event, aliases: [olympics, olympic], categories: [news_event, pop_culture], desc: "Olympic games", popularity: 0.4}

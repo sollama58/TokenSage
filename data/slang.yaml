@@ -48,7 +48,7 @@ terms:
   dev: {meaning: "the token creator", categories: [crypto_native/pumpfun_meta], weight: 0.3}
   kol: {meaning: "key opinion leader (influencer)", categories: [crypto_native/slang], weight: 0.5}
   alpha: {meaning: "early information", categories: [crypto_native/slang], weight: 0.3}
-  ath: {meaning: "all-time high", categories: [crypto_native/slang], weight: 0.5}
+  ath: {meaning: "all-time high", categories: [crypto_native/trading], weight: 0.5}
   pump: {meaning: "price rise / pump.fun", categories: [crypto_native/pumpfun_meta], weight: 0.3}
   pumpfun: {meaning: "the launchpad itself", categories: [crypto_native/pumpfun_meta], weight: 0.8}
   dump: {meaning: "price crash", categories: [crypto_native/slang], weight: 0.3}
@@ -58,8 +58,8 @@ terms:
   lambo: {meaning: "Lamborghini (wen lambo)", categories: [crypto_native/slang], weight: 0.5}
   "100x": {meaning: "hundredfold gain", categories: [crypto_native/slang], weight: 0.6}
   "1000x": {meaning: "thousandfold gain", categories: [crypto_native/slang], weight: 0.6}
-  lowcap: {meaning: "low market cap", categories: [crypto_native/slang], weight: 0.5}
-  mcap: {meaning: "market cap", categories: [crypto_native/slang], weight: 0.5}
+  lowcap: {meaning: "low market cap", categories: [crypto_native/trading], weight: 0.5}
+  mcap: {meaning: "market cap", categories: [crypto_native/trading], weight: 0.5}
   bonding: {meaning: "bonding curve stage", categories: [crypto_native/pumpfun_meta], weight: 0.5}
   graduate: {meaning: "leave the bonding curve", categories: [crypto_native/pumpfun_meta], weight: 0.5}
   migrate: {meaning: "move to the DEX", categories: [crypto_native/pumpfun_meta], weight: 0.4}
@@ -180,9 +180,11 @@ terms:
   agentic: {meaning: "agentic AI", categories: [ai_agent], weight: 0.6}
   "ai agent": {meaning: "AI agent", categories: [ai_agent], weight: 0.8}
   # --- launchpads, tools and on-chain products: crypto-native by the coin's own content
-  launchpad: {meaning: "a token launchpad", categories: [crypto_native/pumpfun_meta], weight: 0.6}
-  launchpads: {meaning: "token launchpads", categories: [crypto_native/pumpfun_meta], weight: 0.6}
-  pad: {meaning: "launchpad (as in 'Lobbypad')", categories: [crypto_native/pumpfun_meta], weight: 0.45}
+# (launchpad: a platform's own coin; tech: blockchain technology; trading: trading-desk words;
+# chain_or_coin: a chain, coin or stablecoin named as a word)
+  launchpad: {meaning: "a token launchpad", categories: [crypto_native/launchpad], weight: 0.6}
+  launchpads: {meaning: "token launchpads", categories: [crypto_native/launchpad], weight: 0.6}
+  pad: {meaning: "launchpad (as in 'Lobbypad')", categories: [crypto_native/launchpad], weight: 0.45}
   memecoin: {meaning: "a meme coin", categories: [crypto_native/pumpfun_meta], weight: 0.5}
   memecoins: {meaning: "meme coins", categories: [crypto_native/pumpfun_meta], weight: 0.5}
   wallet: {meaning: "crypto wallet", categories: [crypto_native/utility_claim], weight: 0.45}
@@ -191,30 +193,30 @@ terms:
   swaps: {meaning: "token swaps", categories: [crypto_native/utility_claim], weight: 0.4}
   dex: {meaning: "decentralised exchange", categories: [crypto_native/utility_claim], weight: 0.5}
   liquidity: {meaning: "market liquidity", categories: [crypto_native/utility_claim], weight: 0.45}
-  onchain: {meaning: "on the blockchain", categories: [crypto_native/slang], weight: 0.5}
-  on chain: {meaning: "on the blockchain", categories: [crypto_native/slang], weight: 0.45}
-  blockchain: {meaning: "blockchain", categories: [crypto_native/slang], weight: 0.5}
-  nft: {meaning: "non-fungible token", categories: [crypto_native/slang], weight: 0.5}
-  nfts: {meaning: "non-fungible tokens", categories: [crypto_native/slang], weight: 0.5}
-  airdrop: {meaning: "free token distribution", categories: [crypto_native/slang], weight: 0.5}
-  airdropped: {meaning: "given out free", categories: [crypto_native/slang], weight: 0.5}
+  onchain: {meaning: "on the blockchain", categories: [crypto_native/tech], weight: 0.5}
+  on chain: {meaning: "on the blockchain", categories: [crypto_native/tech], weight: 0.45}
+  blockchain: {meaning: "blockchain", categories: [crypto_native/tech], weight: 0.5}
+  nft: {meaning: "non-fungible token", categories: [crypto_native/tech], weight: 0.5}
+  nfts: {meaning: "non-fungible tokens", categories: [crypto_native/tech], weight: 0.5}
+  airdrop: {meaning: "free token distribution", categories: [crypto_native/tech], weight: 0.5}
+  airdropped: {meaning: "given out free", categories: [crypto_native/tech], weight: 0.5}
   staking: {meaning: "staking tokens for yield", categories: [crypto_native/utility_claim], weight: 0.5}
-  hashrate: {meaning: "mining power", categories: [crypto_native/slang], weight: 0.6}
-  miner: {meaning: "crypto miner", categories: [crypto_native/slang], weight: 0.35}
-  mining: {meaning: "crypto mining", categories: [crypto_native/slang], weight: 0.35}
-  trader: {meaning: "trader", categories: [crypto_native/slang], weight: 0.35}
-  traders: {meaning: "traders", categories: [crypto_native/slang], weight: 0.35}
-  trading: {meaning: "trading", categories: [crypto_native/slang], weight: 0.35}
+  hashrate: {meaning: "mining power", categories: [crypto_native/tech], weight: 0.6}
+  miner: {meaning: "crypto miner", categories: [crypto_native/tech], weight: 0.35}
+  mining: {meaning: "crypto mining", categories: [crypto_native/tech], weight: 0.35}
+  trader: {meaning: "trader", categories: [crypto_native/trading], weight: 0.35}
+  traders: {meaning: "traders", categories: [crypto_native/trading], weight: 0.35}
+  trading: {meaning: "trading", categories: [crypto_native/trading], weight: 0.35}
   protocol: {meaning: "a crypto protocol", categories: [crypto_native/utility_claim], weight: 0.4}
   tokenize: {meaning: "turn into a token", categories: [crypto_native/utility_claim], weight: 0.5}
   tokenized: {meaning: "turned into a token", categories: [crypto_native/utility_claim], weight: 0.5}
   escrow: {meaning: "escrow", categories: [crypto_native/utility_claim], weight: 0.4}
-  pnl: {meaning: "profit and loss", categories: [crypto_native/slang], weight: 0.5}
-  usdc: {meaning: "the USDC stablecoin", categories: [crypto_native/slang], weight: 0.45}
-  usdt: {meaning: "the USDT stablecoin", categories: [crypto_native/slang], weight: 0.45}
-  wbtc: {meaning: "wrapped bitcoin", categories: [crypto_native/slang], weight: 0.5}
-  buy and hold: {meaning: "the hold-forever slogan", categories: [crypto_native/slang], weight: 0.5}
-  floor price: {meaning: "lowest listed price", categories: [crypto_native/slang], weight: 0.5}
+  pnl: {meaning: "profit and loss", categories: [crypto_native/trading], weight: 0.5}
+  usdc: {meaning: "the USDC stablecoin", categories: [crypto_native/chain_or_coin], weight: 0.45}
+  usdt: {meaning: "the USDT stablecoin", categories: [crypto_native/chain_or_coin], weight: 0.45}
+  wbtc: {meaning: "wrapped bitcoin", categories: [crypto_native/chain_or_coin], weight: 0.5}
+  buy and hold: {meaning: "the hold-forever slogan", categories: [crypto_native/trading], weight: 0.5}
+  floor price: {meaning: "lowest listed price", categories: [crypto_native/trading], weight: 0.5}
   rugs: {meaning: "rug pulls", categories: [crypto_native/slang], weight: 0.6}
   # --- political
   maga: {meaning: "Make America Great Again", categories: [political], weight: 0.9}

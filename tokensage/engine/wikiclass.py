@@ -72,7 +72,17 @@ _RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "other",
         ("pop_culture",),
     ),
-    (r"cryptocurrency|blockchain|memecoin|meme coin|crypto", "coin", ("crypto_native",)),
+    (
+        r"(?:cryptocurrency|crypto|bitcoin|blockchain)[- ](?:exchange|company|firm|platform|"
+        r"broker|lender|wallet)|stablecoin issuer|bitcoin treasury",
+        "concept",
+        ("crypto_native/company",),
+    ),
+    (
+        r"cryptocurrency|blockchain|memecoin|meme coin|crypto|stablecoin",
+        "coin",
+        ("crypto_native/chain_or_coin",),
+    ),
     (
         r"\b(?:incident|attack|shooting|assassination|scandal|protest|election|war|crisis|"
         r"summit|ceasefire|disaster|earthquake|hurricane|controversy|trial)\b",
@@ -81,6 +91,10 @@ _RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
 )
 _RULES_RE = [(re.compile(p), kind, cats) for p, kind, cats in _RULES]
+# A person whose description is about crypto ("co-founder of Ethereum") is also a crypto figure.
+_CRYPTO_PERSON = re.compile(
+    r"cryptocurrenc|\bcrypto\b|blockchain|bitcoin|ethereum|solana|binance|memecoin|\bnft"
+)
 
 
 def animal_category(desc: str) -> str:
@@ -107,5 +121,8 @@ def classify(desc: str) -> tuple[str, list[str]]:
         return "famous_animal", [animal_category(d)]
     for rx, kind, cats in _RULES_RE:
         if rx.search(d):
-            return kind, list(cats)
+            out = list(cats)
+            if kind == "person" and _CRYPTO_PERSON.search(d):
+                out.append("crypto_native/person")
+            return kind, out
     return "other", []
