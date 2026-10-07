@@ -63,6 +63,8 @@ class Candidate:
     known_coin: str | None = None
     template: str | None = None
     created_at: datetime | None = None  # when the token behind a mint candidate launched
+    name: str | None = None  # the token behind a mint candidate (lineage, copy_of)
+    symbol: str | None = None
 
 
 @dataclass
@@ -165,9 +167,8 @@ def features(data: bytes) -> ImageFeatures:
         )
 
 
-def near_duplicates(
-    f: ImageFeatures, candidates: list[Candidate], max_distance: int
-) -> list[NearDup]:
+def all_near(f: ImageFeatures, candidates: list[Candidate], max_distance: int) -> list[NearDup]:
+    """Every candidate within max_distance (plain or mirrored), nearest first."""
     out: list[NearDup] = []
     for c in candidates:
         d = hamming(f.phash, c.phash)
@@ -175,7 +176,13 @@ def near_duplicates(
         if min(d, dm) <= max_distance:
             out.append(NearDup(c, min(d, dm), mirrored=dm < d))
     out.sort(key=lambda n: n.distance)
-    return out[:10]
+    return out
+
+
+def near_duplicates(
+    f: ImageFeatures, candidates: list[Candidate], max_distance: int
+) -> list[NearDup]:
+    return all_near(f, candidates, max_distance)[:10]
 
 
 def analyze(data: bytes | None, candidates: list[Candidate], max_distance: int) -> ImageResult:

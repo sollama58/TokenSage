@@ -10,6 +10,11 @@
 #   copy_of_excludes                        : tickers that must NOT appear
 #   tokens                                  : exact normalized name tokens
 #   obfuscation_include                     : obfuscation codes
+#   same_name / originals                  : earlier coins with this name or ticker, and
+#                                             TokenSage's stored reads of them (lineage)
+#   category_between                        : {label: [low, high]} confidence range
+#   lineage_kind                            : lineage.kind
+#   referent_supported_by                   : inputs (where) that must support the referent
 cases:
   # ---------------------------------------------------------------- the famous ones (self)
   - name: dogwifhat
@@ -345,3 +350,34 @@ cases:
     symbol: ZEUS
     top_category: animal
     categories_include: [animal/dog]
+  # ---------------------------------------------------------------- lineage: theme vs copy
+  # the theme of a copy comes from its own name; the copy relation is added on top
+  - name: Barkley the Dog
+    symbol: BARKLEY
+    same_name: [{mint: OrigBarkley111, name: Barkley the Dog, symbol: BARKLEY, hours_before: 2}]
+    categories_include: [animal/dog, derivative]
+    categories_exclude: [crypto_native]
+    flags_include: [copycat]
+    lineage_kind: early_copy
+  # its only content is the original's ticker: it inherits the original's theme and referent
+  # at 0.8x, supported by copy_of
+  - name: $GLORP
+    symbol: GLORP
+    same_name: [{mint: OrigGlorp1111, name: Glorp the Frog, symbol: GLORP, hours_before: 30}]
+    originals:
+      OrigGlorp1111:
+        categories: {animal: 0.8, animal/frog: 0.8, derivative: 0.6, crypto_native/pumpfun_meta: 0.6}
+        referent: {label: Glorp (frog meme), kind: meme, confidence: 0.75}
+    categories_include: [animal/frog, derivative]
+    categories_exclude: [crypto_native]
+    category_between: {animal/frog: [0.6, 0.66]}
+    referent: Glorp
+    referent_supported_by: [copy_of]
+    lineage_kind: late_copy
+    flags_include: [late_copy, copycat]
+  # a launchpad coin that copies nothing: crypto_native from its words, no derivative
+  - name: Pumpfun Bonding Curve
+    symbol: BONDING
+    categories_include: [crypto_native/pumpfun_meta]
+    categories_exclude: [derivative]
+    lineage_kind: original

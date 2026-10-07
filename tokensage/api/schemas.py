@@ -97,6 +97,26 @@ class Market(_Model):
     )
 
 
+class ReferentWave(_Model):
+    """How many coins TokenSage resolved to the same referent around now ("narrative heat")."""
+
+    launches_1h: int = Field(
+        description="Coins TokenSage resolved to this referent that launched in the last hour "
+        "(this one included when it launched in that window)"
+    )
+    launches_6h: int
+    launches_24h: int
+    first_seen_at: datetime | None = Field(
+        default=None,
+        description="Launch time of the first coin with this referent in the last 7 days",
+    )
+    rank_24h: int | None = Field(
+        default=None,
+        description="This coin's place by launch time among the last 24 h launches on this "
+        "referent (1 = the first); null when it launched before that window",
+    )
+
+
 class Referent(_Model):
     label: str
     kind: ReferentKind
@@ -106,13 +126,80 @@ class Referent(_Model):
     supported_by: list[str] = Field(
         default=[],
         description="Inputs that point at this referent (name, symbol, description, image, "
-        "x, trend, chain, db); several independent ones make it more trustworthy",
+        "x, trend, chain, db, copy_of); several independent ones make it more trustworthy. "
+        "copy_of = inherited from the coin this one copies",
+    )
+    wave: ReferentWave | None = Field(
+        default=None,
+        description="Launch counts on this referent, by TokenSage's normalised referent "
+        "(coins TokenSage has analysed only)",
     )
 
 
 class Category(_Model):
     label: str
     confidence: float = Field(ge=0, le=1)
+    wave_1h: int | None = Field(
+        default=None,
+        description="Coins TokenSage analysed in the last hour that carry this label (top-level "
+        "document categories only; coins TokenSage has analysed only)",
+    )
+
+
+class OriginalMarket(_Model):
+    """The copied coin's bonding curve when this coin was read."""
+
+    complete: bool | None = None
+    curve_progress: float | None = Field(default=None, ge=0, le=1)
+    graduated_pool: str | None = None
+    as_of: datetime | None = Field(
+        default=None, description="When the copied coin's curve was read"
+    )
+
+
+LineageKind = Literal["original", "early_copy", "copy", "late_copy", "reference", "unknown"]
+
+
+class Lineage(_Model):
+    """Which copy this is, and of what: the strongest copy relation in one place."""
+
+    kind: LineageKind = Field(
+        description="original: no earlier coin with its name, ticker or logo in the copycat "
+        "window. early_copy: rank <= 3 and the original launched less than 6 h earlier. "
+        "late_copy: rank > 10, or the original launched more than 24 h earlier. copy: any "
+        "other copy. reference: builds on an established coin (copy_of recent false). "
+        "unknown: no launch time"
+    )
+    of_mint: str | None = None
+    of_name: str | None = None
+    of_ticker: str | None = None
+    of_created_at: datetime | None = None
+    match: list[Literal["name", "ticker", "image"]] = []
+    rank: int | None = Field(
+        default=None,
+        description="Place by launch time among coins sharing its name or ticker within "
+        "window_hours either side (as copy_of[].rank); for a logo-only copy, among the earlier "
+        "coins with a near-identical logo",
+    )
+    rank_of: int | None = None
+    window_hours: int | None = None
+    siblings_1h: int | None = Field(
+        default=None,
+        description="Coins with the same name, ticker or a near-identical logo launched in the "
+        "hour up to this coin's launch, this one included",
+    )
+    siblings_6h: int | None = None
+    siblings_24h: int | None = None
+    logo_reuse_24h: int | None = Field(
+        default=None,
+        description="Other coins whose logo is a near-duplicate of this one's, launched in the "
+        "24 h up to this coin's launch",
+    )
+    logo_first_seen_at: datetime | None = Field(
+        default=None,
+        description="Launch time of the first coin TokenSage saw with this logo (any "
+        "near-duplicate), within the logo scan window (7 d)",
+    )
 
 
 class CopyOf(_Model):
@@ -141,6 +228,19 @@ class CopyOf(_Model):
         'of it, this one included ("3rd of 41")',
     )
     rank_window_hours: int | None = None
+    original_age_s: int | None = Field(
+        default=None, description="Seconds from the copied coin's launch to this coin's"
+    )
+    original_market: OriginalMarket | None = Field(
+        default=None, description="The copied coin's bonding curve at the time of this read"
+    )
+    match: list[Literal["name", "ticker", "image"]] = Field(
+        default=[], description="Which of this coin's inputs match the copied coin"
+    )
+    image_distance: int | None = Field(
+        default=None,
+        description="pHash Hamming distance between the two logos, when they were compared",
+    )
 
 
 class ImageLabel(_Model):
@@ -459,6 +559,7 @@ class Analysis(_Model):
     categories: list[Category] = []
     ticker_explanation: str | None = None
     copy_of: list[CopyOf] = []
+    lineage: Lineage | None = None
     image: ImageInfo = ImageInfo()
     x: XInfo | None = None
     trend: Trend = Trend()

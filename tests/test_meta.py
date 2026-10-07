@@ -52,11 +52,14 @@ def test_a_name_launched_many_times_today_is_the_current_meta() -> None:
     ctx = DbContext(same_name=_namesakes([0.5 * i for i in range(1, 41)]))
     out = _run("Blorbo", "BLORBO", ctx)
     cats = dict(out.agg.categories)
-    assert cats.get("crypto_native/pumpfun_meta", 0) >= 0.6
-    # nothing else knows "Blorbo": the meta is the referent
-    assert out.agg.referent is not None
-    assert out.agg.referent.label == "current pump.fun meta: Blorbo"
-    assert out.agg.referent.kind == "meme"
+    # a name launched 40 times is a copy relation, not a crypto in-joke theme, and it is no
+    # referent: a copy is about what its original is about (nothing known here)
+    assert "crypto_native/pumpfun_meta" not in cats and "crypto_native" not in cats
+    assert "derivative/copycat" in cats
+    assert out.agg.referent is None
+    meta_ev = [e for e in out.evidence if e.label == meta.CORPUS_LABEL]
+    assert meta_ev and meta_ev[0].source == "meta:name:blorbo"
+    assert out.lineage is not None and out.lineage.kind == "late_copy"
     # the copycat rank rides on the recent same-name copy
     copy = next(c for c in out.copy_of if c.get("recent"))
     assert (copy["rank"], copy["rank_of"], copy["rank_window_hours"]) == (41, 41, 24)
@@ -73,7 +76,8 @@ def test_the_first_of_many_is_a_meta_but_not_a_copy() -> None:
     assert "copycat" not in {f.code for f in out.flags}
     assert out.copy_of == []
     assert "1st of 10 $BLORBO coins" in out.summary
-    assert "crypto_native/pumpfun_meta" in dict(out.agg.categories)
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+    assert out.lineage is not None and out.lineage.kind == "original"
 
 
 def test_a_few_namesakes_are_not_a_meta() -> None:
@@ -84,7 +88,7 @@ def test_a_few_namesakes_are_not_a_meta() -> None:
     assert out.agg.referent is None
 
 
-def test_a_resolved_referent_wins_and_the_meta_only_adds_its_category() -> None:
+def test_a_resolved_referent_wins_and_the_meta_adds_no_category() -> None:
     out = _run(
         "Elon Musk",
         "MUSKY",
@@ -92,7 +96,8 @@ def test_a_resolved_referent_wins_and_the_meta_only_adds_its_category() -> None:
     )
     assert out.agg.referent is not None
     assert "meta" not in out.agg.referent.label
-    assert "crypto_native/pumpfun_meta" in dict(out.agg.categories)
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+    assert "celebrity/elon" in dict(out.agg.categories)  # the theme of its own name
 
 
 def test_a_famous_coin_is_not_its_own_meta() -> None:
@@ -116,7 +121,8 @@ def test_a_word_spiking_today_is_the_current_meta() -> None:
     out = _run("Zibzab Zibzab Blorpo", "BLORPO", DbContext(meta_counts=counts))
     assert out.agg.referent is not None
     assert out.agg.referent.label == "current pump.fun meta: Blorpo"  # the higher lift
-    assert dict(out.agg.categories).get("crypto_native/pumpfun_meta", 0) >= 0.5
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+    assert any(e.label == meta.CORPUS_LABEL for e in out.evidence)
     assert "'Blorpo' is a current meta (300 coins in 24 h)" in out.summary
 
 
@@ -225,10 +231,11 @@ TOP = _top(
 
 def test_sharing_a_name_with_a_top_token_rides_the_days_meta() -> None:
     out = _run("Le Chonk", "LCHONK", DbContext(top_volume=TOP))
-    assert dict(out.agg.categories).get("crypto_native/pumpfun_meta", 0) >= 0.5
-    assert out.agg.referent is not None
-    assert out.agg.referent.label == "current pump.fun meta: Le Chonk"
-    assert "#3 by 24 h trading volume" in (out.agg.referent.desc or "")
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+    # sharing the name of a top coin is a copy relation: evidence, not a referent
+    assert out.agg.referent is None
+    ev = next(e for e in out.evidence if e.source == "meta:top:le chonk")
+    assert "#3 of the top 3" in ev.detail
     assert "shares its name with $CHONK, #3 by trading volume today" in out.summary
     # the ticker alone is enough
     out = _run("Munk Of The Day", "MUNK", DbContext(top_volume=TOP))
@@ -238,7 +245,8 @@ def test_sharing_a_name_with_a_top_token_rides_the_days_meta() -> None:
 def test_a_name_word_shared_with_a_top_token_is_weaker() -> None:
     out = _run("Chonk Cat Zorbo", "CHZ", DbContext(top_volume=TOP))
     cats = dict(out.agg.categories)
-    assert 0.3 <= cats.get("crypto_native/pumpfun_meta", 0) < 0.6
+    assert "crypto_native/pumpfun_meta" not in cats
+    assert out.agg.referent is not None and out.agg.referent.score < 0.45
     assert "'Chonk' is in $CHONK, #3 by trading volume today" in out.summary
 
 
@@ -262,14 +270,13 @@ def test_no_match_and_short_tickers_add_nothing() -> None:
     assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
 
 
-def test_a_launch_count_meta_keeps_the_referent_and_the_top_match_adds_context() -> None:
+def test_a_launch_count_meta_and_the_top_match_both_add_context() -> None:
     ctx = DbContext(
         same_name=_namesakes([0.5 * i for i in range(1, 10)], "Le Chonk", "LCHONK"), top_volume=TOP
     )
     out = _run("Le Chonk", "LCHONK", ctx)
-    assert out.agg.referent is not None
-    assert out.agg.referent.label == "current pump.fun meta: Le Chonk"
-    assert sum(1 for e in out.evidence if e.referent is not None) == 1
+    assert out.agg.referent is None
+    assert sum(1 for e in out.evidence if e.label == meta.CORPUS_LABEL) == 2
     assert "(a current meta)" in out.summary and "#3 by trading volume today" in out.summary
 
 

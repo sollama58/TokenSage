@@ -213,6 +213,16 @@
             "title": "Launchpad",
             "type": "string"
           },
+          "lineage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Lineage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "market": {
             "$ref": "#/components/schemas/Market",
             "default": {}
@@ -479,6 +489,18 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "wave_1h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Coins TokenSage analysed in the last hour that carry this label (top-level document categories only; coins TokenSage has analysed only)",
+            "title": "Wave 1H"
           }
         },
         "required": [
@@ -504,6 +526,32 @@
             "description": "When the copied token launched (when known)",
             "title": "Created At"
           },
+          "image_distance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pHash Hamming distance between the two logos, when they were compared",
+            "title": "Image Distance"
+          },
+          "match": {
+            "default": [],
+            "description": "Which of this coin's inputs match the copied coin",
+            "items": {
+              "enum": [
+                "name",
+                "ticker",
+                "image"
+              ],
+              "type": "string"
+            },
+            "title": "Match",
+            "type": "array"
+          },
           "mint": {
             "anyOf": [
               {
@@ -525,6 +573,29 @@
               }
             ],
             "title": "Name"
+          },
+          "original_age_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds from the copied coin's launch to this coin's",
+            "title": "Original Age S"
+          },
+          "original_market": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginalMarket"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The copied coin's bonding curve at the time of this read"
           },
           "rank": {
             "anyOf": [
@@ -1247,6 +1318,181 @@
         "title": "KeyUpdate",
         "type": "object"
       },
+      "Lineage": {
+        "additionalProperties": false,
+        "description": "Which copy this is, and of what: the strongest copy relation in one place.",
+        "properties": {
+          "kind": {
+            "description": "original: no earlier coin with its name, ticker or logo in the copycat window. early_copy: rank <= 3 and the original launched less than 6 h earlier. late_copy: rank > 10, or the original launched more than 24 h earlier. copy: any other copy. reference: builds on an established coin (copy_of recent false). unknown: no launch time",
+            "enum": [
+              "original",
+              "early_copy",
+              "copy",
+              "late_copy",
+              "reference",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "logo_first_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Launch time of the first coin TokenSage saw with this logo (any near-duplicate), within the logo scan window (7 d)",
+            "title": "Logo First Seen At"
+          },
+          "logo_reuse_24h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Other coins whose logo is a near-duplicate of this one's, launched in the 24 h up to this coin's launch",
+            "title": "Logo Reuse 24H"
+          },
+          "match": {
+            "default": [],
+            "items": {
+              "enum": [
+                "name",
+                "ticker",
+                "image"
+              ],
+              "type": "string"
+            },
+            "title": "Match",
+            "type": "array"
+          },
+          "of_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of Created At"
+          },
+          "of_mint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of Mint"
+          },
+          "of_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of Name"
+          },
+          "of_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of Ticker"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Place by launch time among coins sharing its name or ticker within window_hours either side (as copy_of[].rank); for a logo-only copy, among the earlier coins with a near-identical logo",
+            "title": "Rank"
+          },
+          "rank_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank Of"
+          },
+          "siblings_1h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Coins with the same name, ticker or a near-identical logo launched in the hour up to this coin's launch, this one included",
+            "title": "Siblings 1H"
+          },
+          "siblings_24h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Siblings 24H"
+          },
+          "siblings_6h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Siblings 6H"
+          },
+          "window_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Hours"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "Lineage",
+        "type": "object"
+      },
       "Market": {
         "additionalProperties": false,
         "properties": {
@@ -1495,6 +1741,62 @@
           }
         },
         "title": "Normalized",
+        "type": "object"
+      },
+      "OriginalMarket": {
+        "additionalProperties": false,
+        "description": "The copied coin's bonding curve when this coin was read.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the copied coin's curve was read",
+            "title": "As Of"
+          },
+          "complete": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Complete"
+          },
+          "curve_progress": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curve Progress"
+          },
+          "graduated_pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graduated Pool"
+          }
+        },
+        "title": "OriginalMarket",
         "type": "object"
       },
       "Pair": {
@@ -1831,12 +2133,23 @@
           },
           "supported_by": {
             "default": [],
-            "description": "Inputs that point at this referent (name, symbol, description, image, x, trend, chain, db); several independent ones make it more trustworthy",
+            "description": "Inputs that point at this referent (name, symbol, description, image, x, trend, chain, db, copy_of); several independent ones make it more trustworthy. copy_of = inherited from the coin this one copies",
             "items": {
               "type": "string"
             },
             "title": "Supported By",
             "type": "array"
+          },
+          "wave": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferentWave"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Launch counts on this referent, by TokenSage's normalised referent (coins TokenSage has analysed only)"
           }
         },
         "required": [
@@ -1845,6 +2158,57 @@
           "confidence"
         ],
         "title": "Referent",
+        "type": "object"
+      },
+      "ReferentWave": {
+        "additionalProperties": false,
+        "description": "How many coins TokenSage resolved to the same referent around now (\"narrative heat\").",
+        "properties": {
+          "first_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Launch time of the first coin with this referent in the last 7 days",
+            "title": "First Seen At"
+          },
+          "launches_1h": {
+            "description": "Coins TokenSage resolved to this referent that launched in the last hour (this one included when it launched in that window)",
+            "title": "Launches 1H",
+            "type": "integer"
+          },
+          "launches_24h": {
+            "title": "Launches 24H",
+            "type": "integer"
+          },
+          "launches_6h": {
+            "title": "Launches 6H",
+            "type": "integer"
+          },
+          "rank_24h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This coin's place by launch time among the last 24 h launches on this referent (1 = the first); null when it launched before that window",
+            "title": "Rank 24H"
+          }
+        },
+        "required": [
+          "launches_1h",
+          "launches_6h",
+          "launches_24h"
+        ],
+        "title": "ReferentWave",
         "type": "object"
       },
       "SourceHealth": {
