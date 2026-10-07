@@ -34,7 +34,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.14.0-full"
+RULES_VERSION = "0.15.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
