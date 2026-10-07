@@ -155,3 +155,17 @@ async def test_callback_for_finished_target_is_runnable_at_once(conn: asyncpg.Co
     )
     cb = await queue.claim(conn, lease_s=60)
     assert cb is not None and cb.kind == "callback"
+
+
+async def test_pending_count_ignores_jobs_parked_on_a_future_run_after(
+    conn: asyncpg.Connection,
+) -> None:
+    """A metadata retry scheduled for later is not queue depth: nothing waits on a worker
+    for it, so it must not count toward the 503 back-pressure limit or the admin alert."""
+    await queue.enqueue(conn, "analyze", "M1", "basic")
+    await conn.execute(
+        """insert into job (kind, mint, depth, priority, run_after)
+           values ('retry_metadata', 'M2', 'basic', $1, now() + interval '20 minutes')""",
+        queue.PRIORITY_BACKGROUND,
+    )
+    assert await queue.pending_count(conn) == 1
