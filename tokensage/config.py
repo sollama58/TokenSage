@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # --- behaviour flags ---
     accept_non_pump: bool = True
     enable_clip: bool = False
+    # Optional local sentence-embedding classifier (engine/embed.py): guesses categories for
+    # names and tweets nothing else resolves. Needs a MiniLM-class ONNX model on disk.
+    enable_embed: bool = False
+    embed_model_path: str = ""  # the .onnx file, or a directory holding model.onnx + vocab.txt
+    embed_vocab_path: str = ""  # vocab.txt, when it is not next to the model
     enable_corpus: bool = False
     enable_paid_x: bool = False
     paid_x_daily_usd_cap: float = 1.0

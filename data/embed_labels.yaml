@@ -1,0 +1,56 @@
+# Optional embedding classifier (ENABLE_EMBED, guide §5.6a). A local MiniLM-class sentence
+# encoder embeds the token's name, description and linked tweet; each text is assigned the
+# taxonomy label whose prompt is nearest by cosine, when it clears `threshold`. These rows are
+# guesses ("embedding guess"): they only ever add a category, never a referent.
+#
+# Labels must exist in taxonomy.yaml. Several prompts per label are fine; the best one counts.
+scoring:
+  threshold: 0.45 # minimum cosine between a text and its nearest prompt
+  min_margin: 0.03 # the nearest label must beat the next-best label by this much
+  weight_floor: 0.25 # weight at the threshold
+  max_weight: 0.4 # weight cap (hard ceiling 0.4 in code); description rows are further
+  # scaled by templates.yaml description_factor, so only strong description matches surface
+  full_weight_at: 0.65 # cosine at which the weight reaches max_weight
+  min_text_chars: 3 # skip shorter texts (a bare "X" embeds as noise)
+  max_text_chars: 512
+# Run only when the rule layers found no topical category (derivative/* and the pair label
+# describe a coin's context, not its subject, so they do not count as resolving it).
+only_when_unresolved: true
+context_labels:
+  - derivative
+  - crypto_native/paired_ecosystem
+  - tradfi/tokenized_stock
+
+prompts:
+  animal/dog: ["a dog", "a puppy or doggo", "shiba inu dog meme"]
+  animal/cat: ["a cat", "a kitten or kitty", "cat meme"]
+  animal/frog: ["a frog or toad", "a frog meme"]
+  animal/monkey: ["a monkey or ape", "a chimpanzee or gorilla"]
+  animal/hippo: ["a hippo", "a baby pygmy hippopotamus"]
+  animal/squirrel: ["a squirrel", "a chipmunk"]
+  animal/bird: ["a bird", "a parrot, owl, eagle or penguin"]
+  animal/bear_bull: ["a bear or a bull", "bear market and bull market"]
+  animal/fish: ["a fish or sea creature", "a shark, whale, octopus or crab"]
+  animal/other: ["a wild animal", "a farm animal or pet"]
+  meme_template/pepe_wojak_chad: ["pepe the frog, wojak or gigachad meme"]
+  meme_template/brainrot: ["brainrot slang like skibidi, sigma, rizz and gyatt"]
+  meme_template/copypasta: ["an internet copypasta or catchphrase"]
+  meme_template/other: ["an internet meme", "a viral meme image"]
+  ai_agent: ["artificial intelligence", "an autonomous AI agent", "a chatbot or language model"]
+  political: ["politics and elections", "a president or politician", "a political slogan"]
+  celebrity/musician: ["a singer, rapper or musician", "a pop star"]
+  celebrity/athlete: ["a famous athlete or sports star", "football, basketball or boxing"]
+  celebrity/streamer_kol: ["a streamer or online influencer", "a crypto influencer"]
+  celebrity/other: ["a famous person or celebrity", "an actor or actress"]
+  pop_culture: ["a movie, TV show or video game", "a cartoon or fictional character", "anime"]
+  news_event: ["breaking news", "a viral news story", "something that just happened"]
+  food_object_abstract:
+    ["food or a snack", "a drink or meal", "an everyday object", "a feeling or emotion"]
+  regional_language: ["a country or city", "a language community or nationality"]
+  crypto_native/slang: ["crypto slang like wagmi, hodl, wen moon and send it"]
+  crypto_native/pumpfun_meta: ["a joke about pump.fun memecoins and the current meta"]
+  crypto_native/cto: ["a community takeover of an abandoned coin"]
+  crypto_native/utility_claim: ["a token with real utility, a tool or a protocol"]
+  tradfi/stock: ["a listed company and its stock", "stock market shares"]
+  tradfi/index_etf: ["a stock index or ETF", "the S&P 500 or Nasdaq"]
+  humor_crude_offensive: ["toilet humour, farts and poop", "crude or offensive jokes"]
