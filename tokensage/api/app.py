@@ -18,12 +18,26 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from tokensage import __version__, queue
 from tokensage.api import errors
 from tokensage.api.auth import KeyStore, require_admin
+from tokensage.api.routes_admin import router as admin
 from tokensage.api.routes_v1 import router as v1
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.logging import configure_logging
 
 log = structlog.get_logger("api")
+KEY_RELOAD_S = 30.0  # how soon another instance's key changes reach this one
+
+
+async def _reload_keys_forever(app: FastAPI, stop: asyncio.Event) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=KEY_RELOAD_S)
+        except TimeoutError:
+            try:
+                async with app.state.pool.acquire() as conn:
+                    await app.state.keys.reload(conn)
+            except Exception as e:  # noqa: BLE001
+                log.warning("auth.key_reload_failed", error=f"{type(e).__name__}: {e}")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -37,9 +51,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         inline_n = max(1, settings.inline_worker_concurrency) if settings.inline_analyzer else 0
         # API requests share the pool with the inline analyzer's job connections
         app.state.pool = await create_pool(settings.database_url, max_size=5 + inline_n + 1)
+        async with app.state.pool.acquire() as conn:
+            await app.state.keys.reload(conn)
         app.state.waiter = queue.DoneWaiter(app.state.pool)
         await app.state.waiter.start()
         stop = asyncio.Event()
+        key_reloader = asyncio.create_task(_reload_keys_forever(app, stop))
         inline: asyncio.Task[None] | None = None
         if settings.inline_analyzer:
             from tokensage.worker import run_worker
@@ -48,12 +65,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 run_worker(app.state.pool, settings, stop, concurrency=inline_n)
             )
             log.info("inline_analyzer.started")
-        if not settings.api_key_pairs:
+        if not settings.api_key_pairs and not app.state.keys.has_keys:
             log.warning("auth.no_api_keys_configured")
         try:
             yield
         finally:
             stop.set()
+            await key_reloader
             if inline is not None:
                 await inline
             await app.state.waiter.stop()
@@ -131,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(v1)
+    app.include_router(admin)
 
     # Test console: a single static page that drives /v1 from the browser. It carries no
     # secrets; the user pastes an API key, which stays in their browser's localStorage.

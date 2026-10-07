@@ -81,7 +81,7 @@ async def clean_tables(migrated_db: str) -> AsyncIterator[None]:
     conn = await asyncpg.connect(migrated_db)
     try:
         await conn.execute(
-            "truncate job, analysis, token, api_usage, pair_token restart identity cascade"
+            "truncate job, analysis, token, api_usage, api_key, pair_token restart identity cascade"
         )
         yield
     finally:
