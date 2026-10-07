@@ -137,6 +137,14 @@ async def test_full_depth_fills_x_trend_and_caches(
     assert await db.fetchval("select count(*) from lookup_cache") == 2
     assert [t.source for t in a.trend.terms] == ["wikipedia"]
     assert a.trend.terms[0].headline == "Peanut the squirrel story"
+    # 40x its usual views: a strong spike, seen today, on the coin's own name
+    t0 = a.trend.terms[0]
+    assert a.trend.score == t0.score and t0.score is not None and t0.score > 0.9
+    assert t0.seen_at is not None and t0.seen_at.date() == date.today()
+    assert t0.matched_on == "name"
+    # every source reports whether it had data (the Google Trends feed is a 404 here)
+    status = {s.source: s.status for s in a.trend.sources}
+    assert status == {"wikipedia": "ok", "google_trends": "failed", "news": "ok"}
     assert len(fx_calls) == 1
 
     # second full analysis: tweet comes from cache, FxTwitter not called again

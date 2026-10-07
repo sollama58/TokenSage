@@ -363,14 +363,61 @@ class XInfo(_Model):
 
 class TrendTerm(_Model):
     term: str
-    spike: float | None = None
-    source: str
+    spike: float | None = Field(
+        default=None, description="Wikipedia only: the day's views over the usual (median)"
+    )
+    source: str = Field(description="wikipedia, google_trends or news")
     headline: str | None = None
+    score: float | None = Field(
+        default=None,
+        description="Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends "
+        "by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1); halved for "
+        "perennially popular articles",
+    )
+    seen_at: datetime | None = Field(
+        default=None,
+        description="How fresh the hit is: the UTC day of the Wikipedia spike (day "
+        "granularity), when Google Trends first listed the search, or the newest matching "
+        "news headline",
+    )
+    matched_on: str | None = Field(
+        default=None,
+        description="What matched: name, description or x (the coin's own text), referent "
+        "(the referent it resolves to) or alias (an alias of that referent)",
+    )
+    searches: int | None = Field(
+        default=None, description="Google Trends only: Google's approximate search count"
+    )
+
+
+class TrendSource(_Model):
+    source: str = Field(description="wikipedia, google_trends or news")
+    status: Literal["ok", "stale", "failed", "skipped", "unavailable"] = Field(
+        description="ok: the source had current data; stale: only old data (see detail); "
+        "failed: the lookup failed and nothing was cached; skipped: not looked up for this "
+        "coin (news: the name is too generic to search); unavailable: no data loaded at all"
+    )
+    as_of: datetime | None = Field(
+        default=None, description="The newest data the source gave (Wikipedia: its UTC day)"
+    )
+    terms: int | None = Field(
+        default=None,
+        description="Trending terms the source contributed (news: relevant headlines found)",
+    )
+    detail: str | None = None
 
 
 class Trend(_Model):
     matched: bool = False
+    score: float | None = Field(
+        default=None,
+        description="Strength of the strongest matching trend, 0-1 (full depth; 0 when "
+        "nothing matched)",
+    )
     terms: list[TrendTerm] = []
+    sources: list[TrendSource] = Field(
+        default=[], description="Per-source status of the trend lookups (full depth)"
+    )
 
 
 class Flag(_Model):

@@ -268,6 +268,7 @@
             "$ref": "#/components/schemas/Trend",
             "default": {
               "matched": false,
+              "sources": [],
               "terms": []
             }
           },
@@ -2200,6 +2201,27 @@
             "title": "Matched",
             "type": "boolean"
           },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Strength of the strongest matching trend, 0-1 (full depth; 0 when nothing matched)",
+            "title": "Score"
+          },
+          "sources": {
+            "default": [],
+            "description": "Per-source status of the trend lookups (full depth)",
+            "items": {
+              "$ref": "#/components/schemas/TrendSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
           "terms": {
             "default": [],
             "items": {
@@ -2210,6 +2232,70 @@
           }
         },
         "title": "Trend",
+        "type": "object"
+      },
+      "TrendSource": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest data the source gave (Wikipedia: its UTC day)",
+            "title": "As Of"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "source": {
+            "description": "wikipedia, google_trends or news",
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "description": "ok: the source had current data; stale: only old data (see detail); failed: the lookup failed and nothing was cached; skipped: not looked up for this coin (news: the name is too generic to search); unavailable: no data loaded at all",
+            "enum": [
+              "ok",
+              "stale",
+              "failed",
+              "skipped",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "terms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trending terms the source contributed (news: relevant headlines found)",
+            "title": "Terms"
+          }
+        },
+        "required": [
+          "source",
+          "status"
+        ],
+        "title": "TrendSource",
         "type": "object"
       },
       "TrendTerm": {
@@ -2226,7 +2312,57 @@
             ],
             "title": "Headline"
           },
+          "matched_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What matched: name, description or x (the coin's own text), referent (the referent it resolves to) or alias (an alias of that referent)",
+            "title": "Matched On"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1); halved for perennially popular articles",
+            "title": "Score"
+          },
+          "searches": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Google Trends only: Google's approximate search count",
+            "title": "Searches"
+          },
+          "seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How fresh the hit is: the UTC day of the Wikipedia spike (day granularity), when Google Trends first listed the search, or the newest matching news headline",
+            "title": "Seen At"
+          },
           "source": {
+            "description": "wikipedia, google_trends or news",
             "title": "Source",
             "type": "string"
           },
@@ -2239,6 +2375,7 @@
                 "type": "null"
               }
             ],
+            "description": "Wikipedia only: the day's views over the usual (median)",
             "title": "Spike"
           },
           "term": {
