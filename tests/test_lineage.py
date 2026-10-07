@@ -257,7 +257,8 @@ async def test_referent_and_category_waves_count_recent_reads(
     await db.execute("insert into token (mint, created_at) values ('mine', $1)", now)
 
     agg = SimpleNamespace(
-        referent=SimpleNamespace(label="Elon Musk"), categories=[("celebrity/elon", 0.8)]
+        referent=SimpleNamespace(label="Elon Musk", generic=False),
+        categories=[("celebrity/elon", 0.8)],
     )
     out = SimpleNamespace(copy_of=[], lineage=None, agg=agg)
     ctx = SimpleNamespace(rpc=None)

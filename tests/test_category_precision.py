@@ -151,7 +151,8 @@ def test_crypto_native_lands_on_a_specific_sub_label() -> None:
 
 
 def test_crypto_native_summary_names_the_kind() -> None:
-    assert "a coin about a blockchain or established coin" in _run("zCash", "ZCASH").summary
+    # (zCash resolves to the Zcash entity since rules 0.17.0; WBTC is a slang-only chain coin)
+    assert "a coin about a blockchain or established coin" in _run("WBTC", "WBTC").summary
     assert "a launchpad / launch-platform coin" in _run("VOLUMEPAD", "VOLUMEPAD").summary
 
 

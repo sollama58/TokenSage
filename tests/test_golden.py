@@ -40,7 +40,12 @@ def _ctx(case: dict[str, Any]) -> DbContext:
         ctx.originals[mint] = PriorRead(
             categories=list((o.get("categories") or {}).items()),
             referent=ReferentCandidate(
-                ref["label"], ref.get("kind", "other"), None, "analysis", ref["confidence"]
+                ref["label"],
+                ref.get("kind", "other"),
+                None,
+                "analysis",
+                ref["confidence"],
+                generic=bool(ref.get("generic")),
             )
             if ref
             else None,
@@ -114,6 +119,21 @@ def test_golden(case: dict[str, Any]) -> None:
         }
         for w in case["referent_supported_by"]:
             assert w in wheres, f"referent not supported by {w}: {wheres}{ctx}"
+    rr = out.referent_read
+    rctx = f"{ctx}\n  referent_read={rr}"
+    if case.get("referent_null"):
+        assert rr is None, f"unexpected referent{rctx}"
+    if "referent_kind" in case:
+        assert rr is not None and rr.kind == case["referent_kind"], f"referent kind{rctx}"
+    if "referent_generic" in case:
+        assert rr is not None and rr.generic == case["referent_generic"], f"generic{rctx}"
+    if "referent_label" in case:
+        assert rr is not None and rr.label == case["referent_label"], f"label{rctx}"
+    if "referent_confidence_between" in case:
+        lo, hi = case["referent_confidence_between"]
+        assert rr is not None and lo <= rr.confidence <= hi, f"confidence{rctx}"
+    if "referent_inputs" in case:
+        assert rr is not None and rr.supported_by == case["referent_inputs"], f"inputs{rctx}"
     for c in case.get("caveats_include", []):
         assert any(c in cv for cv in out.caveats), f"caveat {c!r} missing: {out.caveats}"
     # every result must be explainable and summarised

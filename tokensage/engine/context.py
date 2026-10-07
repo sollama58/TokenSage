@@ -34,6 +34,8 @@ class ReferentCandidate:
     score: float
     categories: list[str] = field(default_factory=list)
     surface: str | None = None  # the words that matched, when the match came from text
+    # only the kind is known ("frog", an animal): no specific entity was identified
+    generic: bool = False
 
 
 @dataclass

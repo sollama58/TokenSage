@@ -34,7 +34,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.15.0-full"
+RULES_VERSION = "0.17.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -144,6 +144,8 @@ class EngineOutput:
     lineage: lineage_stage.Lineage | None = None
     x_account: xcred.AccountFacts | None = None
     x_credibility: float | None = None
+    # the referent as reported: kind, banded confidence and the inputs behind it
+    referent_read: ReferentRead | None = None
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -1044,6 +1046,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             evidence += emb
             agg = aggregate(evidence, k, symbol_is_name=_symbol_is_name(n))
     _demote_description_only_referent(agg, head)
+    referent_read = read_referent(agg, symbol_is_name, k)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     flags += _lineage_flags(lin, k)
     if pair is not None and pair.meaningful:
@@ -1134,6 +1137,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         trend_hits=trend_hits,
         pair=pair,
         lineage=lin,
+        referent_read=referent_read,
     )
 
 
@@ -1270,6 +1274,7 @@ def _inherit(
             source=f"copy_of:{o.mint}",
             score=round(r.score * factor, 3),
             categories=list(r.categories),
+            generic=r.generic,
         )
         evs.append(
             Ev(
@@ -1283,6 +1288,183 @@ def _inherit(
             )
         )
     return evs
+
+
+# What a referent is when only its kind is known: the top-level theme category -> the
+# reported kind. A child can say more than its parent (crypto slang is a concept, not a
+# project). Relation and context labels (derivative, a regional script, the pair's ecosystem)
+# say nothing about what the coin is.
+_CATEGORY_KIND = {
+    "animal": "animal",
+    "meme_template": "meme",
+    "celebrity": "person",
+    "political": "concept",
+    "pop_culture": "media",
+    "news_event": "event",
+    "food_object_abstract": "object",
+    "crypto_native": "project",
+    "crypto_native/slang": "concept",
+    "crypto_native/cto": "concept",
+    "crypto_native/person": "person",
+    "crypto_native/chain_or_coin": "coin",
+    "crypto_native/company": "organization",
+    "crypto_native/launchpad": "project",
+    "crypto_native/trading": "concept",
+    "crypto_native/tech": "concept",
+    "ai_agent": "project",
+    "tradfi": "organization",
+    "humor_crude_offensive": "concept",
+}
+_THEME_ORDER = [
+    "animal", "celebrity", "meme_template", "pop_culture", "news_event", "political",
+    "ai_agent", "tradfi", "food_object_abstract", "humor_crude_offensive", "crypto_native",
+]  # fmt: skip
+# The generic label when no matched word can stand for the kind.
+_KIND_LABEL = {
+    "animal": "animal",
+    "meme_template": "meme",
+    "celebrity": "celebrity",
+    "political": "politics",
+    "pop_culture": "pop culture",
+    "news_event": "news event",
+    "food_object_abstract": "object",
+    "crypto_native": "crypto project",
+    "crypto_native/slang": "crypto slang",
+    "crypto_native/cto": "community takeover",
+    "crypto_native/person": "crypto figure",
+    "crypto_native/chain_or_coin": "crypto coin",
+    "crypto_native/company": "crypto company",
+    "crypto_native/launchpad": "launchpad",
+    "crypto_native/trading": "crypto trading",
+    "crypto_native/tech": "crypto tech",
+    "ai_agent": "AI agent",
+    "tradfi": "company",
+    "humor_crude_offensive": "crude humour",
+}
+# Themes whose matched word is itself a fair generic label ("frog", "beer", "brainrot").
+_WORD_LABELS = ("animal", "food_object_abstract", "meme_template")
+# Engine and knowledge kinds as reported.
+REFERENT_KINDS = {
+    "famous_animal", "meme", "person", "coin", "event", "concept", "place", "other",
+    "animal", "media", "project", "object", "organization",
+}  # fmt: skip
+
+
+@dataclass
+class ReferentRead:
+    """The referent as reported. `generic`: only the kind is known, the label is a generic
+    word ("frog") and the confidence stays in the kind-only band."""
+
+    label: str
+    kind: str
+    desc: str | None
+    source: str
+    confidence: float
+    supported_by: list[str]
+    generic: bool = False
+
+
+def _theme(agg: Aggregated, floor: float) -> tuple[str, str, float] | None:
+    """The coin's strongest theme that names a kind: (top-level label, best label under it,
+    top-level confidence)."""
+    best: dict[str, tuple[str, float]] = {}
+    for lbl, conf in agg.categories:
+        top = lbl.split("/")[0]
+        if top not in _CATEGORY_KIND or lbl in NO_PARENT or conf < floor:
+            continue
+        if top not in best:
+            best[top] = (lbl, conf)
+        elif lbl != top and best[top][0] == top:
+            best[top] = (lbl, best[top][1])  # the child says which (animal -> animal/frog)
+    if not best:
+        return None
+    # on a tie the subject wins over the setting: a "golden bull" is a bull before it is
+    # crypto slang
+    top = max(best, key=lambda t: (best[t][1], -_THEME_ORDER.index(t)))
+    return top, best[top][0], best[top][1]
+
+
+def _theme_kind(labels: list[str]) -> str | None:
+    for lbl in labels:
+        kind = _CATEGORY_KIND.get(lbl) or _CATEGORY_KIND.get(lbl.split("/")[0])
+        if kind:
+            return kind
+    return None
+
+
+def read_referent(agg: Aggregated, symbol_is_name: bool, k: Knowledge) -> ReferentRead | None:
+    """The reported referent. A named one keeps its label and gets a confidence by how many
+    independent inputs point at it: below 0.45 a weak guess as before, 0.5-0.69 from one
+    input, 0.7+ from two or more. When nothing is named (or only a weak guess under 0.45)
+    but the coin has a theme, the kind alone is reported with a generic label ("frog") at
+    0.3-0.49. Null only when the coin has no readable theme."""
+    floor = float(k.scoring.get("generic_referent_min_category", 0.2))
+    r = agg.referent
+    theme = _theme(agg, floor)
+    weakest = float(k.scoring.get("named_referent_min", 0.45))
+    if r is not None and not r.generic and (r.score >= weakest or theme is None):
+        chans = [
+            channel(ev, symbol_is_name)
+            for ev in agg.evidence
+            if ev.referent is not None and ev.referent.label == r.label
+        ]
+        inputs = list(dict.fromkeys(chans))
+        raw = r.score
+        if raw >= 0.45:
+            lift = min(1.0, (raw - 0.45) / 0.5)
+            raw = 0.7 + 0.27 * lift if len(inputs) >= 2 else 0.5 + 0.19 * lift
+        kind = r.kind if r.kind in REFERENT_KINDS else "other"
+        if kind == "other":
+            kind = _theme_kind(r.categories) or (_CATEGORY_KIND[theme[0]] if theme else "other")
+        elif kind == "concept" and _theme_kind(r.categories) in ("media", "organization"):
+            # a franchise, game or show (Pokémon, Fortnite); a company or exchange (Binance)
+            kind = _theme_kind(r.categories) or kind
+        return ReferentRead(r.label, kind, r.desc, r.source, round(raw, 3), inputs)
+    if r is not None and r.generic:
+        # inherited from the coin this one copies, itself only a kind
+        inputs = list(
+            dict.fromkeys(
+                channel(ev, symbol_is_name)
+                for ev in agg.evidence
+                if ev.referent is not None and ev.referent.label == r.label
+            )
+        )
+        kind = r.kind if r.kind in REFERENT_KINDS else "other"
+        return ReferentRead(
+            r.label, kind, r.desc, r.source, round(min(0.49, r.score), 3), inputs, True
+        )
+    if theme is None:
+        return None
+    top, leaf, conf = theme
+    key = leaf if leaf in _CATEGORY_KIND else top
+    label = _KIND_LABEL.get(key, top)
+    if top == "animal" and leaf != top and not leaf.endswith("/other"):
+        label = leaf.split("/")[1].replace("_", "/")  # animal/bear_bull -> bear/bull
+    if top in _WORD_LABELS:
+        rows = [
+            ev
+            for ev in agg.evidence
+            if ev.surface
+            and (ev.label == leaf or ev.label.split("/")[0] == top)
+            and ev.where in ("name", "symbol", "image", "description")
+        ]
+        # the word behind the chosen label, from the name when it has one
+        rows.sort(key=lambda ev: (ev.label != leaf, ev.where != "name", -ev.weight))
+        if rows and rows[0].surface:
+            label = rows[0].surface
+    inputs = agg.inputs.get(leaf) or agg.inputs.get(top) or []
+    what = _KIND_LABEL.get(key, top)
+    article = "an" if what[0].lower() in "aeio" else "a"
+    return ReferentRead(
+        label=label,
+        kind=_CATEGORY_KIND[key],
+        desc=f"{article} {what} coin by its {' and '.join(inputs) or 'own text'}; "
+        "nothing more specific identified",
+        source=f"category:{leaf}",
+        confidence=round(min(0.49, 0.3 + 0.2 * conf), 3),
+        supported_by=list(inputs),
+        generic=True,
+    )
 
 
 # The quoted / replied-to author is usually the narrative; the posting account is often the

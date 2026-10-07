@@ -15,6 +15,12 @@
 #   category_between                        : {label: [low, high]} confidence range
 #   lineage_kind                            : lineage.kind
 #   referent_supported_by                   : inputs (where) that must support the referent
+#   reported referent (rules 0.17.0: kind-only referents, banded confidence):
+#   referent_kind / referent_label          : the reported kind / exact label
+#   referent_generic                        : true when only the kind is known
+#   referent_confidence_between             : [low, high] reported confidence
+#   referent_inputs                         : the exact supported_by list
+#   referent_null                           : true -> no reported referent at all
 cases:
   # ---------------------------------------------------------------- the famous ones (self)
   - name: dogwifhat
@@ -419,3 +425,124 @@ cases:
     categories_include: [crypto_native/pumpfun_meta]
     categories_exclude: [derivative]
     lineage_kind: original
+  # ---------------------------------------------------------------- kind-only referents
+  # TrenchScanner's missing-referents brief: the kind is plain from the name even when no
+  # specific entity is known, so it is reported with a generic label at 0.3-0.49
+  - name: FROGMAN
+    symbol: FROGMAN
+    referent_kind: animal
+    referent_label: frog
+    referent_generic: true
+    referent_confidence_between: [0.3, 0.49]
+    referent_inputs: [name]
+  - name: PSWORDCAT
+    symbol: PSWORDCAT
+    referent_kind: animal
+    referent_label: cat
+    referent_generic: true
+  - name: TROLLTON
+    symbol: TROLLTON
+    referent_kind: meme
+    referent_label: troll
+    referent_generic: true
+  - name: golden bull               # the bull before the crypto slang
+    symbol: Bullz
+    referent_kind: animal
+    referent_label: bull
+  - name: zCash
+    symbol: ZEC
+    referent: Zcash
+    referent_kind: coin
+    referent_generic: false
+  - name: Etherbum
+    symbol: ETHERBUM
+    referent: Ethereum
+    referent_kind: coin
+  - name: Vortex Launchpad
+    symbol: VLP
+    referent_kind: project
+    referent_generic: true
+    referent_label: launchpad
+  # nothing readable: null stays for coins with no theme at all
+  - name: xqzvbk
+    symbol: XQZ
+    referent_null: true
+  # a named referent from one input sits at 0.5-0.69; two agreeing inputs lift it to 0.7+
+  - name: Moo Deng
+    symbol: HIPPO
+    referent: Moo Deng
+    referent_kind: famous_animal
+    referent_confidence_between: [0.5, 0.69]
+    referent_inputs: [name]
+  - name: Moo Deng
+    symbol: HIPPO
+    description: "the baby pygmy hippo moo deng from Khao Kheow zoo"
+    referent: Moo Deng
+    referent_confidence_between: [0.7, 0.97]
+    referent_inputs: [name, description]
+  # a ticker that spells the name is the name again: one input
+  - name: Pepe
+    symbol: PEPE
+    referent_inputs: [name]
+  # a franchise is media, not a concept
+  - name: Sad pikachu
+    symbol: PIKACHU
+    referent: Pokémon
+    referent_kind: media
+  # a copy whose own name says nothing inherits the original's kind, generic as it was
+  - name: $ZORBLE
+    symbol: ZORBLE
+    same_name: [{mint: OrigZorble111, name: Zorble Frog, symbol: ZORBLE, hours_before: 30}]
+    originals:
+      OrigZorble111:
+        categories: {animal: 0.55, animal/frog: 0.55}
+        referent: {label: frog, kind: animal, confidence: 0.41, generic: true}
+    categories_include: [animal/frog]
+    referent_kind: animal
+    referent_label: frog
+    referent_generic: true
+    referent_inputs: [copy_of]
+    referent_confidence_between: [0.3, 0.49]
+  # a copy of a named original keeps the label, from one input (copy_of)
+  - name: $GLORP
+    symbol: GLORP
+    same_name: [{mint: OrigGlorp1111, name: Glorp the Frog, symbol: GLORP, hours_before: 30}]
+    originals:
+      OrigGlorp1111:
+        categories: {animal: 0.8, animal/frog: 0.8}
+        referent: {label: Glorp (frog meme), kind: meme, confidence: 0.75}
+    referent_kind: meme
+    referent_generic: false
+    referent_inputs: [copy_of]
+    referent_confidence_between: [0.5, 0.69]
+  # crypto_native children (the split in #38) map to referent kinds
+  - name: Satoshi
+    symbol: SATS
+    referent: Satoshi Nakamoto
+    referent_kind: person
+  - name: Solana Summer
+    symbol: SOLS
+    referent: Solana
+    referent_kind: coin
+  - name: Coinbase
+    symbol: COIN
+    referent: Coinbase
+    referent_kind: organization
+  - name: Microsoft
+    symbol: MSFT
+    referent_kind: organization
+  - name: Voltpad Launchpad
+    symbol: VPAD
+    referent_kind: project
+    referent_label: launchpad
+    referent_generic: true
+  - name: Airdrop Hunter
+    symbol: DROP
+    referent_kind: concept
+    referent_label: crypto tech
+    referent_generic: true
+  - name: Floor Price
+    symbol: FLOOR
+    referent_kind: concept
+    referent_label: crypto trading
+    referent_generic: true

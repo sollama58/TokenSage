@@ -124,7 +124,8 @@ entities:
   - {label: Bitcoin, kind: coin, aliases: [bitcoin, btc], categories: [crypto_native/chain_or_coin], desc: "bitcoin", popularity: 0.5}
   - {label: Satoshi Nakamoto, kind: person, aliases: [satoshi, satoshi nakamoto, nakamoto], categories: [crypto_native/person], desc: "Bitcoin's pseudonymous creator", popularity: 0.5}
   - {label: Robinhood Chain, kind: coin, aliases: [robinhood chain], categories: [crypto_native/chain_or_coin], desc: "Robinhood's blockchain", popularity: 0.4}
-  - {label: Ethereum, kind: coin, aliases: [ethereum, eth], categories: [crypto_native/chain_or_coin], desc: "ethereum", popularity: 0.4}
+  - {label: Ethereum, kind: coin, aliases: [ethereum, eth, ether], categories: [crypto_native/chain_or_coin], desc: "ethereum", popularity: 0.4}
+  - {label: Zcash, kind: coin, aliases: [zcash], categories: [crypto_native/chain_or_coin], desc: "privacy coin", popularity: 0.4}
   - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/chain_or_coin], desc: "solana", popularity: 0.4}
   - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/company, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
   - {label: Coinbase, kind: concept, aliases: [coinbase], categories: [crypto_native/company, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
