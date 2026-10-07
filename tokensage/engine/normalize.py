@@ -330,14 +330,14 @@ def normalize(
     # description
     d1 = unicodedata.normalize("NFKC", description)
     _, d_emoji_kws, d2 = _emoji_keywords(d1, k)
-    for w in d_emoji_kws:
-        if w not in emoji_kws:
-            emoji_kws.append(w)
     d3 = _ZW.sub("", d2)
     dollars = [m.upper() for m in _DOLLAR.findall(d3)]
     d3, _ = translate_han(d3, k)
     d_fold = _fold(d3).lower()
-    desc_clean = re.sub(r"\s+", " ", _PUNCT_TO_SPACE.sub(" ", d_fold)).strip()
+    # a sentence's full stop is not part of its last word ("your portfolio agent."); dots
+    # inside a word (pump.fun, v2.0) stay
+    d_words = re.sub(r"\.+(?=\s|$)", " ", _PUNCT_TO_SPACE.sub(" ", d_fold))
+    desc_clean = re.sub(r"\s+", " ", d_words).strip()
     desc_tokens = desc_clean.split()[:400]
 
     return Normalized(
@@ -361,4 +361,5 @@ def normalize(
         leet_decoded=leet_decoded,
         cjk_gloss=cjk_gloss,
         name_pinyin=name_pinyin,
+        desc_emoji_keywords=d_emoji_kws,
     )

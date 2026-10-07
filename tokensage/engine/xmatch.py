@@ -155,7 +155,12 @@ def match_name(n: Normalized, text: str | None) -> FieldMatch:
             0.9, "normalized", f"'{n.name_compact}' appears in the post once normalised"
         )
     informative = [t for t in n.name_tokens if len(t) > 1 and t not in NAME_STOP]
-    post_words = set(pn.name_tokens) | set(pn.emoji_keywords) | set(pn.desc_tokens)
+    post_words = (
+        set(pn.name_tokens)
+        | set(pn.emoji_keywords)
+        | set(pn.desc_emoji_keywords)
+        | set(pn.desc_tokens)
+    )
     if informative:
         hits = [t for t in informative if t in post_words]
         if hits:

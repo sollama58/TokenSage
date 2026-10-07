@@ -112,7 +112,7 @@ def test_engine_uses_guesses_only_for_unresolved_tokens() -> None:
 def test_engine_embeds_description_and_tweet(monkeypatch: pytest.MonkeyPatch) -> None:
     stub = StubEncoder()
     out = run_basic(
-        EngineInput("m", "Plorp", "PLORP", "the first quuxle on chain", None, None, encoder=stub)
+        EngineInput("m", "Plorp", "PLORP", "the first quuxle in town", None, None, encoder=stub)
     )
     rows = [e for e in out.evidence if e.kind == "embedding"]
     assert [(e.where, e.label) for e in rows] == [("description", "ai_agent")]

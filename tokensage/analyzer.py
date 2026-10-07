@@ -721,7 +721,12 @@ def build_document(
                 wave=ex.wave,
             )
         categories = [
-            Category(label=lbl, confidence=s, wave_1h=ex.category_waves.get(lbl))
+            Category(
+                label=lbl,
+                confidence=s,
+                inputs=agg.inputs.get(lbl),
+                wave_1h=ex.category_waves.get(lbl),
+            )
             for lbl, s in agg.categories
         ]
         copy_of = [
@@ -932,7 +937,7 @@ def _normalized_view(out: EngineOutput | None) -> NormalizedOut:
         ticker=n.ticker or None,
         ticker_base=n.ticker_base or None,
         markers=[m.code for m in n.markers],
-        emoji_keywords=n.emoji_keywords,
+        emoji_keywords=list(dict.fromkeys([*n.emoji_keywords, *n.desc_emoji_keywords])),
         obfuscation=n.obfuscation,
     )
 

@@ -203,7 +203,8 @@ cases:
     referent: Truth Terminal
   - name: DeepSeek
     symbol: DEEPSEEK
-    categories_include: [ai_agent, news_event]
+    categories_include: [ai_agent]
+    categories_exclude: [news_event]  # the Jan 2025 shock is not news now (no trend hit)
     referent: DeepSeek
   - name: Sentient AGI
     symbol: AGI
@@ -227,7 +228,7 @@ cases:
     referent: Biden
   - name: Luigi Mangione
     symbol: LUIGI
-    categories_include: [news_event]
+    categories_exclude: [news_event]  # a 2024 story; news only with a trend or headline hit
     referent: Luigi Mangione
   - name: Kanye West
     symbol: YE
@@ -301,7 +302,8 @@ cases:
   - name: Super Bowl Sunday
     symbol: SBS
     ticker_method: acronym
-    categories_include: [news_event]
+    categories_exclude: [news_event]  # an annual event is not news without a trend hit
+    referent: Super Bowl
   - name: Pizza Time
     symbol: PIZZA
     categories_include: [food_object_abstract]

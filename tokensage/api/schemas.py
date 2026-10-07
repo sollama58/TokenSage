@@ -139,6 +139,12 @@ class Referent(_Model):
 class Category(_Model):
     label: str
     confidence: float = Field(ge=0, le=1)
+    inputs: list[str] | None = Field(
+        default=None,
+        description="The independent inputs that agree on this label, strongest first: name, "
+        "symbol, description, image, x, trend, db, copy_of. A ticker that spells the name "
+        "counts as the name. More agreeing inputs make the label more trustworthy",
+    )
     wave_1h: int | None = Field(
         default=None,
         description="Coins TokenSage analysed in the last hour that carry this label (top-level "
