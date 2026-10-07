@@ -138,6 +138,15 @@ terms:
   sentient: {meaning: "sentient AI lore", categories: [ai_agent], weight: 0.5}
   robot: {meaning: "robot", categories: [ai_agent], weight: 0.4}
   singularity: {meaning: "AI singularity", categories: [ai_agent], weight: 0.6}
+  superintelligence: {meaning: "artificial superintelligence", categories: [ai_agent], weight: 0.8}
+  superintelligent: {meaning: "artificial superintelligence", categories: [ai_agent], weight: 0.8}
+  "super intelligence": {meaning: "artificial superintelligence", categories: [ai_agent], weight: 0.8}
+  "artificial superintelligence": {meaning: "artificial superintelligence", categories: [ai_agent], weight: 0.9}
+  "artificial intelligence": {meaning: "artificial intelligence", categories: [ai_agent], weight: 0.8}
+  "artificial general intelligence": {meaning: "artificial general intelligence", categories: [ai_agent], weight: 0.9}
+  asi: {meaning: "artificial superintelligence", categories: [ai_agent], weight: 0.6}
+  agentic: {meaning: "agentic AI", categories: [ai_agent], weight: 0.6}
+  "ai agent": {meaning: "AI agent", categories: [ai_agent], weight: 0.8}
   # --- political
   maga: {meaning: "Make America Great Again", categories: [political], weight: 0.9}
   potus: {meaning: "President of the United States", categories: [political], weight: 0.8}

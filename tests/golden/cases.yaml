@@ -203,6 +203,15 @@ cases:
   - name: Sentient AGI
     symbol: AGI
     categories_include: [ai_agent]
+  - name: Superintelligence
+    symbol: SI
+    categories_include: [ai_agent]
+  - name: Artificial Super Intelligence
+    symbol: ASI
+    categories_include: [ai_agent]
+  - name: Agentic
+    symbol: AGENTIC
+    categories_include: [ai_agent]
   # ---------------------------------------------------------------- political / celebrity
   - name: MAGA
     symbol: MAGA
