@@ -29,7 +29,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.12.0-full"
+RULES_VERSION = "0.13.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -61,6 +61,8 @@ class DbContext:
     gazetteer: Gazetteer | None = None
     # name-word counts around the launch, for the current-meta signal (engine/meta.py)
     meta_counts: meta.MetaCounts | None = None
+    # the day's most-traded pump.fun tokens (top_volume table)
+    top_volume: list[meta.TopVolume] = field(default_factory=list)
 
 
 @dataclass
@@ -717,6 +719,9 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         k,
         is_famous=is_famous,
         has_referent=any(e.referent is not None for e in evidence),
+        words=meta.candidate_words(n, k),
+        compact=n.name_compact,
+        top=inp.ctx.top_volume,
     )
     evidence += mt.evidence
     if mt.rank is not None and mt.rank.rank > 1:

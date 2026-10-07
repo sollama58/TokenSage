@@ -58,7 +58,7 @@ from tokensage.config import Settings
 from tokensage.engine import embed, meta, pairing, wikilookup, xmatch, xsignals
 from tokensage.engine import image as image_stage
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
-from tokensage.engine.meta import MetaCounts, MetaWord
+from tokensage.engine.meta import MetaCounts, MetaWord, TopVolume
 from tokensage.engine.pipeline import (
     RULES_VERSION,
     DbContext,
@@ -265,6 +265,25 @@ async def _db_context(
             log.info("lookups.failed", error=str(e)[:120])
     if meta_words:
         dbc.meta_counts = await _meta_counts(conn, r, meta_words, **meta_cfg)
+    # the most-traded tokens of the snapshot nearest this launch (a day either side)
+    rows = await conn.fetch(
+        """select rank, mint, name, symbol, volume_usd from top_volume
+           where day = (select max(day) from top_volume
+                        where day between coalesce($1, now())::date - 1
+                                      and coalesce($1, now())::date + 1)
+           order by rank""",
+        r.created_at,
+    )
+    dbc.top_volume = [
+        TopVolume(
+            row["rank"],
+            row["mint"],
+            row["name"] or "",
+            row["symbol"] or "",
+            row["volume_usd"] or 0.0,
+        )
+        for row in rows
+    ]
     dbc.gazetteer = await gazetteer_db.current(conn)
     # known coins from the database (seed lives in data/, cron adds more)
     rows = await conn.fetch(

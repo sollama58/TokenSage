@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.knowledge import Knowledge
+from tokensage.engine.segment import common_words
 
 LABEL = "crypto_native/pumpfun_meta"
 
@@ -49,6 +50,20 @@ class MetaCounts:
     recent_total: int = 0  # all tokens launched within the window
     history_total: int = 0  # all tokens over the history (window included)
     words: list[MetaWord] = field(default_factory=list)
+
+
+@dataclass
+class TopVolume:
+    """One of the day's most-traded pump.fun tokens (top_volume table, daily cron)."""
+
+    rank: int  # 1 = the most traded
+    mint: str
+    name: str
+    symbol: str
+    volume_usd: float
+
+    def tag(self) -> str:
+        return f"${self.symbol}" if self.symbol else f"'{self.name}'"
 
 
 @dataclass
@@ -164,18 +179,40 @@ def assess(
     *,
     is_famous: bool,
     has_referent: bool,
+    words: Sequence[str] = (),
+    compact: str = "",
+    top: Sequence[TopVolume] = (),
 ) -> MetaResult:
     """The meta evidence, copycat rank and summary clause for one token.
 
     is_famous: the token is an established coin itself; its clones are not a new meta.
     has_referent: some other stage already names what the coin is about; the meta then
-    adds its category but not a referent of its own."""
+    adds its category but not a referent of its own.
+    words / compact: candidate_words() and the compact name, matched against `top`, the
+    day's most-traded tokens."""
     cfg = config(k)
     window = int(cfg.get("window_hours", 24))
     out = MetaResult()
     out.rank = copy_rank(mint, created_at, same_name, window)
     if is_famous:
         return out
+    _corpus(out, name, ticker, counts, k, has_referent)
+    has_ref = has_referent or any(e.referent is not None for e in out.evidence)
+    _top_volume(out, mint, name, ticker, words, compact, top, k, has_ref)
+    return out
+
+
+def _corpus(
+    out: MetaResult,
+    name: str | None,
+    ticker: str | None,
+    counts: MetaCounts | None,
+    k: Knowledge,
+    has_referent: bool,
+) -> None:
+    """The launch-count meta: this name launched many times, or a word of it spiking."""
+    cfg = config(k)
+    window = int(cfg.get("window_hours", 24))
     label_name = (name or "").strip() or (f"${ticker}" if ticker else "")
     what = f"${ticker}" if ticker else f"'{label_name}'"
 
@@ -188,9 +225,10 @@ def assess(
             f"this is the {_ordinal(r.rank)}"
         )
         desc = f"launched {r.of} times within {window} h"
-        out.evidence.append(_ev(label_name, weight, detail, desc, "name", has_referent, cfg))
+        score = float(cfg.get("referent_score_name", 0.5))
+        out.evidence.append(_ev(label_name, weight, detail, desc, "name", has_referent, score))
         out.context.append(f"{r.phrase(what)} (a current meta)")
-        return out
+        return
 
     hot = hot_word(counts, k)
     if hot is not None:
@@ -205,13 +243,93 @@ def assess(
             f"{'over 100' if lift > 100 else f'{lift:.0f}'}x its usual share over the last "
             f"{int(cfg.get('history_days', 90))} d"
         )
-        # the word as the name writes it ("Sahur", not "sahur"), when it is spelled out there
-        m = re.search(rf"(?<![^\W_]){re.escape(w.word)}(?![^\W_])", name or "", re.IGNORECASE)
-        word = m.group(0) if m else w.word
+        word = _as_written(w.word, name)
         desc = f"in {w.recent} coin names launched within {window} h"
-        out.evidence.append(_ev(word, weight, detail, desc, "word", has_referent, cfg))
+        score = float(cfg.get("referent_score_word", 0.4))
+        out.evidence.append(_ev(word, weight, detail, desc, "word", has_referent, score))
         out.context.append(f"'{word}' is a current meta ({w.recent} coins in {window} h)")
-    return out
+
+
+def _as_written(word: str, name: str | None) -> str:
+    """The word as the name writes it ("Sahur", not "sahur"), when it is spelled out there."""
+    m = re.search(rf"(?<![^\W_]){re.escape(word)}(?![^\W_])", name or "", re.IGNORECASE)
+    return m.group(0) if m else word
+
+
+def _compact(s: str) -> str:
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def _usd(v: float) -> str:
+    return f"${v / 1e6:.1f}M" if v >= 1e6 else f"${v / 1e3:.0f}k"
+
+
+def _top_volume(
+    out: MetaResult,
+    mint: str,
+    name: str | None,
+    ticker: str | None,
+    words: Sequence[str],
+    compact: str,
+    top: Sequence[TopVolume],
+    k: Knowledge,
+    has_referent: bool,
+) -> None:
+    """The day's most-traded tokens are the meta too: a coin that is one of them, shares a
+    name or ticker with one, or shares a name word with one, rides it."""
+    if not top:
+        return
+    tv = config(k).get("top_volume") or {}
+    ranked = sorted(top, key=lambda t: t.rank)
+    of = len(ranked)
+    me = next((t for t in ranked if t.mint == mint), None)
+    if me is not None:
+        detail = f"#{me.rank} of the top {of} pump.fun coins by 24 h volume ({_usd(me.volume_usd)})"
+        weight = float(tv.get("self_weight", 0.5))
+        out.evidence.append(Ev("meta", LABEL, weight, detail, "meta:top:self", "db"))
+        out.context.append(f"#{me.rank} by 24 h trading volume on pump.fun")
+        return
+    t_up = (ticker or "").upper()
+    for t in ranked:
+        same_ticker = len(t_up) >= 3 and t.symbol == t_up
+        same_name = bool(compact) and _compact(t.name) == compact
+        if t.mint == mint or not (same_ticker or same_name):
+            continue
+        what = "name" if same_name else "ticker"
+        detail = (
+            f"shares its {what} with {t.tag()} {t.name}, #{t.rank} of the top {of} pump.fun "
+            f"coins by 24 h volume ({_usd(t.volume_usd)})"
+        )
+        subject = t.name or t.tag()
+        desc = f"#{t.rank} by 24 h trading volume on pump.fun"
+        score = float(tv.get("referent_score_name", 0.5))
+        weight = float(tv.get("name_weight", 0.6))
+        out.evidence.append(_ev(subject, weight, detail, desc, "top", has_referent, score))
+        out.context.append(f"shares its {what} with {t.tag()}, #{t.rank} by trading volume today")
+        return
+    # an everyday word ("cat" in a top "Knight Cat") is not what the coin shares with it
+    everyday = common_words(k)
+    words = [w for w in words if w not in everyday]
+    if not words:
+        return
+    for t in ranked:
+        if t.mint == mint:
+            continue
+        theirs = set(re.findall(r"[a-z0-9]+", t.name.lower())) | {t.symbol.lower()}
+        common = next((w for w in words if w in theirs), None)
+        if common is None:
+            continue
+        word = _as_written(common, name)
+        detail = (
+            f"'{word}' is also in {t.tag()} {t.name}, #{t.rank} of the top {of} pump.fun coins "
+            f"by 24 h volume ({_usd(t.volume_usd)})"
+        )
+        desc = f"in {t.tag()}, #{t.rank} by 24 h trading volume on pump.fun"
+        score = float(tv.get("referent_score_word", 0.4))
+        weight = float(tv.get("word_weight", 0.45))
+        out.evidence.append(_ev(word, weight, detail, desc, "top", has_referent, score))
+        out.context.append(f"'{word}' is in {t.tag()}, #{t.rank} by trading volume today")
+        return
 
 
 def _ev(
@@ -221,11 +339,10 @@ def _ev(
     desc: str,
     scope: str,
     has_referent: bool,
-    cfg: dict[str, Any],
+    score: float,
 ) -> Ev:
     if has_referent:
         return Ev("meta", LABEL, weight, detail, f"meta:{scope}:{subject.lower()}", "db")
-    score = float(cfg.get(f"referent_score_{scope}", 0.4))
     ref = ReferentCandidate(
         label=f"current pump.fun meta: {subject}",
         kind="meme",

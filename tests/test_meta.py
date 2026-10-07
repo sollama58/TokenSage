@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import asyncpg
 import httpx
 import pytest
+import respx
 
 from tests.conftest import needs_db
 from tokensage.engine import meta
@@ -205,3 +206,164 @@ async def test_db_context_counts_namesakes_and_words_around_the_launch(
     words = {w.word: w for w in dbc.meta_counts.words}
     assert (words["sahur"].recent, words["sahur"].total) == (9, 69)
     assert dbc.meta_counts.recent_total == 10 and dbc.meta_counts.history_total == 70
+
+
+# ----------------------------------------------------------------- the day's top tokens by volume
+
+
+def _top(*rows: tuple[str, str, str]) -> list[meta.TopVolume]:
+    return [
+        meta.TopVolume(i, mint, name, sym, 30e6 - i * 1e6)
+        for i, (mint, name, sym) in enumerate(rows, 1)
+    ]
+
+
+TOP = _top(
+    ("phub1", "phubber", "PHUBBER"), ("munk1", "winmunk", "MUNK"), ("chonk1", "Le Chonk", "CHONK")
+)
+
+
+def test_sharing_a_name_with_a_top_token_rides_the_days_meta() -> None:
+    out = _run("Le Chonk", "LCHONK", DbContext(top_volume=TOP))
+    assert dict(out.agg.categories).get("crypto_native/pumpfun_meta", 0) >= 0.5
+    assert out.agg.referent is not None
+    assert out.agg.referent.label == "current pump.fun meta: Le Chonk"
+    assert "#3 by 24 h trading volume" in (out.agg.referent.desc or "")
+    assert "shares its name with $CHONK, #3 by trading volume today" in out.summary
+    # the ticker alone is enough
+    out = _run("Munk Of The Day", "MUNK", DbContext(top_volume=TOP))
+    assert "shares its ticker with $MUNK" in out.summary
+
+
+def test_a_name_word_shared_with_a_top_token_is_weaker() -> None:
+    out = _run("Chonk Cat Zorbo", "CHZ", DbContext(top_volume=TOP))
+    cats = dict(out.agg.categories)
+    assert 0.3 <= cats.get("crypto_native/pumpfun_meta", 0) < 0.6
+    assert "'Chonk' is in $CHONK, #3 by trading volume today" in out.summary
+
+
+def test_a_top_token_itself_is_noted_but_not_its_own_referent() -> None:
+    out = run_basic(
+        EngineInput("munk1", "winmunk", "MUNK", None, None, NOW, ctx=DbContext(top_volume=TOP))
+    )
+    assert "#2 by 24 h trading volume on pump.fun" in out.summary
+    assert out.agg.referent is None or "meta" not in out.agg.referent.label
+
+
+def test_no_match_and_short_tickers_add_nothing() -> None:
+    top = _top(("up1", "Uncle Pussy", "UP"))
+    out = _run("Up Only", "UP", DbContext(top_volume=top))  # a 2-letter ticker is too generic
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+    out = _run("Zorbo", "ZORBO", DbContext(top_volume=TOP))
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+    # an everyday word shared with a top token is not riding it
+    top = _top(("kc1", "Knight Cat", "KCAT"))
+    out = _run("Lucky Cat", "LCAT", DbContext(top_volume=top))
+    assert "crypto_native/pumpfun_meta" not in dict(out.agg.categories)
+
+
+def test_a_launch_count_meta_keeps_the_referent_and_the_top_match_adds_context() -> None:
+    ctx = DbContext(
+        same_name=_namesakes([0.5 * i for i in range(1, 10)], "Le Chonk", "LCHONK"), top_volume=TOP
+    )
+    out = _run("Le Chonk", "LCHONK", ctx)
+    assert out.agg.referent is not None
+    assert out.agg.referent.label == "current pump.fun meta: Le Chonk"
+    assert sum(1 for e in out.evidence if e.referent is not None) == 1
+    assert "(a current meta)" in out.summary and "#3 by trading volume today" in out.summary
+
+
+def _gt_page(*pools: tuple[str, str, str, float]) -> dict:  # type: ignore[type-arg]
+    return {
+        "data": [
+            {
+                "type": "pool",
+                "attributes": {"volume_usd": {"h24": str(vol)}},
+                "relationships": {"base_token": {"data": {"id": f"solana_{mint}"}}},
+            }
+            for mint, _, _, vol in pools
+        ],
+        "included": [
+            {
+                "id": f"solana_{mint}",
+                "type": "token",
+                "attributes": {"address": mint, "name": n, "symbol": s},
+            }
+            for mint, n, s, _ in pools
+        ],
+    }
+
+
+@respx.mock
+async def test_geckoterminal_top_tokens_merge_pools_and_skip_majors() -> None:
+    from tokensage.sources import geckoterminal
+
+    respx.get(url__regex=r".*/dexes/pumpswap/pools.*").mock(
+        return_value=httpx.Response(
+            200,
+            json=_gt_page(
+                ("A", "alpha", "ALPHA", 10e6),
+                ("So11111111111111111111111111111111111111112", "Wrapped SOL", "SOL", 99e6),
+                ("B", "beta", "BETA", 8e6),
+            ),
+        )
+    )
+    respx.get(url__regex=r".*/dexes/pump-fun/pools.*").mock(
+        side_effect=[
+            httpx.Response(
+                200, json=_gt_page(("B", "beta", "BETA", 5e6), ("C", "gamma", "GAMMA", 1e6))
+            ),
+            httpx.Response(429),
+        ]
+    )
+    async with httpx.AsyncClient() as http:
+        top = await geckoterminal.top_tokens(http, ["pumpswap", "pump-fun"], 1, 2, pause_s=0)
+        assert top is not None
+        assert [(t.mint, t.volume_usd, t.dex) for t in top] == [
+            ("B", 13e6, "pumpswap"),
+            ("A", 10e6, "pumpswap"),
+        ]
+        # every page failing: None, so yesterday's list stays
+        assert await geckoterminal.top_tokens(http, ["pump-fun"], 1, 25, pause_s=0) is None
+
+
+@needs_db
+async def test_refresh_top_volume_stores_todays_snapshot_and_the_analyzer_reads_it(
+    db: asyncpg.Connection,
+    settings,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tokensage import analyzer
+    from tokensage.jobs import knowledge as kjob
+    from tokensage.sources import geckoterminal
+
+    async def fake_top(*_a, **_k):  # type: ignore[no-untyped-def]
+        return [
+            geckoterminal.TopToken("chonk1", "Le Chonk", "CHONK", 25e6, "pumpswap"),
+            geckoterminal.TopToken("munk1", "winmunk", "MUNK", 20e6, "pump-fun"),
+        ]
+
+    monkeypatch.setattr(geckoterminal, "top_tokens", fake_top)
+    await db.execute(
+        "insert into top_volume (day, rank, mint) values (current_date - 400, 1, 'ancient')"
+    )
+    async with httpx.AsyncClient() as http:
+        res = await kjob.refresh_top_volume(db, http, pause_s=0)
+        assert res == {"stored": 2, "pruned": 1}
+        assert (await kjob.refresh_top_volume(db, http, pause_s=0))[
+            "stored"
+        ] == 2  # rerun: no dupes
+    assert await db.fetchval("select count(*) from top_volume") == 2
+
+    def refuse(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as http:
+        ctx = SimpleNamespace(settings=settings, http=http)
+        r = SimpleNamespace(mint="mine", created_at=datetime.now(UTC), creator=None)
+        dbc = await analyzer._db_context(db, ctx, r, None, None, "", "", [])  # type: ignore[arg-type]
+        assert [(t.rank, t.symbol) for t in dbc.top_volume] == [(1, "CHONK"), (2, "MUNK")]
+        # a token launched long before any snapshot gets none
+        r = SimpleNamespace(mint="mine", created_at=NOW - timedelta(days=30), creator=None)
+        dbc = await analyzer._db_context(db, ctx, r, None, None, "", "", [])  # type: ignore[arg-type]
+        assert dbc.top_volume == []
