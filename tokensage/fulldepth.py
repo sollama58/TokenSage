@@ -260,13 +260,15 @@ async def trend_index(conn: asyncpg.Connection) -> trends.TrendIndex:
 
 
 async def news_for(
-    conn: asyncpg.Connection, http: httpx.AsyncClient, term: str
+    conn: asyncpg.Connection, http: httpx.AsyncClient, term: str, exact: bool = False
 ) -> list[dict[str, Any]] | None:
-    key = f"gnews:{term.lower()}"
+    """Recent Google News headlines for a term (cached an hour). exact: search the quoted
+    phrase, so "le chonk" does not return stories about "le" and "chonk" separately."""
+    key = f"gnews:{'q:' if exact else ''}{term.lower()}"
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and datetime.now(UTC) - row["fetched_at"] < NEWS_TTL:
         return list(row["value"])
-    heads = await gnews.search(http, term)
+    heads = await gnews.search(http, f'"{term}"' if exact else term)
     if heads is None:
         return list(row["value"]) if row else None
     value = [{"title": h.title, "source": h.source, "published": h.published} for h in heads]

@@ -126,7 +126,11 @@ async def test_full_depth_fills_x_trend_and_caches(
     # caches populated
     assert await db.fetchval("select status from x_tweet where tweet_id=$1", TID) == "ok"
     assert await db.fetchval("select count(*) from x_profile") == 1
-    assert await db.fetchval("select count(*) from lookup_cache") == 1
+    # one news check for the trend hit, one for the name ("Peanut the Squirrel": one headline
+    # only, so not "in the news" by itself)
+    assert await db.fetchval("select count(*) from lookup_cache") == 2
+    assert [t.source for t in a.trend.terms] == ["wikipedia"]
+    assert a.trend.terms[0].headline == "Peanut the squirrel story"
     assert len(fx_calls) == 1
 
     # second full analysis: tweet comes from cache, FxTwitter not called again

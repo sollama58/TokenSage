@@ -55,7 +55,7 @@ from tokensage.api.schemas import (
     XMatch as XMatchOut,
 )
 from tokensage.config import Settings
-from tokensage.engine import embed, meta, pairing, wikilookup, xmatch, xsignals
+from tokensage.engine import embed, meta, pairing, trends, wikilookup, xmatch, xsignals
 from tokensage.engine import image as image_stage
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.meta import MetaCounts, MetaWord, TopVolume
@@ -73,7 +73,7 @@ from tokensage.resolve import metadata as md
 from tokensage.resolve import pair as pair_lookup
 from tokensage.resolve.resolver import Resolved, ResolveError, resolve
 from tokensage.resolve.rpc import SolanaRpc
-from tokensage.sources import lookups
+from tokensage.sources import gnews, lookups
 
 log = structlog.get_logger("analyzer")
 
@@ -655,7 +655,12 @@ def build_document(
             doc_trend = TrendOut(
                 matched=True,
                 terms=[
-                    TrendTermOut(term=h.term.term, spike=h.term.spike, source=h.term.source)
+                    TrendTermOut(
+                        term=h.term.term,
+                        spike=None if h.term.source == "news" else h.term.spike,
+                        source=h.term.source,
+                        headline=h.headline,
+                    )
                     for h in out.trend_hits
                 ],
             )
@@ -1049,6 +1054,7 @@ async def analyze(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
         )
         inp.wiki_refs = await _wiki_refs(conn, ctx, inp)
+        inp.news_hits = await _name_news(conn, ctx, inp)
         # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
         # worker's other concurrent jobs keep making network progress meanwhile.
         out = await asyncio.to_thread(run_full, inp)
@@ -1141,14 +1147,37 @@ async def _wiki_refs(
     return refs
 
 
+async def _name_news(
+    conn: asyncpg.Connection, ctx: Context, inp: EngineInput
+) -> list[trends.TrendHit]:
+    """Search Google News for the coin's name (when it is specific enough to search): a coin
+    named after a story that broke today is "in the news" long before, or without ever, its
+    subject reaching Wikipedia's daily top 1000."""
+    phrase = gnews.name_query(inp.name)
+    if phrase is None:
+        return []
+    try:
+        heads = await fulldepth.news_for(conn, ctx.http, phrase, exact=True)
+    except Exception as e:  # noqa: BLE001 - an optional enrichment
+        log.info("news.lookup_failed", error=str(e)[:120])
+        return []
+    if not heads:
+        return []
+    hit = trends.news_hit(phrase, gnews.relevant(heads, phrase, inp.symbol))
+    return [hit] if hit else []
+
+
 async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:
-    """Confirm the top trend hits against Google News and surface headline counts."""
-    hits = sorted(out.trend_hits, key=lambda h: -h.term.spike)[: fulldepth.MAX_NEWS_LOOKUPS]
+    """Confirm the top Wikipedia trend hits against Google News: a caveat with the headline
+    count, and the first headline on the hit (trend.terms[].headline)."""
+    wiki = [h for h in out.trend_hits if h.term.source != "news"]
+    hits = sorted(wiki, key=lambda h: -h.term.spike)[: fulldepth.MAX_NEWS_LOOKUPS]
     for h in hits:
         heads = await fulldepth.news_for(conn, ctx.http, h.term.term)
         if heads is None:
             continue
         if heads:
+            h.headline = str(heads[0]["title"])[:200]
             out.caveats.append(
                 f"news check: {len(heads)} recent headline(s) for '{h.term.term}', e.g. "
                 f'"{heads[0]["title"][:90]}"'

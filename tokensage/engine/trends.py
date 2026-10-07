@@ -18,8 +18,8 @@ MIN_TERM_LEN = 4
 class TrendTerm:
     term: str  # article title, spaces not underscores
     spike: float  # views / prior median
-    views: int
-    source: str = "wikipedia"
+    views: int  # for a news hit: the number of matching headlines
+    source: str = "wikipedia"  # or "news": the coin's name is in recent headlines
 
 
 @dataclass
@@ -27,6 +27,7 @@ class TrendHit:
     term: TrendTerm
     surface: str
     where: str
+    headline: str | None = None  # a recent news headline about it, when one was found
 
 
 class TrendIndex:
@@ -92,6 +93,9 @@ def evidence(hits: list[TrendHit], index: TrendIndex) -> list[Ev]:
     evs: list[Ev] = []
     for h in hits:
         t = h.term
+        if t.source == "news":
+            evs += news_evidence(h)
+            continue
         if t.spike >= 10:
             w = 0.6
         elif t.spike >= 3:
@@ -136,4 +140,60 @@ def evidence(hits: list[TrendHit], index: TrendIndex) -> list[Ev]:
                     referent=ref,
                 )
             )
+    return evs
+
+
+MIN_NEWS_HEADLINES = 2  # from at least two outlets: one story is not "in the news"
+
+
+def news_hit(phrase: str, heads: list[dict]) -> TrendHit | None:
+    """A trend hit for a coin name found in recent headlines, or None when too few outlets
+    carry it. heads: the relevant headlines (gnews.relevant) as dicts."""
+    outlets = {(h.get("source") or h.get("title") or "").lower() for h in heads}
+    if len(heads) < MIN_NEWS_HEADLINES or len(outlets) < MIN_NEWS_HEADLINES:
+        return None
+    return TrendHit(
+        TrendTerm(phrase, 0.0, len(heads), source="news"),
+        phrase.lower(),
+        "name",
+        headline=str(heads[0].get("title") or "")[:200] or None,
+    )
+
+
+def news_evidence(h: TrendHit) -> list[Ev]:
+    """The coin's name is in the news: news_event evidence, and a referent for the story when
+    several outlets carry it (a model launch, a viral animal, a court case that broke today)."""
+    n = h.term.views
+    eg = f', e.g. "{h.headline[:90]}"' if h.headline else ""
+    evs = [
+        Ev(
+            kind="trend",
+            label="news_event",
+            weight=0.5 if n >= 5 else 0.35,
+            detail=f"'{h.term.term}' is in {n} news headline(s) from the last 2 days{eg}",
+            source=f"news:{h.term.term.lower()}",
+            where=h.where,  # type: ignore[arg-type]
+        )
+    ]
+    if n >= 3:
+        ref = ReferentCandidate(
+            label=h.term.term,
+            kind="event",
+            desc=f"in the news: {n} recent headlines{eg}",
+            source=f"news:{h.term.term.lower()}",
+            score=0.45 if n >= 5 else 0.35,
+            categories=["news_event"],
+            surface=h.surface,
+        )
+        evs.append(
+            Ev(
+                kind="referent",
+                label="referent",
+                weight=ref.score,
+                detail=f"{h.term.term}: {ref.desc}",
+                source=ref.source,
+                where=h.where,  # type: ignore[arg-type]
+                referent=ref,
+            )
+        )
     return evs
