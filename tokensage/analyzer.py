@@ -55,9 +55,10 @@ from tokensage.api.schemas import (
     XMatch as XMatchOut,
 )
 from tokensage.config import Settings
-from tokensage.engine import embed, pairing, wikilookup, xmatch, xsignals
+from tokensage.engine import embed, meta, pairing, wikilookup, xmatch, xsignals
 from tokensage.engine import image as image_stage
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
+from tokensage.engine.meta import MetaCounts, MetaWord
 from tokensage.engine.pipeline import (
     RULES_VERSION,
     DbContext,
@@ -182,6 +183,7 @@ async def _db_context(
     x: XInfo | None,
     ticker: str | None,
     name_compact: str,
+    meta_words: list[str] | None = None,
 ) -> DbContext:
     dbc = DbContext()
     # X link reuse across other tokens
@@ -209,6 +211,10 @@ async def _db_context(
         )
     # same-name tokens we already know, plus best-effort external searches
     dbc.copycat_window_days = ctx.settings.copycat_window_days
+    meta_cfg = {
+        "window_hours": int(load_knowledge().meta.get("window_hours", 24)),
+        "history_days": int(load_knowledge().meta.get("history_days", 90)),
+    }
     if ticker or name_compact:
         # an empty name or ticker must not match every token whose name/ticker is empty
         rows = await conn.fetch(
@@ -220,10 +226,32 @@ async def _db_context(
             (ticker or "").upper(),
             name_compact,
         )
-        dbc.same_name = [
-            SameNameToken(x_["mint"], x_["name"], x_["symbol"], x_["created_at"], "db")
-            for x_ in rows
+        # ... and every namesake launched around this one, for its copycat rank and the
+        # current-meta count (the query above keeps only the oldest 50)
+        rows = [
+            *rows,
+            *await conn.fetch(
+                """select mint, name, symbol, created_at from token
+                   where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
+                         regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
+                     and created_at >= coalesce($4, now()) - make_interval(hours => $5)
+                     and created_at <= coalesce($4, now()) + make_interval(hours => $5)
+                   order by created_at limit 2000""",
+                r.mint,
+                (ticker or "").upper(),
+                name_compact,
+                r.created_at,
+                meta_cfg["window_hours"],
+            ),
         ]
+        dbc.same_name = list(
+            {
+                x_["mint"]: SameNameToken(
+                    x_["mint"], x_["name"], x_["symbol"], x_["created_at"], "db"
+                )
+                for x_ in rows
+            }.values()
+        )
         term = ticker or name_compact
         try:
             ext = await asyncio.gather(
@@ -235,6 +263,8 @@ async def _db_context(
             dbc.same_name += [t for t in found if t.mint not in known]
         except Exception as e:  # noqa: BLE001 - lookups are optional
             log.info("lookups.failed", error=str(e)[:120])
+    if meta_words:
+        dbc.meta_counts = await _meta_counts(conn, r, meta_words, **meta_cfg)
     dbc.gazetteer = await gazetteer_db.current(conn)
     # known coins from the database (seed lives in data/, cron adds more)
     rows = await conn.fetch(
@@ -289,6 +319,46 @@ async def _db_context(
             )
         )
     return dbc
+
+
+async def _meta_counts(
+    conn: asyncpg.Connection,
+    r: Resolved,
+    words: list[str],
+    window_hours: int,
+    history_days: int,
+) -> MetaCounts:
+    """How many token names carry each word within `window_hours` of this launch, and over
+    the `history_days` before it, plus the totals: the current-meta signal's inputs."""
+    bounds = """t.created_at > coalesce($1, now()) - make_interval(days => $3)
+                and t.created_at <= coalesce($1, now()) + make_interval(hours => $2)"""
+    recent = """t.created_at >= coalesce($1, now()) - make_interval(hours => $2)"""
+    tot = await conn.fetchrow(
+        f"""select count(*) filter (where {recent}) as recent, count(*) as total
+            from token t where {bounds} and t.mint <> $4""",
+        r.created_at,
+        window_hours,
+        history_days,
+        r.mint,
+    )
+    # the words are lowercase [a-z0-9]+ (meta.candidate_words), safe inside the regex
+    rows = await conn.fetch(
+        f"""select w, count(*) filter (where {recent}) as recent, count(*) as total
+            from unnest($5::text[]) as w
+            join token t on lower(coalesce(t.name, '')) ~ ('\\m' || w || '\\M')
+            where {bounds} and t.mint <> $4
+            group by w""",
+        r.created_at,
+        window_hours,
+        history_days,
+        r.mint,
+        words,
+    )
+    return MetaCounts(
+        recent_total=int(tot["recent"] or 0),
+        history_total=int(tot["total"] or 0),
+        words=[MetaWord(row["w"], int(row["recent"]), int(row["total"])) for row in rows],
+    )
 
 
 async def _persist_image(conn: asyncpg.Connection, key: str, out: EngineOutput) -> None:
@@ -503,6 +573,9 @@ def build_document(
                 signals=c["signals"],
                 created_at=c.get("created_at"),
                 recent=c.get("recent"),
+                rank=c.get("rank"),
+                rank_of=c.get("rank_of"),
+                rank_window_hours=c.get("rank_window_hours"),
             )
             for c in out.copy_of
         ]
@@ -919,7 +992,16 @@ async def analyze(
     from tokensage.engine.normalize import clean_ticker, normalize
 
     n0 = normalize(name, symbol, None)
-    dbc = await _db_context(conn, ctx, r, m, x, clean_ticker(symbol or ""), n0.name_compact)
+    dbc = await _db_context(
+        conn,
+        ctx,
+        r,
+        m,
+        x,
+        clean_ticker(symbol or ""),
+        n0.name_compact,
+        meta.candidate_words(n0, load_knowledge()),
+    )
     inp = EngineInput(
         mint=r.mint,
         name=name,

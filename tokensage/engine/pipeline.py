@@ -11,6 +11,7 @@ from tokensage.engine import (
     gazetteer,
     known_coins,
     lexicon,
+    meta,
     ocr,
     pairing,
     ticker,
@@ -28,7 +29,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.11.0-full"
+RULES_VERSION = "0.12.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -58,6 +59,8 @@ class DbContext:
     copycat_window_days: int = 30
     # the Wikidata gazetteer; None = the packaged snapshot (the cron's table, when loaded)
     gazetteer: Gazetteer | None = None
+    # name-word counts around the launch, for the current-meta signal (engine/meta.py)
+    meta_counts: meta.MetaCounts | None = None
 
 
 @dataclass
@@ -704,6 +707,25 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                     trend_hits.append(h)
         evidence += trends.evidence(trend_hits, inp.trend_index)
 
+    mt = meta.assess(
+        inp.mint,
+        inp.name,
+        n.ticker or inp.symbol,
+        inp.created_at,
+        inp.ctx.same_name,
+        inp.ctx.meta_counts,
+        k,
+        is_famous=is_famous,
+        has_referent=any(e.referent is not None for e in evidence),
+    )
+    evidence += mt.evidence
+    if mt.rank is not None and mt.rank.rank > 1:
+        for c in copies:
+            if "same_name_recent" in c["signals"]:
+                c["rank"], c["rank_of"] = mt.rank.rank, mt.rank.of
+                c["rank_window_hours"] = mt.rank.window_hours
+                c["signals"].append(f"copycat_rank:{mt.rank.rank}/{mt.rank.of}")
+
     agg = aggregate(evidence, k)
     if inp.encoder is not None:
         emb = embed.guesses(
@@ -758,7 +780,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         extra_caveats.append("the linked tweet or account no longer exists")
     if depth == "full" and ocr_err and inp.image_bytes:
         extra_caveats.append(f"OCR unavailable: {ocr_err}")
-    context = _context(pair, recent_copies, trend_hits)
+    context = _context(pair, recent_copies, trend_hits) + mt.context
     summary, caveats = summarize(
         inp.name,
         n.ticker or inp.symbol,
