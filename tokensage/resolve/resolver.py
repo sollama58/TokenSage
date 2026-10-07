@@ -119,20 +119,40 @@ def _quote_label(quote_mint: str | None) -> str | None:
     return quote_mint
 
 
+def _raw_bytes(acc: dict) -> bytes:
+    """Account data as bytes. Accounts with no jsonParsed parser (the bonding curve, Metaplex
+    metadata) come back as ["<base64>", "base64"] whichever encoding was asked."""
+    data = acc.get("data")
+    if not isinstance(data, list) or not data:
+        raise ValueError("account data is not base64-encoded")
+    return base64.b64decode(data[0])
+
+
 async def _onchain_metadata(
-    rpc: SolanaRpc, mint: str, token_program: str, info: dict
+    rpc: SolanaRpc,
+    mint: str,
+    token_program: str,
+    info: dict,
+    metaplex_acc: dict | None = None,
+    metaplex_read: bool = False,
 ) -> tuple[dict[str, str] | None, str]:
-    """name / symbol / uri from the Token-2022 extension, the Metaplex PDA, or DAS."""
+    """name / symbol / uri from the Token-2022 extension, the Metaplex PDA, or DAS.
+    metaplex_read: the caller already read the Metaplex PDA into metaplex_acc (None when the
+    account does not exist); otherwise it is read here if needed."""
     meta: dict[str, str] | None = None
     meta_source = "none"
     if token_program == "token-2022":
         meta = _token2022_metadata(info)
         meta_source = "token2022" if meta else "none"
     if meta is None and token_program == "spl-token":
-        md_acc = await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
+        md_acc = (
+            await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
+            if not metaplex_read
+            else metaplex_acc
+        )
         if md_acc:
             try:
-                meta = metaplex.decode_metadata(base64.b64decode(md_acc["data"][0]))
+                meta = metaplex.decode_metadata(_raw_bytes(md_acc))
                 meta_source = "metaplex"
             except (ValueError, struct.error):
                 meta = None
@@ -153,14 +173,19 @@ async def _onchain_metadata(
 async def read_mint_metadata(rpc: SolanaRpc, mint: str) -> dict[str, str] | None:
     """Name / symbol / uri of any SPL or Token-2022 mint (e.g. a pair token), or None when
     the address is not a mint or carries no metadata."""
-    acc = await rpc.get_account_info(mint, encoding="jsonParsed")
+    # one call for the mint and its Metaplex PDA (1 credit instead of 2 for SPL mints)
+    acc, md_acc = await rpc.get_multiple_accounts(
+        [mint, metaplex.metadata_pda(mint)], encoding="jsonParsed"
+    )
     if acc is None:
         return None
     token_program = TOKEN_PROGRAMS.get(acc.get("owner") or "")
     parsed = acc.get("data") if isinstance(acc.get("data"), dict) else None
     if token_program is None or not parsed or parsed.get("parsed", {}).get("type") != "mint":
         return None
-    meta, _ = await _onchain_metadata(rpc, mint, token_program, parsed["parsed"]["info"])
+    meta, _ = await _onchain_metadata(
+        rpc, mint, token_program, parsed["parsed"]["info"], metaplex_acc=md_acc, metaplex_read=True
+    )
     return meta
 
 
@@ -249,8 +274,12 @@ async def resolve(
     API and the (RPC-expensive) signature-history lookup when nothing better is stored."""
     mint = parse_ca(raw_ca)
 
-    # 1. mint account
-    acc = await rpc.get_account_info(mint, encoding="jsonParsed")
+    # 1. mint, bonding curve and Metaplex PDA in one call (1 RPC credit instead of 2-3).
+    # The curve and Metaplex accounts have no jsonParsed parser, so they come back base64.
+    curve_addr = bonding_curve_pda(mint)
+    acc, curve_acc, md_acc = await rpc.get_multiple_accounts(
+        [mint, curve_addr, metaplex.metadata_pda(mint)], encoding="jsonParsed"
+    )
     if acc is None:
         raise ResolveError("token_not_found", "no account found on-chain for this address")
     owner = acc.get("owner")
@@ -265,12 +294,10 @@ async def resolve(
     info = parsed["parsed"]["info"]  # type: ignore[index]
 
     # 2. bonding curve
-    curve_addr = bonding_curve_pda(mint)
-    curve_acc = await rpc.get_account_info(curve_addr, encoding="base64")
     curve: dict | None = None
     if curve_acc and curve_acc.get("owner") == PUMP_PROGRAM:
         try:
-            curve = decode_bonding_curve(base64.b64decode(curve_acc["data"][0]))
+            curve = decode_bonding_curve(_raw_bytes(curve_acc))
         except ValueError:
             curve = None
     is_pumpfun = curve is not None
@@ -279,21 +306,17 @@ async def resolve(
 
     complete = curve_progress = creator = quote_mint = is_mayhem = None
     if curve:
-        complete = bool(curve.get("complete"))
+        complete, curve_progress = await _curve_state(rpc, curve)
         creator = curve.get("creator")
         if creator and set(creator) == {"1"}:
             creator = None
         is_mayhem = curve.get("is_mayhem_mode")
         quote_mint = _quote_label(curve.get("quote_mint")) or "SOL"
-        real = curve.get("real_token_reserves")
-        if real is not None:
-            init = await initial_real_token_reserves(rpc)
-            curve_progress = max(0.0, min(1.0, 1 - real / init)) if init else None
-            if complete:
-                curve_progress = 1.0
 
     # 3. on-chain name / symbol / uri
-    meta, meta_source = await _onchain_metadata(rpc, mint, token_program, info)
+    meta, meta_source = await _onchain_metadata(
+        rpc, mint, token_program, info, metaplex_acc=md_acc, metaplex_read=True
+    )
 
     # 4. creation time + creator
     created: datetime | None = None
@@ -345,6 +368,57 @@ async def resolve(
     )
     await persist(conn, res)
     return res
+
+
+async def _curve_state(rpc: SolanaRpc, curve: dict) -> tuple[bool, float | None]:
+    complete = bool(curve.get("complete"))
+    progress: float | None = None
+    real = curve.get("real_token_reserves")
+    if real is not None:
+        init = await initial_real_token_reserves(rpc)
+        progress = max(0.0, min(1.0, 1 - real / init)) if init else None
+        if complete:
+            progress = 1.0
+    return complete, progress
+
+
+async def curve_now(
+    conn: asyncpg.Connection, rpc: SolanaRpc | None, mint: str, max_age_s: int = 300
+) -> tuple[bool | None, float | None, datetime | None] | None:
+    """Another coin's bonding curve (complete, curve_progress, as_of): the stored state when
+    it is fresher than max_age_s, else one RPC read (stored back). None when unknown."""
+    row = await conn.fetchrow(
+        "select complete, curve_progress, updated_at from token_market where mint=$1", mint
+    )
+    now = datetime.now(UTC)
+    if row and row["updated_at"] and (now - row["updated_at"]).total_seconds() <= max_age_s:
+        return row["complete"], row["curve_progress"], row["updated_at"]
+    if rpc is not None:
+        try:
+            acc = await rpc.get_account_info(bonding_curve_pda(mint), encoding="base64")
+            if acc and acc.get("owner") == PUMP_PROGRAM:
+                curve = decode_bonding_curve(base64.b64decode(acc["data"][0]))
+                complete, progress = await _curve_state(rpc, curve)
+                if row is not None or await conn.fetchval(
+                    "select 1 from token where mint=$1", mint
+                ):
+                    await conn.execute(
+                        """insert into token_market (mint, complete, curve_progress, updated_at)
+                           values ($1,$2,$3,$4)
+                           on conflict (mint) do update set complete=excluded.complete,
+                             curve_progress=excluded.curve_progress,
+                             updated_at=excluded.updated_at""",
+                        mint,
+                        complete,
+                        progress,
+                        now,
+                    )
+                return complete, progress, now
+        except (RpcError, ValueError, KeyError, IndexError, TypeError) as e:
+            log.info("curve_now.failed", mint=mint, error=str(e)[:120])
+    if row:
+        return row["complete"], row["curve_progress"], row["updated_at"]
+    return None
 
 
 async def persist(conn: asyncpg.Connection, r: Resolved) -> None:

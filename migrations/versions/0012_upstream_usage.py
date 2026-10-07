@@ -2,8 +2,8 @@
 latency, Helius credits) for the admin panel; job.started_at to split queue wait from
 processing time; source_health.updated_at so recovered sources age out.
 
-Revision ID: 0011
-Revises: 0010
+Revision ID: 0012
+Revises: 0011
 Create Date: 2026-10-07
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "0011"
-down_revision = "0010"
+revision = "0012"
+down_revision = "0011"
 branch_labels = None
 depends_on = None
 

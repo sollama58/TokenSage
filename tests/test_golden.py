@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from tokensage.engine.context import ReferentCandidate
 from tokensage.engine.knowledge import load_knowledge
-from tokensage.engine.pipeline import EngineInput, run_basic
+from tokensage.engine.pipeline import DbContext, EngineInput, PriorRead, SameNameToken, run_basic
 from tokensage.engine.ticker import explain
 
 CASES = yaml.safe_load((Path(__file__).parent / "golden" / "cases.yaml").read_text("utf-8"))[
@@ -24,6 +25,29 @@ def _ids() -> list[str]:
     return [f"{c.get('name', '')!r}/{c.get('symbol', '')}" for c in CASES]
 
 
+NOW = datetime(2026, 10, 1, tzinfo=UTC)
+
+
+def _ctx(case: dict[str, Any]) -> DbContext:
+    """same_name: earlier coins [{mint, name, symbol, hours_before}]; originals: their stored
+    reads {mint: {categories: {label: conf}, referent: {label, kind, confidence}}}."""
+    ctx = DbContext()
+    for t in case.get("same_name", []):
+        when = NOW - timedelta(hours=float(t["hours_before"]))
+        ctx.same_name.append(SameNameToken(t["mint"], t.get("name"), t.get("symbol"), when, "db"))
+    for mint, o in (case.get("originals") or {}).items():
+        ref = o.get("referent")
+        ctx.originals[mint] = PriorRead(
+            categories=list((o.get("categories") or {}).items()),
+            referent=ReferentCandidate(
+                ref["label"], ref.get("kind", "other"), None, "analysis", ref["confidence"]
+            )
+            if ref
+            else None,
+        )
+    return ctx
+
+
 def _run(case: dict[str, Any]):  # type: ignore[no-untyped-def]
     inp = EngineInput(
         mint="So11111111111111111111111111111111111111112",
@@ -31,7 +55,8 @@ def _run(case: dict[str, Any]):  # type: ignore[no-untyped-def]
         symbol=case.get("symbol"),
         description=case.get("description"),
         image_bytes=None,
-        created_at=datetime(2026, 10, 1, tzinfo=UTC),
+        created_at=NOW,
+        ctx=_ctx(case),
     )
     return run_basic(inp)
 
@@ -74,6 +99,21 @@ def test_golden(case: dict[str, Any]) -> None:
         assert out.normalized.name_tokens == case["tokens"], ctx
     for o in case.get("obfuscation_include", []):
         assert o in out.normalized.obfuscation, ctx
+    for lbl, (lo, hi) in (case.get("category_between") or {}).items():
+        assert lo <= cats.get(lbl, 0) <= hi, f"{lbl} not in [{lo}, {hi}]{ctx}"
+    if "lineage_kind" in case:
+        assert out.lineage is not None and out.lineage.kind == case["lineage_kind"], (
+            f"lineage {out.lineage}{ctx}"
+        )
+    if "referent_supported_by" in case:
+        assert out.agg.referent is not None, f"no referent{ctx}"
+        wheres = {
+            ev.where
+            for ev in out.evidence
+            if ev.referent is not None and ev.referent.label == out.agg.referent.label
+        }
+        for w in case["referent_supported_by"]:
+            assert w in wheres, f"referent not supported by {w}: {wheres}{ctx}"
     for c in case.get("caveats_include", []):
         assert any(c in cv for cv in out.caveats), f"caveat {c!r} missing: {out.caveats}"
     # every result must be explainable and summarised

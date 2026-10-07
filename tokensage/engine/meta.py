@@ -10,8 +10,11 @@ Two counts feed this, both gathered by the analyzer and passed in (this module i
   against its usual share over the longer history (an IDF-style lift, so "trump", which is
   in thousands of names every week, says little, while "sahur" spiking today says a lot).
 
-Either one emits crypto_native/pumpfun_meta evidence; when nothing else resolves a
-referent, the name (or word) becomes the referent "current pump.fun meta: <name>".
+Either one emits `launch_meta` evidence: a fact about the launch corpus, not a category.
+The coin's theme comes from its own content (crypto_native/pumpfun_meta only from words such
+as "pump" or launchpad names), so a copied name no longer reads as a crypto in-joke. The
+name count feeds lineage (engine/lineage.py) instead of a referent of its own; when nothing
+else resolves a referent, a spiking word becomes the referent "current pump.fun meta: <word>".
 """
 
 from __future__ import annotations
@@ -28,6 +31,9 @@ from tokensage.engine.knowledge import Knowledge
 from tokensage.engine.segment import common_words
 
 LABEL = "crypto_native/pumpfun_meta"
+# The evidence label of the corpus signals below: not a taxonomy label, so it scores nothing.
+CORPUS_LABEL = "launch_meta"
+REFERENT_PREFIX = "current pump.fun meta: "
 
 
 class _Launch(Protocol):  # pipeline.SameNameToken, without importing the pipeline
@@ -224,9 +230,10 @@ def _corpus(
             f"{r.of} coins with this name or ticker launched within {window} h of it; "
             f"this is the {_ordinal(r.rank)}"
         )
-        desc = f"launched {r.of} times within {window} h"
-        score = float(cfg.get("referent_score_name", 0.5))
-        out.evidence.append(_ev(label_name, weight, detail, desc, "name", has_referent, score))
+        # a fact about the copies, not a referent: a copy is about what its original is
+        # about (pipeline._inherit), never "the current meta" at a flat score
+        src = f"meta:name:{label_name.lower()}"
+        out.evidence.append(Ev("meta", CORPUS_LABEL, weight, detail, src, "db"))
         out.context.append(f"{r.phrase(what)} (a current meta)")
         return
 
@@ -286,7 +293,7 @@ def _top_volume(
     if me is not None:
         detail = f"#{me.rank} of the top {of} pump.fun coins by 24 h volume ({_usd(me.volume_usd)})"
         weight = float(tv.get("self_weight", 0.5))
-        out.evidence.append(Ev("meta", LABEL, weight, detail, "meta:top:self", "db"))
+        out.evidence.append(Ev("meta", CORPUS_LABEL, weight, detail, "meta:top:self", "db"))
         out.context.append(f"#{me.rank} by 24 h trading volume on pump.fun")
         return
     t_up = (ticker or "").upper()
@@ -301,10 +308,10 @@ def _top_volume(
             f"coins by 24 h volume ({_usd(t.volume_usd)})"
         )
         subject = t.name or t.tag()
-        desc = f"#{t.rank} by 24 h trading volume on pump.fun"
-        score = float(tv.get("referent_score_name", 0.5))
         weight = float(tv.get("name_weight", 0.6))
-        out.evidence.append(_ev(subject, weight, detail, desc, "top", has_referent, score))
+        # the same name as a top coin is a copy of it (lineage), not a referent of its own
+        src = f"meta:top:{subject.lower()}"
+        out.evidence.append(Ev("meta", CORPUS_LABEL, weight, detail, src, "db"))
         out.context.append(f"shares its {what} with {t.tag()}, #{t.rank} by trading volume today")
         return
     # an everyday word ("cat" in a top "Knight Cat") is not what the coin shares with it
@@ -342,18 +349,18 @@ def _ev(
     score: float,
 ) -> Ev:
     if has_referent:
-        return Ev("meta", LABEL, weight, detail, f"meta:{scope}:{subject.lower()}", "db")
+        return Ev("meta", CORPUS_LABEL, weight, detail, f"meta:{scope}:{subject.lower()}", "db")
     ref = ReferentCandidate(
-        label=f"current pump.fun meta: {subject}",
+        label=f"{REFERENT_PREFIX}{subject}",
         kind="meme",
         desc=desc,
         source=f"meta:{scope}:{subject.lower()}",
         score=score,
-        categories=[LABEL],
+        categories=[],
         surface=subject,
     )
-    # kind "referent" so the aggregator takes the candidate; its label is the category
-    return Ev("referent", LABEL, weight, detail, ref.source, "db", referent=ref)
+    # kind "referent" so the aggregator takes the candidate
+    return Ev("referent", CORPUS_LABEL, weight, detail, ref.source, "db", referent=ref)
 
 
 def _ordinal(n: int) -> str:

@@ -14,15 +14,16 @@ min_word_lift: 3.0
 min_word_len: 3
 max_words: 6            # words looked up per token
 
-# Evidence weight for crypto_native/pumpfun_meta: base + step * log2(count / min_count + 1),
-# capped. A word-level meta is worth `word_factor` of a whole-name one.
+# Evidence weight (label launch_meta, a corpus fact that scores no category): base + step *
+# log2(count / min_count + 1), capped. A word-level meta is worth `word_factor` of a
+# whole-name one.
 weight_base: 0.35
 weight_step: 0.1
 weight_max: 0.75
 word_factor: 0.8
 
-# Referent "current pump.fun meta: <name>", used only when nothing else resolves.
-referent_score_name: 0.5
+# Referent "current pump.fun meta: <word>", used only when nothing else resolves. A whole
+# name launched many times gets no referent of its own: a copy is about its original.
 referent_score_word: 0.4
 
 # Words that never make a meta on their own (they are in every other coin name).
@@ -42,5 +43,15 @@ top_volume:
   name_weight: 0.6              # same name or ticker as a top token
   word_weight: 0.45             # shares a name word with a top token
   self_weight: 0.5              # the token is itself in the top list
-  referent_score_name: 0.5
   referent_score_word: 0.4
+
+# Lineage (engine/lineage.py): which copy this is. rank is the same-name copy rank above;
+# ages are from the original's launch to this coin's.
+lineage:
+  early_max_rank: 3               # early_copy: rank <= 3 ...
+  early_max_original_age_h: 6     # ... and the original launched less than 6 h earlier
+  late_min_rank: 11               # late_copy: rank > 10 ...
+  late_min_original_age_h: 24     # ... or the original launched more than 24 h earlier
+  logo_scan_days: 7               # logo near-duplicates are searched this far back
+  logo_reused_min: 3              # flag logo_reused at this many other coins in 24 h
+  inherit_factor: 0.8             # a copy with no theme of its own inherits the original's

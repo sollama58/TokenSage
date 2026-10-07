@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-Where = Literal["name", "symbol", "description", "image", "x", "trend", "chain", "db"]
+Where = Literal["name", "symbol", "description", "image", "x", "trend", "chain", "db", "copy_of"]
 
 
 @dataclass

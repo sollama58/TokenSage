@@ -170,6 +170,26 @@ class FakeChain:
                 200,
                 json={"jsonrpc": "2.0", "id": rid, "result": {"context": {"slot": 1}, "value": a}},
             )
+        if method == "getMultipleAccounts":
+            # jsonParsed falls back to base64 for accounts with no parser, as stored here
+            value = []
+            for addr in params[0]:
+                a = self.accounts.get(addr)
+                if (
+                    a is not None
+                    and params[1].get("encoding") == "base64"
+                    and isinstance(a["data"], dict)
+                ):
+                    a = {**a, "data": ["", "base64"]}
+                value.append(a)
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "result": {"context": {"slot": 1}, "value": value},
+                },
+            )
         if method == "getSignaturesForAddress":
             sigs = self.signatures.get(params[0], [])
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": rid, "result": sigs})

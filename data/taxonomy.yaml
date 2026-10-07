@@ -160,6 +160,12 @@ flags:
   - code: obfuscated_text
     severity: info
     description: Name uses full-width, zero-width, small-caps, leetspeak or repeated-letter tricks.
+  - code: late_copy
+    severity: warn
+    description: A late copy (lineage.kind late_copy) - more than 10th with its name or ticker, or its original launched over 24 h earlier.
+  - code: logo_reused
+    severity: info
+    description: Three or more other coins used a near-identical logo in the 24 h before it.
   - code: earlier_same_name
     severity: warn
     description: Another token with the same name or ticker launched in the 30 days before this one.
