@@ -1,12 +1,13 @@
 """S8 Trend matching (guide §5.8): match token text, and the referent it resolves to, against
-spiking Wikipedia articles, Google Trends searches and Google News headlines."""
+spiking Wikipedia articles, Google Trends searches, X's trending topics, Google News headlines
+and Bluesky posts."""
 
 from __future__ import annotations
 
 import math
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Literal
 
@@ -22,16 +23,20 @@ MIN_TERM_LEN = 4
 @dataclass(frozen=True)
 class TrendTerm:
     term: str  # article title, spaces not underscores
-    spike: float  # views / prior median (0 for news and Google Trends terms)
+    spike: float  # views / prior median (0 for every source but Wikipedia)
     # wikipedia: daily views; news: the number of matching headlines; google_trends: Google's
-    # approximate search count
+    # approximate search count; x_trends: the hourly lists it was on in the last day;
+    # bluesky: matching posts in the last 24 hours
     views: int
-    # "wikipedia" | "news" (the coin's name is in recent headlines) | "google_trends"
+    # "wikipedia" | "news" (the coin's name is in recent headlines) | "google_trends" |
+    # "x_trends" (on X's trending list) | "bluesky" (the coin's name is in recent posts)
     source: str = "wikipedia"
-    # how fresh it is: the UTC day of the Wikipedia spike, the newest matching headline, or when
-    # Google Trends listed the search
+    # how fresh it is: the UTC day of the Wikipedia spike, the newest matching headline or post,
+    # or when Google Trends / X first listed it
     seen_at: datetime | None = None
-    headline: str | None = None  # the story behind a Google Trends search
+    # the story behind a Google Trends search, or the most liked matching Bluesky post
+    headline: str | None = None
+    rank: int | None = None  # x_trends: its best position on X's list (1-50)
 
 
 @dataclass
@@ -149,17 +154,24 @@ def _strength(t: TrendTerm) -> float:
 def score(h: TrendHit, index: TrendIndex | None = None) -> float:
     """How strong the trend is, 0-1 (trend.score, trend.terms[].score).
     wikipedia: log of the spike, 30x its usual views = 1; google_trends: log of the search
-    count, 100 = 0, 100,000 = 1; news: the number of outlets' headlines, 8 = 1. A perennial
-    entity (one of the best-known articles) counts half: it trends every day."""
+    count, 100 = 0, 100,000 = 1; news: the number of outlets' headlines, 8 = 1; x_trends: half
+    its best rank (1 = 0.5, 50 = 0.01), half the hours listed (12 = 0.5); bluesky: posts in the
+    last 24 hours, 25 = 1. A perennial entity (one of the best-known articles) counts half: it
+    trends every day."""
     t = h.term
     if t.source == "news":
         s = t.views / 8
+    elif t.source == "bluesky":
+        s = t.views / 25
+    elif t.source == "x_trends":
+        rank = min(max(t.rank or 50, 1), 50)
+        s = 0.5 * (51 - rank) / 50 + 0.5 * min(t.views, 12) / 12
     elif t.source == "google_trends":
         s = math.log10(max(t.views, 100) / 100) / 3
     else:
         s = math.log(max(t.spike, 1.0)) / math.log(30)
     s = max(0.05, min(1.0, s))
-    if index is not None and t.source != "news" and index.is_generic(t.term):
+    if index is not None and t.source not in ("news", "bluesky") and index.is_generic(t.term):
         s *= 0.5
     return round(s, 3)
 
@@ -180,7 +192,9 @@ def referent_hits(
     for ev in refs:
         ref = ev.referent
         assert ref is not None
-        if ref.label in seen or ref.source.startswith(("wikipedia:", "news:", "gtrends:")):
+        if ref.label in seen or ref.source.startswith(
+            ("wikipedia:", "news:", "gtrends:", "xtrends:", "bsky:")
+        ):
             continue
         seen.add(ref.label)
         if len(seen) > max_referents:
@@ -206,6 +220,12 @@ def evidence(hits: list[TrendHit], index: TrendIndex) -> list[Ev]:
             continue
         if t.source == "google_trends":
             evs += gtrends_evidence(h, index)
+            continue
+        if t.source == "x_trends":
+            evs += xtrends_evidence(h, index)
+            continue
+        if t.source == "bluesky":
+            evs += bluesky_evidence(h)
             continue
         if t.spike >= 10:
             w = 0.6
@@ -305,6 +325,112 @@ def gtrends_evidence(h: TrendHit, index: TrendIndex) -> list[Ev]:
                 label="referent",
                 weight=ref.score,
                 detail=f"{t.term}: {ref.desc}",
+                source=ref.source,
+                where=h.where,  # type: ignore[arg-type]
+                referent=ref,
+            )
+        )
+    return evs
+
+
+def xtrends_evidence(h: TrendHit, index: TrendIndex) -> list[Ev]:
+    """On X's trending list: news_event evidence weighted by rank, and (from the coin's own
+    name or post) a referent for a topic nothing else knows yet."""
+    t = h.term
+    rank = t.rank or 50
+    w = 0.5 if rank <= 10 else (0.4 if rank <= 25 else 0.3)
+    generic = index.is_generic(t.term)
+    if generic:
+        w *= 0.5
+    hours = f", {t.views} hour(s) on the list" if t.views > 1 else ""
+    evs = [
+        Ev(
+            kind="trend",
+            label="news_event",
+            weight=round(w, 3),
+            detail=(f"{_matched(h)} matches '{t.term}', trending on X (best rank #{rank}{hours})"),
+            source=f"xtrends:{t.term.lower()}",
+            where=h.where,  # type: ignore[arg-type]
+        )
+    ]
+    if rank <= 25 and not generic and h.where in ("name", "x") and h.via is None:
+        ref = ReferentCandidate(
+            label=t.term,
+            kind="event",
+            desc=f"trending on X (best rank #{rank}{hours})",
+            source=f"xtrends:{t.term.lower()}",
+            score=0.45 if rank <= 10 else 0.4,
+            categories=["news_event"],
+            surface=h.surface,
+        )
+        evs.append(
+            Ev(
+                kind="referent",
+                label="referent",
+                weight=ref.score,
+                detail=f"{t.term}: {ref.desc}",
+                source=ref.source,
+                where=h.where,  # type: ignore[arg-type]
+                referent=ref,
+            )
+        )
+    return evs
+
+
+MIN_BLUESKY_POSTS = 3  # from at least three accounts: one person posting is not a trend
+BLUESKY_WINDOW = timedelta(hours=24)
+
+
+def bluesky_hit(phrase: str, posts: list[dict], now: datetime | None = None) -> TrendHit | None:
+    """A trend hit for a coin name people are posting about on Bluesky, or None when fewer
+    than MIN_BLUESKY_POSTS accounts did in the last day. posts: bluesky.relevant(...)."""
+    from tokensage.sources.bluesky import created
+
+    now = now or datetime.now(UTC)
+    recent = [(p, d) for p in posts if (d := created(p)) is not None and now - d < BLUESKY_WINDOW]
+    authors = {p.get("author") for p, _ in recent}
+    if len(recent) < MIN_BLUESKY_POSTS or len(authors) < MIN_BLUESKY_POSTS:
+        return None
+    top = max(recent, key=lambda pd: int(pd[0].get("likes") or 0) + int(pd[0].get("reposts") or 0))
+    return TrendHit(
+        TrendTerm(phrase, 0.0, len(recent), source="bluesky", seen_at=max(d for _, d in recent)),
+        phrase.lower(),
+        "name",
+        headline=" ".join(str(top[0].get("text") or "").split())[:200] or None,
+    )
+
+
+def bluesky_evidence(h: TrendHit) -> list[Ev]:
+    """The coin's name is being posted about on Bluesky: weaker than the news (anyone can
+    post), so news_event evidence, and a referent only when many posts carry it."""
+    n = h.term.views
+    eg = f', e.g. "{h.headline[:90]}"' if h.headline else ""
+    evs = [
+        Ev(
+            kind="trend",
+            label="news_event",
+            weight=0.45 if n >= 10 else 0.3,
+            detail=f"'{h.term.term}' is in {n} Bluesky post(s) from the last 24 hours{eg}",
+            source=f"bsky:{h.term.term.lower()}",
+            where=h.where,  # type: ignore[arg-type]
+        )
+    ]
+    if n >= 10:
+        ref = ReferentCandidate(
+            label=h.term.term,
+            kind="event",
+            desc=f"being posted about: {n} Bluesky posts in a day{eg}",
+            source=f"bsky:{h.term.term.lower()}",
+            score=0.35,
+            categories=["news_event"],
+            surface=h.surface,
+        )
+        evs.append(
+            Ev(
+                kind="referent",
+                label="referent",
+                weight=ref.score,
+                detail=f"{h.term.term}: {ref.desc}",
                 source=ref.source,
                 where=h.where,  # type: ignore[arg-type]
                 referent=ref,

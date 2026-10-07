@@ -34,7 +34,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.17.0-full"
+RULES_VERSION = "0.18.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -1725,10 +1725,14 @@ def _context(
         t = h.term
         if t.source == "news":
             out.append(f"its name is in the news ('{t.term}')")
+        elif t.source == "bluesky":
+            out.append(f"its name is being posted about on Bluesky ('{t.term}')")
         elif h.via is not None:
             out.append(f"what it refers to is trending ('{t.term}')")
         elif t.source == "google_trends":
             out.append(f"matches the trending search '{t.term}'")
+        elif t.source == "x_trends":
+            out.append(f"matches '{t.term}', trending on X")
         else:
             out.append(f"matches the trending topic '{t.term}'")
     return out

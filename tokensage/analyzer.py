@@ -84,7 +84,7 @@ from tokensage.resolve import metadata as md
 from tokensage.resolve import pair as pair_lookup
 from tokensage.resolve.resolver import Resolved, ResolveError, curve_now, resolve
 from tokensage.resolve.rpc import SolanaRpc
-from tokensage.sources import gnews, lookups
+from tokensage.sources import bluesky, gnews, lookups
 
 log = structlog.get_logger("analyzer")
 
@@ -1260,14 +1260,17 @@ async def analyze(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
         )
         inp.wiki_refs = await _wiki_refs(conn, ctx, inp)
-        inp.news_hits, news_status = await _name_news(conn, ctx, inp)
+        # one after the other: both use this job's single database connection
+        news_hits, news_status = await _name_news(conn, ctx, inp)
+        bsky_hits, bsky_status = await _name_bluesky(conn, ctx, inp)
+        inp.news_hits = news_hits + bsky_hits
         # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
         # worker's other concurrent jobs keep making network progress meanwhile.
         out = await asyncio.to_thread(run_full, inp)
         if inp.run_ocr and m and m.image_content_key and not out.ocr_error:
             await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
         await _attach_news(conn, ctx, out)
-        out.trend_sources = [*inp.trend_index.sources, news_status]
+        out.trend_sources = [*inp.trend_index.sources, news_status, bsky_status]
     else:
         out = await asyncio.to_thread(run_basic, inp)
     if x is not None:
@@ -1404,6 +1407,9 @@ def _trend_out(out: EngineOutput) -> TrendOut:
             seen_at=h.term.seen_at,
             matched_on=h.matched_on,
             searches=h.term.views if h.term.source == "google_trends" else None,
+            rank=h.term.rank if h.term.source == "x_trends" else None,
+            hours=h.term.views if h.term.source == "x_trends" else None,
+            posts=h.term.views if h.term.source == "bluesky" else None,
         )
         for h in out.trend_hits
     ]
@@ -1507,10 +1513,40 @@ async def _name_news(
     return ([hit] if hit else []), st
 
 
+async def _name_bluesky(
+    conn: asyncpg.Connection, ctx: Context, inp: EngineInput
+) -> tuple[list[trends.TrendHit], trends.SourceStatus]:
+    """Search Bluesky for the coin's name (the same names Google News is searched for): a
+    subject people are posting about today, before or without any headline. Posts about a
+    coin (cashtags, prices, pump.fun) do not count."""
+    phrase = gnews.name_query(inp.name)
+    if phrase is None:
+        return [], trends.SourceStatus(
+            "bluesky", "skipped", detail="name not specific enough to search (needs two words)"
+        )
+    try:
+        posts = await fulldepth.bsky_for(conn, ctx.http, phrase)
+    except Exception as e:  # noqa: BLE001 - an optional enrichment
+        log.info("bluesky.lookup_failed", error=str(e)[:120])
+        return [], trends.SourceStatus("bluesky", "failed", detail=f"{type(e).__name__}")
+    if posts is None:
+        return [], trends.SourceStatus("bluesky", "failed", detail="Bluesky unavailable")
+    rel = bluesky.relevant(posts, phrase, inp.symbol)
+    hit = trends.bluesky_hit(phrase, rel)
+    st = trends.SourceStatus(
+        "bluesky",
+        "ok",
+        as_of=datetime.now(UTC),
+        terms=hit.term.views if hit else 0,
+        detail=f"searched '{phrase}'",
+    )
+    return ([hit] if hit else []), st
+
+
 async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:
     """Confirm the top Wikipedia trend hits against Google News: a caveat with the headline
     count, and the first headline on the hit (trend.terms[].headline)."""
-    wiki = [h for h in out.trend_hits if h.term.source != "news"]
+    wiki = [h for h in out.trend_hits if h.term.source not in ("news", "bluesky")]
     hits = sorted(wiki, key=lambda h: -h.term.spike)[: fulldepth.MAX_NEWS_LOOKUPS]
     for h in hits:
         heads = await fulldepth.news_for(conn, ctx.http, h.term.term)

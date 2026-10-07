@@ -511,19 +511,24 @@ class TrendTerm(_Model):
     spike: float | None = Field(
         default=None, description="Wikipedia only: the day's views over the usual (median)"
     )
-    source: str = Field(description="wikipedia, google_trends or news")
-    headline: str | None = None
+    source: str = Field(description="wikipedia, google_trends, x_trends, news or bluesky")
+    headline: str | None = Field(
+        default=None,
+        description="A news headline about the term, the story behind a Google Trends search, "
+        "or (bluesky) the most liked matching post",
+    )
     score: float | None = Field(
         default=None,
         description="Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends "
-        "by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1); halved for "
-        "perennially popular articles",
+        "by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1), X trends by "
+        "rank and hours listed (#1 for 12 h = 1), Bluesky by posts in 24 h (25 = 1); halved "
+        "for perennially popular articles",
     )
     seen_at: datetime | None = Field(
         default=None,
         description="How fresh the hit is: the UTC day of the Wikipedia spike (day "
-        "granularity), when Google Trends first listed the search, or the newest matching "
-        "news headline",
+        "granularity), when Google Trends or X first listed it, or the newest matching "
+        "news headline or Bluesky post",
     )
     matched_on: str | None = Field(
         default=None,
@@ -533,21 +538,35 @@ class TrendTerm(_Model):
     searches: int | None = Field(
         default=None, description="Google Trends only: Google's approximate search count"
     )
+    rank: int | None = Field(
+        default=None, description="X trends only: best position on X's trending list (1-50)"
+    )
+    hours: int | None = Field(
+        default=None,
+        description="X trends only: hourly trending lists it was on in the last 24 h (any region)",
+    )
+    posts: int | None = Field(
+        default=None,
+        description="Bluesky only: posts naming it in the last 24 h (from at least 3 accounts; "
+        "coin chatter excluded; at most 100)",
+    )
 
 
 class TrendSource(_Model):
-    source: str = Field(description="wikipedia, google_trends or news")
+    source: str = Field(description="wikipedia, google_trends, x_trends, news or bluesky")
     status: Literal["ok", "stale", "failed", "skipped", "unavailable"] = Field(
         description="ok: the source had current data; stale: only old data (see detail); "
         "failed: the lookup failed and nothing was cached; skipped: not looked up for this "
-        "coin (news: the name is too generic to search); unavailable: no data loaded at all"
+        "coin (news, bluesky: the name is too generic to search); unavailable: no data loaded "
+        "at all"
     )
     as_of: datetime | None = Field(
         default=None, description="The newest data the source gave (Wikipedia: its UTC day)"
     )
     terms: int | None = Field(
         default=None,
-        description="Trending terms the source contributed (news: relevant headlines found)",
+        description="Trending terms the source contributed (news: relevant headlines found; "
+        "bluesky: matching posts in the last 24 h)",
     )
     detail: str | None = None
 

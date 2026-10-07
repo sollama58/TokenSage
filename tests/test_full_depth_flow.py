@@ -144,7 +144,13 @@ async def test_full_depth_fills_x_trend_and_caches(
     assert t0.matched_on == "name"
     # every source reports whether it had data (the Google Trends feed is a 404 here)
     status = {s.source: s.status for s in a.trend.sources}
-    assert status == {"wikipedia": "ok", "google_trends": "failed", "news": "ok"}
+    assert status == {
+        "wikipedia": "ok",
+        "google_trends": "failed",
+        "x_trends": "failed",
+        "news": "ok",
+        "bluesky": "failed",
+    }
     assert len(fx_calls) == 1
 
     # second full analysis: tweet comes from cache, FxTwitter not called again

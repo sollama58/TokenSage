@@ -17,7 +17,7 @@ from tokensage.api.schemas import XInfo
 from tokensage.config import Settings
 from tokensage.engine import ocr, trends
 from tokensage.engine.knowledge import load_knowledge
-from tokensage.sources import gnews, gtrends, wikipedia
+from tokensage.sources import bluesky, gnews, gtrends, wikipedia, xtrends
 from tokensage.sources.x import ProfileData, TweetData, fetch_profile, fetch_tweet
 
 log = structlog.get_logger("fulldepth")
@@ -26,6 +26,7 @@ PROFILE_TTL = timedelta(hours=12)
 TWEET_RECHECK = timedelta(hours=6)
 DELETED_RETRY = timedelta(hours=1)
 NEWS_TTL = timedelta(hours=1)
+BLUESKY_TTL = timedelta(hours=1)
 WIKI_TTL = timedelta(days=7)  # articles and their descriptions change slowly
 WIKI_EMPTY_TTL = timedelta(days=1)  # a name with no article may get one tomorrow
 TREND_INDEX_TTL_S = 600
@@ -244,9 +245,9 @@ async def trend_index(
     conn: asyncpg.Connection, http: httpx.AsyncClient | None = None
 ) -> trends.TrendIndex:
     """Wikipedia's spiking articles (daily, from the knowledge cron) plus the Google Trends
-    searches of the last two days (polled here, when an http client is given), with each
-    source's status. Rebuilt every TREND_INDEX_TTL_S; concurrent jobs reuse the old index
-    while one of them rebuilds it."""
+    searches of the last two days and X's trending topics of the last day (both polled here,
+    when an http client is given), with each source's status. Rebuilt every
+    TREND_INDEX_TTL_S; concurrent jobs reuse the old index while one of them rebuilds it."""
     global _trend_cache
     now = time.monotonic()
     if _trend_cache and now - _trend_cache[0] < TREND_INDEX_TTL_S:
@@ -261,7 +262,10 @@ async def trend_index(
             return _trend_cache[1]
         wiki_terms, wiki_status = await _wiki_trends(conn)
         g_terms, g_status = await _google_trends(conn, http)
-        idx = trends.TrendIndex(wiki_terms + g_terms, load_knowledge(), [wiki_status, g_status])
+        x_terms, x_status = await _x_trends(conn, http)
+        idx = trends.TrendIndex(
+            wiki_terms + g_terms + x_terms, load_knowledge(), [wiki_status, g_status, x_status]
+        )
         for st in idx.sources:
             log.info(
                 "trends.source",
@@ -388,6 +392,112 @@ async def _google_trends(
     )
 
 
+XTRENDS_KEY = "xtrends:seen"  # lookup_cache row: X's trending topics of the last day
+XTRENDS_KEEP = timedelta(hours=24)
+XTRENDS_POLL = timedelta(minutes=20)  # trends24 adds one list an hour
+
+
+async def _x_trends(
+    conn: asyncpg.Connection, http: httpx.AsyncClient | None
+) -> tuple[list[trends.TrendTerm], trends.SourceStatus]:
+    """X's trending topics (trends24, every XTRENDS_POLL). Each page holds the whole day's
+    hourly lists, so a poll rebuilds the set: per topic its best rank, the hourly lists it was
+    on, and when it first appeared. The stored set is used while the pages are down."""
+    now = datetime.now(UTC)
+    row = await conn.fetchrow(
+        "select value, fetched_at from lookup_cache where key=$1", XTRENDS_KEY
+    )
+    seen: list[dict[str, Any]] = list((row["value"] if row else None) or [])
+    polled_at: datetime | None = row["fetched_at"] if row else None
+    status: trends.SourceState = "ok"
+    detail: str | None = None
+    if http is None:
+        status, detail = "skipped", "not polled by this process"
+    elif polled_at is None or now - polled_at >= XTRENDS_POLL:
+        results = await asyncio.gather(
+            *(xtrends.trending(http, r) for r in xtrends.REGIONS), return_exceptions=True
+        )
+        got = [r for r in results if isinstance(r, list)]
+        if got:
+            seen = _merge_x_lists(got, now)
+            await conn.execute(
+                """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
+                   on conflict (key) do update set value=excluded.value, fetched_at=now()""",
+                XTRENDS_KEY,
+                seen,
+            )
+            polled_at = now
+            if len(got) < len(results):
+                detail = f"{len(results) - len(got)} of {len(results)} region pages failed"
+        else:
+            errs = [type(r).__name__ for r in results if isinstance(r, BaseException)]
+            log.info("xtrends.poll_failed", errors=errs[:4])
+            status = "failed" if not seen else "stale"
+            detail = "trend pages unavailable" + (
+                f"; using the topics seen until {polled_at:%Y-%m-%d %H:%M} UTC"
+                if seen and polled_at
+                else ""
+            )
+    terms = [
+        trends.TrendTerm(
+            str(v["term"]),
+            0.0,
+            int(v.get("hours") or 1),
+            source="x_trends",
+            seen_at=_parse_iso(v.get("seen_at"), now),
+            rank=int(v.get("rank") or 50),
+        )
+        for v in seen
+        if now - _parse_iso(v.get("last_at"), now) < XTRENDS_KEEP
+    ]
+    if status == "ok" and polled_at is not None and now - polled_at > 6 * XTRENDS_POLL:
+        status, detail = "stale", f"last polled {polled_at:%Y-%m-%d %H:%M} UTC"
+    return terms, trends.SourceStatus(
+        "x_trends", status, as_of=polled_at, terms=len(terms), detail=detail
+    )
+
+
+def _merge_x_lists(pages: list[list[xtrends.TrendList]], now: datetime) -> list[dict[str, Any]]:
+    """One record per topic across regions and hours: best rank, the distinct hours it was
+    listed in (any region), when it was first and last listed."""
+    by: dict[str, dict[str, Any]] = {}
+    for lists in pages:
+        for tl in lists:
+            if now - tl.at >= XTRENDS_KEEP:
+                continue
+            hour = tl.at.strftime("%Y-%m-%dT%H")
+            for i, raw in enumerate(tl.terms, 1):
+                term = xtrends.readable(raw)
+                if term is None or gnews._CRYPTO.search(term):
+                    continue
+                d = by.setdefault(
+                    term.lower(),
+                    {
+                        "term": term,
+                        "label": raw,
+                        "rank": i,
+                        "hours": set(),
+                        "first": tl.at,
+                        "last": tl.at,
+                    },
+                )
+                d["rank"] = min(d["rank"], i)
+                d["hours"].add(hour)
+                d["first"] = min(d["first"], tl.at)
+                d["last"] = max(d["last"], tl.at)
+    return [
+        {
+            "term": d["term"],
+            "label": d["label"],
+            "rank": d["rank"],
+            "hours": len(d["hours"]),
+            "seen_at": d["first"].isoformat(),
+            "last_at": d["last"].isoformat(),
+        }
+        for d in by.values()
+    ]
+
+
 def _merge_search(
     seen: dict[str, dict[str, Any]], it: gtrends.TrendingSearch, now: datetime
 ) -> None:
@@ -456,6 +566,38 @@ async def news_for(
     """news_lookup's headlines alone (an older cached list when Google News is down)."""
     found = await news_lookup(conn, http, term, exact)
     return found.headlines if found is not None else None
+
+
+async def bsky_for(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, phrase: str
+) -> list[dict[str, Any]] | None:
+    """The newest Bluesky posts with the quoted phrase (cached an hour; a stale copy beats
+    nothing when Bluesky is down)."""
+    key = f"bsky:q:{phrase.lower()}"
+    row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
+    if row and datetime.now(UTC) - row["fetched_at"] < BLUESKY_TTL:
+        return list(row["value"])
+    posts = await bluesky.search(http, phrase)
+    if posts is None:
+        return list(row["value"]) if row else None
+    value = [
+        {
+            "text": p.text,
+            "created_at": p.created_at,
+            "likes": p.likes,
+            "reposts": p.reposts,
+            "author": p.author,
+            "uri": p.uri,
+        }
+        for p in posts
+    ]
+    await conn.execute(
+        """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
+           on conflict (key) do update set value=excluded.value, fetched_at=now()""",
+        key,
+        value,
+    )
+    return value
 
 
 # ----------------------------------------------------------------- Wikipedia lookups
