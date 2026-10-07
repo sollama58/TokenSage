@@ -64,9 +64,21 @@ categories:
   - label: regional_language
     description: Country, city or language-community themed (e.g. CJK-name metas).
   - label: crypto_native
-    description: Crypto slang or self-referential crypto culture.
+    description: Crypto culture, people, chains and companies; sub-labels say which.
   - label: crypto_native/slang
-    description: Built on crypto slang (wagmi, jeet, send it).
+    description: Built on crypto slang or a catchphrase (wagmi, jeet, send it, wen lambo).
+  - label: crypto_native/person
+    description: About a crypto founder or figure (Vitalik Buterin, CZ, Toly, Saylor, Satoshi).
+  - label: crypto_native/chain_or_coin
+    description: About a blockchain or an established coin or stablecoin (Bitcoin, Ethereum, Solana, Zcash, USDC).
+  - label: crypto_native/company
+    description: About an exchange or crypto company (Binance, Coinbase, Circle, MicroStrategy).
+  - label: crypto_native/trading
+    description: Trading-desk vocabulary (trader, PnL, market cap, ATH, floor price).
+  - label: crypto_native/tech
+    description: Blockchain technology words (blockchain, on-chain, NFT, airdrop, mining, hashrate).
+  - label: crypto_native/launchpad
+    description: The coin of a launchpad or launch platform ("...pad", launchpad).
   - label: crypto_native/pumpfun_meta
     description: Jokes about pump.fun itself or the current "meta".
   - label: crypto_native/cto

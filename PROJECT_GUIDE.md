@@ -509,7 +509,7 @@ Tweet text is fed back through S1–S5 and S8. **The tweet is often the "meaning
   - Version the weights.
 
 ### 5.10 Taxonomy (multi-label; keep it in a YAML config, not code)
-`animal/{dog,cat,frog,monkey,hippo,squirrel,bird,bear_bull,fish,other}` · `meme_template/{pepe_wojak_chad,x_wif_hat,chill_guy,npc,brainrot,copypasta,other}` · `ai_agent` · `political` · `celebrity/{elon,musician,athlete,streamer_kol,other}` · `news_event` · `food_object_abstract` · `regional_language` · `crypto_native/{slang,pumpfun_meta,cto,utility_claim}` · `derivative` (with subtypes `copycat`, `template_family`, `sequel`, `homoglyph_spoof`, `logo_reuse`) · `humor_crude_offensive`.
+`animal/{dog,cat,frog,monkey,hippo,squirrel,bird,bear_bull,fish,other}` · `meme_template/{pepe_wojak_chad,x_wif_hat,chill_guy,npc,brainrot,copypasta,other}` · `ai_agent` · `political` · `celebrity/{elon,musician,athlete,streamer_kol,other}` · `news_event` · `food_object_abstract` · `regional_language` · `crypto_native/{slang,person,chain_or_coin,company,trading,tech,launchpad,pumpfun_meta,cto,utility_claim,paired_ecosystem}` · `derivative` (with subtypes `copycat`, `template_family`, `sequel`, `homoglyph_spoof`, `logo_reuse`) · `humor_crude_offensive`.
 
 ---
 

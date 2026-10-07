@@ -270,6 +270,42 @@ cases:
   - name: Diamond Hands
     symbol: DIAMOND
     categories_include: [crypto_native/slang]
+  # crypto_native sub-labels: what kind of crypto thing the coin is about, not just "crypto"
+  - name: VITALDICK
+    symbol: VITALDICK
+    categories_include: [crypto_native, crypto_native/person]
+    categories_exclude: [crypto_native/slang]
+    referent: Vitalik Buterin
+  - name: SATOSHI CEO
+    symbol: SATOSHI
+    categories_include: [crypto_native/person]
+    referent: Satoshi Nakamoto
+  - name: Solana Sentients
+    symbol: SENTS
+    categories_include: [crypto_native/chain_or_coin]
+    categories_exclude: [crypto_native/slang]
+  - name: zCash
+    symbol: ZCASH
+    categories_include: [crypto_native, crypto_native/chain_or_coin]
+  - name: Binance Listing
+    symbol: BNCL
+    categories_include: [crypto_native/company]
+    referent: Binance
+  - name: MicroStrategy
+    symbol: MSTR
+    categories_include: [crypto_native/company, tradfi/stock]
+  - name: GIRL TRADERS PROJECT
+    symbol: GTP
+    categories_include: [crypto_native/trading]
+    categories_exclude: [crypto_native/slang]
+  - name: NFT Airdrop
+    symbol: NFTA
+    categories_include: [crypto_native/tech]
+    categories_exclude: [crypto_native/slang]
+  - name: VOLUMEPAD
+    symbol: VOLUMEPAD
+    categories_include: [crypto_native, crypto_native/launchpad]
+    categories_exclude: [crypto_native/pumpfun_meta]
   # ---------------------------------------------------------------- regional / scripts
   - name: 币圈大哥
     symbol: BQDG

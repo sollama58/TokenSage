@@ -29,10 +29,10 @@ stocks:
   - {ticker: MRVL, name: Marvell, desc: "Marvell Technology (NASDAQ: MRVL)"}
   - {ticker: APP, name: AppLovin, ticker_is_word: true, desc: "AppLovin (NASDAQ: APP)"}
   - {ticker: NOW, name: ServiceNow, ticker_is_word: true, desc: "ServiceNow (NYSE: NOW)"}
-  - {ticker: COIN, name: Coinbase, ticker_is_word: true, categories: [crypto_native], desc: "Coinbase (NASDAQ: COIN), crypto exchange"}
-  - {ticker: MSTR, name: MicroStrategy, aliases: [microstrategy, strategy inc], categories: [crypto_native], desc: "Strategy / MicroStrategy (NASDAQ: MSTR), Saylor's bitcoin treasury company"}
-  - {ticker: HOOD, name: Robinhood, ticker_is_word: true, aliases: [robinhood markets], categories: [crypto_native], desc: "Robinhood Markets (NASDAQ: HOOD), retail broker"}
-  - {ticker: CRCL, name: Circle, name_is_word: true, aliases: [circle internet, circle stock, usdc issuer], categories: [crypto_native], desc: "Circle Internet Group (NYSE: CRCL), USDC issuer"}
+  - {ticker: COIN, name: Coinbase, ticker_is_word: true, categories: [crypto_native/company], desc: "Coinbase (NASDAQ: COIN), crypto exchange"}
+  - {ticker: MSTR, name: MicroStrategy, aliases: [microstrategy, strategy inc], categories: [crypto_native/company], desc: "Strategy / MicroStrategy (NASDAQ: MSTR), Saylor's bitcoin treasury company"}
+  - {ticker: HOOD, name: Robinhood, ticker_is_word: true, aliases: [robinhood markets], categories: [crypto_native/company], desc: "Robinhood Markets (NASDAQ: HOOD), retail broker"}
+  - {ticker: CRCL, name: Circle, name_is_word: true, aliases: [circle internet, circle stock, usdc issuer], categories: [crypto_native/company], desc: "Circle Internet Group (NYSE: CRCL), USDC issuer"}
   - {ticker: GME, name: GameStop, categories: [meme_template/other], desc: "GameStop (NYSE: GME), the original meme stock"}
   - {ticker: AMC, name: AMC Entertainment, aliases: [amc entertainment, amc theatres], categories: [meme_template/other], desc: "AMC Entertainment (NYSE: AMC), meme stock"}
   - {ticker: OPEN, name: Opendoor, ticker_is_word: true, categories: [meme_template/other], desc: "Opendoor (NASDAQ: OPEN), 2025 meme stock"}

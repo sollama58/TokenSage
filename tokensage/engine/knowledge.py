@@ -268,5 +268,5 @@ def load_knowledge() -> Knowledge:
         meta=_yaml("meta.yaml"),
         name_words=frozenset(str(w).lower() for w in t.get("wordnet_name_words") or []),
         cjk={str(w): str(v or "").lower() for w, v in _yaml("cjk_words.yaml")["words"].items()},
-        versions={"lexicon": "2026-10-07.1", "known_coins": "seed-2026-10-06"},
+        versions={"lexicon": "2026-10-07.2", "known_coins": "seed-2026-10-06"},
     )
