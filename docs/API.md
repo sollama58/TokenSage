@@ -342,6 +342,29 @@ admin key to a browser or app. All schemas are in `/openapi.json` under the `adm
 | `GET /admin/v1/jobs?status=failed&mint=…&depth=…&limit=50` | Recent jobs, newest first, with `error_code` and `last_error` |
 | `POST /admin/v1/jobs/{id}/retry` | Enqueue a failed job again with its original hints. Returns the new job (or the open one for the same token and depth); `409 job_not_failed` otherwise |
 | `GET /admin/v1/recall?hours=24` | How often the engine resolved what coins refer to, per depth |
+| `GET /admin/v1/helius?days=30&hours=48` | Solana RPC (Helius) calls and credits: this hour, today, last 24 h and 7 days, the billing cycle so far, its projection at the last 24 hours' pace against `HELIUS_PLAN_CREDITS`, days until the credits run out, 429s, errors, latency and peak requests per second; a per-method table; hourly and daily series |
+| `GET /admin/v1/upstreams?hours=24` | Every upstream (Helius, Wikipedia, Google News and Trends, GeckoTerminal, CoinGecko, the X sources, IPFS gateways, pump.fun, `other` for metadata hosts): calls, errors, error rate, 429s, average and max latency, peak req/s, circuit-breaker state, and calls per hour |
+| `GET /admin/v1/queue?hours=24` | Job timing per depth (queue wait, processing and total, p50/p95/max), counts per kind, failures by error code, jobs per hour, who requested them, retried and stuck jobs |
+| `GET /admin/v1/signals?hours=6` | Each trend source's status as recent full reads saw it, knowledge-table freshness (trends, known coins, top volume, gazetteer, tokens), paid X spend against its cap, and analyses per depth with how many found a referent |
+
+### Admin panel
+
+`GET /admin` serves a browser panel over these calls. Paste the `ADMIN_KEY` into it (kept in
+the tab, or in the browser with *remember*); the page itself carries no data. It shows alerts
+(credits projected past the plan, 429s, open breakers, a stalled queue, failing sources), the
+Helius credit gauges and charts, queue and job timing, every upstream's health, trend and
+knowledge freshness, API keys with create, limit, rotate and revoke, and recent jobs with retry.
+It refreshes every 30 s by default.
+
+Upstream calls are counted in each process and written to `upstream_usage` every 30 s, so
+the numbers trail live traffic by up to that long. Helius credits are counted from each
+method's price: 1 for standard RPC calls, 10 for DAS (`getAsset`) and `getProgramAccounts`;
+`HELIUS_CREDIT_COSTS="getTransaction:10,..."` overrides prices if Helius changes them. A call
+counts as billed when Helius answered it; 429s and HTTP or transport errors are counted as
+calls but not credits, so compare with the Helius dashboard if the two drift. Set the plan
+with `HELIUS_PLAN_CREDITS` (default 1,000,000, the Free plan; Developer is 10,000,000),
+`HELIUS_BILLING_DAY` (the day of the month credits reset, default 1) and `HELIUS_RPS_LIMIT`
+(default 10; Developer is 50). Peak req/s is per process.
 
 Changing an env key (`PATCH`, `rotate`, `DELETE`) returns `409 read_only`; edit `API_KEYS`
 instead. Key changes apply immediately on the instance that made them and within 30 s on any

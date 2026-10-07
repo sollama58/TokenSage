@@ -33,6 +33,10 @@ async def run_once() -> dict[str, int]:
                    where a.mint = r.mint and a.version = r.version and r.rn > 3
                      and a.created_at < now() - interval '30 days'"""
             )
+            # upstream call counts back a 90-day panel view; the billing cycle needs ~31
+            pruned_usage = await conn.execute(
+                "delete from upstream_usage where hour < now() - interval '90 days'"
+            )
             # the recall number (guide §5.9): how often the last day's analyses resolved a
             # referent, per depth; the series to watch as the gazetteer and rules change
             log.info("recall.daily", **(await recall.summary(conn)))
@@ -40,6 +44,7 @@ async def run_once() -> dict[str, int]:
             "requeued": requeued,
             "pruned_jobs": int(pruned_jobs.split()[-1]),
             "pruned_analyses": int(pruned_analyses.split()[-1]),
+            "pruned_usage_rows": int(pruned_usage.split()[-1]),
         }
     finally:
         await pool.close()

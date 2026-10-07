@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
 
+from tokensage.net import metrics
+
 
 class RpcError(Exception):
-    def __init__(self, message: str, code: int | None = None, retryable: bool = True):
+    def __init__(
+        self,
+        message: str,
+        code: int | None = None,
+        retryable: bool = True,
+        http_status: int | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+        self.http_status = http_status  # None: no HTTP response (transport error)
 
 
 class SolanaRpc:
@@ -24,6 +34,31 @@ class SolanaRpc:
         self._id = 0
 
     async def call(self, method: str, params: list[Any]) -> Any:
+        """One JSON-RPC call, metered under solana_rpc with its Helius credit cost. A call
+        counts as billed when the provider answered it (a result or a JSON-RPC error); HTTP
+        errors, 429s and transport errors are counted as calls but not as credits."""
+        t0 = time.perf_counter()
+        status: int | None = None
+        ok = False
+        try:
+            result = await self._call(method, params)
+            ok = True
+            return result
+        except RpcError as e:
+            status = e.http_status
+            raise
+        finally:
+            billed = ok or status == 200
+            metrics.meter.record(
+                "solana_rpc",
+                method,
+                ok=ok,
+                ms=(time.perf_counter() - t0) * 1000,
+                rate_limited=status == 429,
+                credits=metrics.credits_for(method) if billed else 0,
+            )
+
+    async def _call(self, method: str, params: list[Any]) -> Any:
         self._id += 1
         body = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
         try:
@@ -31,23 +66,30 @@ class SolanaRpc:
         except httpx.HTTPError as e:
             raise RpcError(f"rpc transport error: {type(e).__name__}: {e}") from e
         if r.status_code == 429:
-            raise RpcError("rpc rate limited (429)")
+            raise RpcError("rpc rate limited (429)", http_status=429)
         if r.status_code >= 500:
-            raise RpcError(f"rpc http {r.status_code}")
+            raise RpcError(f"rpc http {r.status_code}", http_status=r.status_code)
         if r.status_code != 200:
-            raise RpcError(f"rpc http {r.status_code}: {r.text[:200]}", retryable=False)
+            raise RpcError(
+                f"rpc http {r.status_code}: {r.text[:200]}",
+                retryable=False,
+                http_status=r.status_code,
+            )
         try:
             data = r.json()
         except ValueError as e:  # e.g. an HTML error page from a proxy with status 200
-            raise RpcError(f"rpc returned non-JSON: {r.text[:120]!r}") from e
+            raise RpcError(f"rpc returned non-JSON: {r.text[:120]!r}", http_status=200) from e
         if not isinstance(data, dict):
-            raise RpcError(f"rpc returned unexpected JSON: {str(data)[:120]}")
+            raise RpcError(f"rpc returned unexpected JSON: {str(data)[:120]}", http_status=200)
         if "error" in data:
             err = data["error"] or {}
             code = err.get("code")
             # -32601 method not found (e.g. no DAS on this provider): not retryable
             raise RpcError(
-                f"rpc error {code}: {err.get('message')}", code=code, retryable=code != -32601
+                f"rpc error {code}: {err.get('message')}",
+                code=code,
+                retryable=code != -32601,
+                http_status=200,
             )
         return data.get("result")
 

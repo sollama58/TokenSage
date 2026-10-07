@@ -296,6 +296,35 @@
         "title": "Analysis",
         "type": "object"
       },
+      "AnalysisCount": {
+        "additionalProperties": false,
+        "properties": {
+          "analyses": {
+            "title": "Analyses",
+            "type": "integer"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          },
+          "with_referent": {
+            "title": "With Referent",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "depth",
+          "analyses",
+          "tokens",
+          "with_referent"
+        ],
+        "title": "AnalysisCount",
+        "type": "object"
+      },
       "BatchItem": {
         "additionalProperties": false,
         "properties": {
@@ -467,6 +496,102 @@
         "title": "BatchResponse",
         "type": "object"
       },
+      "Breaker": {
+        "additionalProperties": false,
+        "properties": {
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "open_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Until"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "state",
+          "failures",
+          "open_until"
+        ],
+        "title": "Breaker",
+        "type": "object"
+      },
+      "BreakerRow": {
+        "additionalProperties": false,
+        "properties": {
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "open_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Until"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "state",
+          "failures",
+          "open_until",
+          "source",
+          "updated_at"
+        ],
+        "title": "BreakerRow",
+        "type": "object"
+      },
       "Category": {
         "additionalProperties": false,
         "properties": {
@@ -594,6 +719,202 @@
           }
         },
         "title": "CopyOf",
+        "type": "object"
+      },
+      "DayPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "credits": {
+            "title": "Credits",
+            "type": "integer"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "calls",
+          "credits",
+          "errors"
+        ],
+        "title": "DayPoint",
+        "type": "object"
+      },
+      "DepthTiming": {
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "run_p50_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run P50 S"
+          },
+          "run_p95_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run P95 S"
+          },
+          "total_max_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Max S"
+          },
+          "total_p50_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total P50 S"
+          },
+          "total_p95_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total P95 S"
+          },
+          "wait_p50_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait P50 S"
+          },
+          "wait_p95_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait P95 S"
+          }
+        },
+        "required": [
+          "depth",
+          "done",
+          "failed",
+          "wait_p50_s",
+          "wait_p95_s",
+          "run_p50_s",
+          "run_p95_s",
+          "total_p50_s",
+          "total_p95_s",
+          "total_max_s"
+        ],
+        "title": "DepthTiming",
+        "type": "object"
+      },
+      "ErrorCount": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          }
+        },
+        "required": [
+          "error_code",
+          "count",
+          "last_error",
+          "last_at"
+        ],
+        "title": "ErrorCount",
         "type": "object"
       },
       "Evidence": {
@@ -770,6 +1091,356 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeliusCalls": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_ms_24h": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms 24H"
+          },
+          "errors_24h": {
+            "title": "Errors 24H",
+            "type": "integer"
+          },
+          "errors_today": {
+            "title": "Errors Today",
+            "type": "integer"
+          },
+          "last_24h": {
+            "title": "Last 24H",
+            "type": "integer"
+          },
+          "peak_rps_24h": {
+            "title": "Peak Rps 24H",
+            "type": "integer"
+          },
+          "rate_limited_24h": {
+            "title": "Rate Limited 24H",
+            "type": "integer"
+          },
+          "rate_limited_today": {
+            "title": "Rate Limited Today",
+            "type": "integer"
+          },
+          "today": {
+            "title": "Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "today",
+          "errors_today",
+          "rate_limited_today",
+          "last_24h",
+          "errors_24h",
+          "rate_limited_24h",
+          "avg_ms_24h",
+          "peak_rps_24h"
+        ],
+        "title": "HeliusCalls",
+        "type": "object"
+      },
+      "HeliusCredits": {
+        "additionalProperties": false,
+        "properties": {
+          "cycle_pct": {
+            "title": "Cycle Pct",
+            "type": "number"
+          },
+          "cycle_to_date": {
+            "title": "Cycle To Date",
+            "type": "integer"
+          },
+          "days_left_in_cycle": {
+            "title": "Days Left In Cycle",
+            "type": "number"
+          },
+          "days_until_exhausted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Until Exhausted"
+          },
+          "last_24h": {
+            "title": "Last 24H",
+            "type": "integer"
+          },
+          "last_7d": {
+            "title": "Last 7D",
+            "type": "integer"
+          },
+          "last_hour": {
+            "title": "Last Hour",
+            "type": "integer"
+          },
+          "per_day_now": {
+            "description": "Credits per day at the last 24 hours' pace",
+            "title": "Per Day Now",
+            "type": "number"
+          },
+          "projected_cycle": {
+            "title": "Projected Cycle",
+            "type": "integer"
+          },
+          "projected_pct": {
+            "title": "Projected Pct",
+            "type": "number"
+          },
+          "this_hour": {
+            "title": "This Hour",
+            "type": "integer"
+          },
+          "today": {
+            "title": "Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "this_hour",
+          "last_hour",
+          "today",
+          "last_24h",
+          "last_7d",
+          "cycle_to_date",
+          "cycle_pct",
+          "per_day_now",
+          "projected_cycle",
+          "projected_pct",
+          "days_left_in_cycle",
+          "days_until_exhausted"
+        ],
+        "title": "HeliusCredits",
+        "type": "object"
+      },
+      "HeliusMethod": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_ms_24h": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms 24H"
+          },
+          "calls_24h": {
+            "title": "Calls 24H",
+            "type": "integer"
+          },
+          "calls_cycle": {
+            "title": "Calls Cycle",
+            "type": "integer"
+          },
+          "calls_today": {
+            "title": "Calls Today",
+            "type": "integer"
+          },
+          "credit_cost": {
+            "title": "Credit Cost",
+            "type": "integer"
+          },
+          "credits_24h": {
+            "title": "Credits 24H",
+            "type": "integer"
+          },
+          "credits_cycle": {
+            "title": "Credits Cycle",
+            "type": "integer"
+          },
+          "credits_today": {
+            "title": "Credits Today",
+            "type": "integer"
+          },
+          "errors_today": {
+            "title": "Errors Today",
+            "type": "integer"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "credit_cost",
+          "calls_today",
+          "credits_today",
+          "errors_today",
+          "calls_24h",
+          "credits_24h",
+          "avg_ms_24h",
+          "calls_cycle",
+          "credits_cycle"
+        ],
+        "title": "HeliusMethod",
+        "type": "object"
+      },
+      "HeliusPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "billing_day": {
+            "title": "Billing Day",
+            "type": "integer"
+          },
+          "credits_per_cycle": {
+            "title": "Credits Per Cycle",
+            "type": "integer"
+          },
+          "cycle_end": {
+            "format": "date-time",
+            "title": "Cycle End",
+            "type": "string"
+          },
+          "cycle_start": {
+            "format": "date-time",
+            "title": "Cycle Start",
+            "type": "string"
+          },
+          "rps_limit": {
+            "title": "Rps Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credits_per_cycle",
+          "rps_limit",
+          "billing_day",
+          "cycle_start",
+          "cycle_end"
+        ],
+        "title": "HeliusPlan",
+        "type": "object"
+      },
+      "HeliusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "$ref": "#/components/schemas/HeliusCalls"
+          },
+          "credit_costs": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Credit Costs",
+            "type": "object"
+          },
+          "credits": {
+            "$ref": "#/components/schemas/HeliusCredits"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/DayPoint"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "default_credit_cost": {
+            "title": "Default Credit Cost",
+            "type": "integer"
+          },
+          "hourly": {
+            "items": {
+              "$ref": "#/components/schemas/HourPoint"
+            },
+            "title": "Hourly",
+            "type": "array"
+          },
+          "methods": {
+            "items": {
+              "$ref": "#/components/schemas/HeliusMethod"
+            },
+            "title": "Methods",
+            "type": "array"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/HeliusPlan"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "rpc_configured": {
+            "title": "Rpc Configured",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rpc_configured",
+          "provider",
+          "plan",
+          "credits",
+          "calls",
+          "methods",
+          "hourly",
+          "daily",
+          "credit_costs",
+          "default_credit_cost"
+        ],
+        "title": "HeliusResponse",
+        "type": "object"
+      },
+      "HourPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "credits": {
+            "title": "Credits",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "hour": {
+            "format": "date-time",
+            "title": "Hour",
+            "type": "string"
+          },
+          "peak_rps": {
+            "title": "Peak Rps",
+            "type": "integer"
+          },
+          "rate_limited": {
+            "title": "Rate Limited",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hour",
+          "calls",
+          "credits",
+          "errors",
+          "rate_limited",
+          "peak_rps"
+        ],
+        "title": "HourPoint",
         "type": "object"
       },
       "ImageInfo": {
@@ -982,6 +1653,70 @@
           "request_id"
         ],
         "title": "JobResponse",
+        "type": "object"
+      },
+      "JobsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "by_depth": {
+            "items": {
+              "$ref": "#/components/schemas/DepthTiming"
+            },
+            "title": "By Depth",
+            "type": "array"
+          },
+          "by_kind": {
+            "items": {
+              "$ref": "#/components/schemas/KindCounts"
+            },
+            "title": "By Kind",
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorCount"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "hourly": {
+            "items": {
+              "$ref": "#/components/schemas/QueueHour"
+            },
+            "title": "Hourly",
+            "type": "array"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "requesters": {
+            "items": {
+              "$ref": "#/components/schemas/Requester"
+            },
+            "title": "Requesters",
+            "type": "array"
+          },
+          "retried": {
+            "title": "Retried",
+            "type": "integer"
+          },
+          "stuck_running": {
+            "title": "Stuck Running",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hours",
+          "by_depth",
+          "by_kind",
+          "errors",
+          "hourly",
+          "requesters",
+          "retried",
+          "stuck_running"
+        ],
+        "title": "JobsResponse",
         "type": "object"
       },
       "KeyCreate": {
@@ -1247,6 +1982,76 @@
         "title": "KeyUpdate",
         "type": "object"
       },
+      "KindCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "pending",
+          "running",
+          "done",
+          "failed"
+        ],
+        "title": "KindCounts",
+        "type": "object"
+      },
+      "KnowledgeTable": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "newest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "rows",
+          "newest"
+        ],
+        "title": "KnowledgeTable",
+        "type": "object"
+      },
       "Market": {
         "additionalProperties": false,
         "properties": {
@@ -1497,6 +2302,35 @@
         "title": "Normalized",
         "type": "object"
       },
+      "PaidX": {
+        "additionalProperties": false,
+        "properties": {
+          "calls_today": {
+            "title": "Calls Today",
+            "type": "integer"
+          },
+          "cap_usd": {
+            "title": "Cap Usd",
+            "type": "number"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "spend_today_usd": {
+            "title": "Spend Today Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "calls_today",
+          "spend_today_usd",
+          "cap_usd"
+        ],
+        "title": "PaidX",
+        "type": "object"
+      },
       "Pair": {
         "additionalProperties": false,
         "description": "The token the coin trades against on its bonding curve. SOL and stablecoins carry no\nmeaning; any other token feeds the analysis (category crypto_native/paired_ecosystem,\nderivative/pair_family when the name builds on it, flag non_sol_pair).",
@@ -1653,6 +2487,36 @@
           "confidence"
         ],
         "title": "PairReferent",
+        "type": "object"
+      },
+      "QueueHour": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "hour": {
+            "format": "date-time",
+            "title": "Hour",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hour",
+          "created",
+          "done",
+          "failed"
+        ],
+        "title": "QueueHour",
         "type": "object"
       },
       "QueueStats": {
@@ -1845,6 +2709,74 @@
           "confidence"
         ],
         "title": "Referent",
+        "type": "object"
+      },
+      "Requester": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "title": "Jobs",
+            "type": "integer"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          }
+        },
+        "required": [
+          "requested_by",
+          "jobs"
+        ],
+        "title": "Requester",
+        "type": "object"
+      },
+      "SignalsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisCount"
+            },
+            "title": "Analyses",
+            "type": "array"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "knowledge": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeTable"
+            },
+            "title": "Knowledge",
+            "type": "array"
+          },
+          "paid_x": {
+            "$ref": "#/components/schemas/PaidX"
+          },
+          "trend_sources": {
+            "items": {
+              "$ref": "#/components/schemas/TrendSourceRow"
+            },
+            "title": "Trend Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hours",
+          "trend_sources",
+          "knowledge",
+          "paid_x",
+          "analyses"
+        ],
+        "title": "SignalsResponse",
         "type": "object"
       },
       "SourceHealth": {
@@ -2298,6 +3230,43 @@
         "title": "TrendSource",
         "type": "object"
       },
+      "TrendSourceRow": {
+        "additionalProperties": false,
+        "properties": {
+          "newest_as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest As Of"
+          },
+          "reads": {
+            "title": "Reads",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "status",
+          "reads",
+          "newest_as_of"
+        ],
+        "title": "TrendSourceRow",
+        "type": "object"
+      },
       "TrendTerm": {
         "additionalProperties": false,
         "properties": {
@@ -2418,6 +3387,161 @@
           "code"
         ],
         "title": "UpstreamError",
+        "type": "object"
+      },
+      "UpstreamHour": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "hour": {
+            "format": "date-time",
+            "title": "Hour",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hour",
+          "source",
+          "calls",
+          "errors"
+        ],
+        "title": "UpstreamHour",
+        "type": "object"
+      },
+      "UpstreamRow": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms"
+          },
+          "breaker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Breaker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "error_rate": {
+            "title": "Error Rate",
+            "type": "number"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          },
+          "max_ms": {
+            "title": "Max Ms",
+            "type": "integer"
+          },
+          "methods": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Methods",
+            "type": "object"
+          },
+          "peak_rps": {
+            "title": "Peak Rps",
+            "type": "integer"
+          },
+          "rate_limited": {
+            "title": "Rate Limited",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "calls",
+          "errors",
+          "rate_limited",
+          "error_rate",
+          "avg_ms",
+          "max_ms",
+          "peak_rps",
+          "last_seen",
+          "methods"
+        ],
+        "title": "UpstreamRow",
+        "type": "object"
+      },
+      "UpstreamsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "breakers": {
+            "items": {
+              "$ref": "#/components/schemas/BreakerRow"
+            },
+            "title": "Breakers",
+            "type": "array"
+          },
+          "hourly": {
+            "items": {
+              "$ref": "#/components/schemas/UpstreamHour"
+            },
+            "title": "Hourly",
+            "type": "array"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/UpstreamRow"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hours",
+          "sources",
+          "hourly",
+          "breakers"
+        ],
+        "title": "UpstreamsResponse",
         "type": "object"
       },
       "UsageDay": {
@@ -3405,6 +4529,72 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/v1/helius": {
+      "get": {
+        "description": "Solana RPC (Helius) calls and credits: this hour, today, the last 24 h, the billing\ncycle so far and its projection against the plan; per method; hourly and daily series.\nCredits are counted from each method's Helius price (HELIUS_CREDIT_COSTS overrides).",
+        "operationId": "helius_admin_v1_helius_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 48,
+              "maximum": 336,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeliusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Helius",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/v1/jobs": {
       "get": {
         "description": "Recent jobs, newest first.",
@@ -3856,6 +5046,60 @@
         ]
       }
     },
+    "/admin/v1/queue": {
+      "get": {
+        "description": "Job timing by depth (queue wait, processing and total, p50/p95), counts by kind,\nfailures by error code, hourly throughput and who asked, over `hours`. Jobs are kept\nfor 7 days.",
+        "operationId": "queue_stats_admin_v1_queue_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Queue Stats",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/v1/recall": {
       "get": {
         "description": "How often the engine resolved what a coin refers to, per depth, over `hours`.",
@@ -3912,6 +5156,60 @@
         ]
       }
     },
+    "/admin/v1/signals": {
+      "get": {
+        "description": "What the engine's inputs look like: each trend source's status as recent full reads\nsaw it, how fresh the knowledge tables are, paid X spend against its cap, and analyses\nper depth with how many found a referent.",
+        "operationId": "signals_admin_v1_signals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Signals",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/v1/status": {
       "get": {
         "description": "Queue depth, upstream source health, today's usage per key and the last day's\nreferent recall.",
@@ -3937,6 +5235,60 @@
           }
         ],
         "summary": "Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/upstreams": {
+      "get": {
+        "description": "Every upstream's calls, errors, 429s and latency over `hours`, its circuit breaker,\nand an hourly series. Hosts nothing names (metadata URIs) count as `other`.",
+        "operationId": "upstreams_admin_v1_upstreams_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 336,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upstreams",
         "tags": [
           "admin"
         ]

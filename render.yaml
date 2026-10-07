@@ -22,6 +22,14 @@ envVarGroups:
         value: "1.00"
       - key: IPFS_GATEWAYS
         value: "https://pump.mypinata.cloud,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"
+      # Helius plan for the admin panel's credit gauge (/admin). Free: 1000000 and 10;
+      # Developer: 10000000 and 50. BILLING_DAY is the day of the month credits reset.
+      - key: HELIUS_PLAN_CREDITS
+        value: "1000000"
+      - key: HELIUS_RPS_LIMIT
+        value: "10"
+      - key: HELIUS_BILLING_DAY
+        value: "1"
 
 services:
   - type: web

@@ -25,6 +25,7 @@ from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.engine import ocr
 from tokensage.logging import configure_logging
+from tokensage.net import metrics
 
 log = structlog.get_logger("worker")
 
@@ -287,15 +288,20 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     concurrency = max(1, settings.worker_concurrency)
-    # one connection per concurrent job, plus the LISTEN connection and a spare
-    pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 2)
+    # one connection per concurrent job, plus the LISTEN connection, the metrics flusher's
+    # and a spare
+    pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 3)
     w = Worker(pool, settings, concurrency=concurrency)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, w.request_stop)
+    stop_flush = asyncio.Event()
+    flusher = asyncio.create_task(metrics.run_flusher(pool, stop_flush))
     try:
         await w.run()
     finally:
+        stop_flush.set()
+        await flusher  # the last counts land before the pool closes
         await pool.close()
 
 

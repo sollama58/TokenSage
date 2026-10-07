@@ -22,6 +22,7 @@ from tokensage.db import create_pool
 from tokensage.engine import image as image_stage
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.logging import configure_logging
+from tokensage.net import metrics
 from tokensage.net.safe_fetch import safe_get
 from tokensage.sources import coingecko, geckoterminal, wikidata, wikimedia
 
@@ -188,8 +189,13 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     pool = await create_pool(settings.database_url, min_size=1, max_size=2)
+    metrics.meter.configure(
+        ipfs_gateways=settings.ipfs_gateway_list, costs=settings.helius_credit_costs
+    )
     async with httpx.AsyncClient(
-        headers={"User-Agent": settings.http_user_agent}, follow_redirects=False
+        headers={"User-Agent": settings.http_user_agent},
+        follow_redirects=False,
+        transport=metrics.MeteredTransport(),
     ) as http:
         try:
             async with pool.acquire() as conn:
@@ -202,6 +208,11 @@ async def main() -> None:
                 g = await refresh_gazetteer(conn, http)
                 log.info("knowledge.gazetteer", **g)
         finally:
+            try:
+                async with pool.acquire() as conn:
+                    await metrics.flush(conn)
+            except Exception as e:  # noqa: BLE001
+                log.warning("metrics.flush_failed", error=f"{type(e).__name__}: {e}")
             await pool.close()
 
 

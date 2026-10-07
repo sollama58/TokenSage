@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     # --- upstream ---
     solana_rpc_url: str = ""
     solana_ws_url: str = ""
+    # Helius plan, for the admin panel's credit gauge: monthly credits, the day of the month
+    # the credits reset (the subscription date), and the plan's RPC requests per second.
+    # Defaults are the Free plan; Developer is 10,000,000 credits and 50 req/s.
+    helius_plan_credits: int = 1_000_000
+    helius_billing_day: int = Field(default=1, ge=1, le=28)
+    helius_rps_limit: int = 10
+    # "method:credits,..." overrides for the credit table in net/metrics.py
+    helius_credit_costs: str = ""
     coingecko_api_key: str = ""
     twitterapi_io_key: str = ""
     ipfs_gateways: str = (
