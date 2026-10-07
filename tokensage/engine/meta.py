@@ -12,7 +12,8 @@ Two counts feed this, both gathered by the analyzer and passed in (this module i
 
 Either one emits `launch_meta` evidence: a fact about the launch corpus, not a category.
 The coin's theme comes from its own content (crypto_native/pumpfun_meta only from words such
-as "pump" or launchpad names), so a copied name no longer reads as a crypto in-joke. The
+as "pump", crypto_native/launchpad from launchpad names), so a copied name no longer reads as a
+crypto in-joke. The
 name count feeds lineage (engine/lineage.py) instead of a referent of its own; when nothing
 else resolves a referent, a spiking word becomes the referent "current pump.fun meta: <word>".
 """

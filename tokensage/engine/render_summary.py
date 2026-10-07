@@ -20,6 +20,28 @@ _CATEGORY_PHRASE = {
     "tradfi": "a stock-market / tradfi-themed coin",
     "pop_culture": "a film / TV / game / pop-culture coin",
 }
+# crypto_native covers people, chains, companies and in-jokes alike: its strongest sub-label
+# says which (paired_ecosystem is context, not subject, so it never names the theme).
+_CRYPTO_PHRASE = {
+    "crypto_native/slang": "a crypto-slang coin",
+    "crypto_native/person": "a coin about a crypto figure",
+    "crypto_native/chain_or_coin": "a coin about a blockchain or established coin",
+    "crypto_native/company": "a coin about a crypto exchange or company",
+    "crypto_native/trading": "a crypto-trading coin",
+    "crypto_native/tech": "a blockchain-tech coin",
+    "crypto_native/launchpad": "a launchpad / launch-platform coin",
+    "crypto_native/pumpfun_meta": "a pump.fun-meta joke coin",
+    "crypto_native/cto": "a community-takeover coin",
+    "crypto_native/utility_claim": "a coin claiming utility (a tool or protocol)",
+}
+
+
+def _phrase(label: str, categories: list[tuple[str, float]]) -> str:
+    if label == "crypto_native":
+        for lbl, _ in categories:  # sorted by confidence
+            if lbl in _CRYPTO_PHRASE:
+                return _CRYPTO_PHRASE[lbl]
+    return _CATEGORY_PHRASE.get(label, label)
 
 
 def _top_parent(categories: list[tuple[str, float]]) -> tuple[str, float] | None:
@@ -73,7 +95,7 @@ def summarize(
         guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
             parts.append(
-                f"Beyond that it reads as {_CATEGORY_PHRASE.get(tp[0], tp[0])} "
+                f"Beyond that it reads as {_phrase(tp[0], agg.categories)} "
                 f"(confidence {tp[1]:.2f}){guess}."
             )
         elif guess:
@@ -83,8 +105,7 @@ def summarize(
         guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
             parts.append(
-                f"{head} reads as {_CATEGORY_PHRASE.get(tp[0], tp[0])} "
-                f"(confidence {tp[1]:.2f}){guess}."
+                f"{head} reads as {_phrase(tp[0], agg.categories)} (confidence {tp[1]:.2f}){guess}."
             )
         else:
             parts.append(f"{head}: no clear reference found; see evidence and caveats{guess}.")

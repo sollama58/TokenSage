@@ -137,7 +137,14 @@ class Referent(_Model):
 
 
 class Category(_Model):
-    label: str
+    label: str = Field(
+        description="A taxonomy label from GET /v1/meta: a top-level theme (crypto_native) or a "
+        "sub-label (crypto_native/person). A sub-label also lifts its parent, except "
+        "crypto_native/paired_ecosystem. crypto_native's sub-labels say what kind of crypto "
+        "thing the coin is about: slang, person, chain_or_coin, company, trading, tech, "
+        "launchpad, pumpfun_meta, cto, utility_claim, paired_ecosystem. New labels are added "
+        "over time"
+    )
     confidence: float = Field(ge=0, le=1)
     inputs: list[str] | None = Field(
         default=None,
