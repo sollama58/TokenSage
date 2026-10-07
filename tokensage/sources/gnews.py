@@ -20,6 +20,16 @@ _SOURCE = re.compile(r"<source[^>]*>(.*?)</source>", re.S)
 _PUB = re.compile(r"<pubDate>(.*?)</pubDate>", re.S)
 
 
+# Pages about a coin's price or chart, not news about what the coin is named after
+_CRYPTO = re.compile(
+    r"\b(price|prices|coin|coins|token|tokens|crypto|cryptocurrency|memecoins?|pump\.?fun|"
+    r"solana|usdt?|converter|market cap|chart|airdrop|presale|binance|coinbase|dex)\b",
+    re.I,
+)
+# Words that do not make a coin name specific enough to search the news for
+_FILLER = {"the", "of", "a", "an", "on", "and", "coin", "token", "inu", "sol", "wif", "official"}
+
+
 @dataclass
 class Headline:
     title: str
@@ -57,4 +67,38 @@ async def search(http: httpx.AsyncClient, query: str, when: str = "2d") -> list[
         )
         if len(out) >= 20:
             break
+    return out
+
+
+def name_query(name: str | None) -> str | None:
+    """The coin name as a news phrase, or None when it is too generic to search for: a single
+    word ("Claudia", "Einstein") matches unrelated stories, so it takes two content words."""
+    if not name:
+        return None
+    words = re.sub(r"[^\w' ]+", " ", name).split()
+    while words and words[-1].isdigit():  # "Peanut the Squirrel 2.0": the story, not the sequel
+        words.pop()
+    content = [w for w in words if w.lower() not in _FILLER]
+    if len(content) < 2 or sum(len(w) for w in content) < 6 or len(words) > 6:
+        return None
+    return " ".join(words)
+
+
+def relevant(heads: list[dict], phrase: str, symbol: str | None = None) -> list[dict]:
+    """The headlines that name the phrase itself and are not about a coin: drops price pages,
+    crypto stories, and stories naming the ticker (unless the ticker is a word of the phrase).
+    heads: headlines as news_for caches them ({title, source, published})."""
+    pat = re.compile(r"(?<!\w)" + re.escape(phrase.lower()) + r"(?!\w)")
+    sym = (symbol or "").strip().lower()
+    sym_pat = (
+        re.compile(r"(?<!\w)\$?" + re.escape(sym) + r"(?!\w)")
+        if len(sym) >= 2 and sym not in phrase.lower().split()
+        else None
+    )
+    out = []
+    for h in heads:
+        t = str(h.get("title") or "").lower()
+        if not pat.search(t) or _CRYPTO.search(t) or (sym_pat and sym_pat.search(t)):
+            continue
+        out.append(h)
     return out

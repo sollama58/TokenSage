@@ -158,3 +158,61 @@ def test_ocr_reads_ticker_and_feeds_engine() -> None:
     assert dict(out.agg.categories).get("derivative/logo_reuse", 0) >= 0.5
     assert out.ocr_lines and "PNUT" in out.ocr_lines[0].text.upper()
     assert ocr.read(b"junk")[1] is not None
+
+
+def test_gnews_name_query() -> None:
+    assert gnews.name_query("Le Chonk") == "Le Chonk"
+    assert gnews.name_query("Peanut the Squirrel 2.0") == "Peanut the Squirrel"
+    assert gnews.name_query("Google Playground") == "Google Playground"
+    # one word, or one word plus filler: too generic to search the news for
+    assert gnews.name_query("Claudia") is None
+    assert gnews.name_query("The 9-5 Coin") is None
+    assert gnews.name_query("cat wif") is None
+    assert gnews.name_query(None) is None
+
+
+def test_gnews_relevant_drops_price_pages_and_other_stories() -> None:
+    heads = [
+        {"title": "Mistral announces Le Chonk, a new open model - DW", "source": "DW"},
+        {"title": "Mistral's new 'Le Chonk' AI model is big and open", "source": "Wired"},
+        {"title": "Le Chonk price today: CHONK to USD converter", "source": "CoinX"},
+        {"title": "Le Chonk (CHONK) jumps 40% on launch day", "source": "Crypto"},
+        {"title": "Chonky cats of the week", "source": "Cats"},
+    ]
+    rel = gnews.relevant(heads, "Le Chonk", "CHONK")
+    assert [h["source"] for h in rel] == ["DW", "Wired", "Crypto"]
+    # a ticker that is not a word of the name marks a story about the coin itself
+    rel = gnews.relevant(
+        [{"title": "Quantus jumps 9% as QTC lists cross-chain", "source": "a"}], "Quantus", "QTC"
+    )
+    assert rel == []
+
+
+def test_news_hit_needs_two_outlets() -> None:
+    one = [{"title": "Le Chonk launched", "source": "DW"}]
+    assert trends.news_hit("Le Chonk", one) is None
+    assert trends.news_hit("Le Chonk", one * 3) is None  # one outlet, three copies
+    two = one + [{"title": "Le Chonk is big", "source": "Wired"}]
+    h = trends.news_hit("Le Chonk", two)
+    assert h is not None and h.term.source == "news" and h.headline == "Le Chonk launched"
+
+
+def test_name_in_the_news_raises_news_event() -> None:
+    heads = [{"title": f"Le Chonk story {i}", "source": f"outlet{i}"} for i in range(6)]
+    hit = trends.news_hit("Le Chonk", heads)
+    assert hit is not None
+    out = run_full(
+        EngineInput(
+            mint="m",
+            name="Le Chonk",
+            symbol="CHONK",
+            description=None,
+            image_bytes=None,
+            created_at=None,
+            trend_index=trends.TrendIndex([], load_knowledge()),
+            news_hits=[hit],
+        )
+    )
+    assert [h.term.source for h in out.trend_hits] == ["news"]
+    assert "news_event" in dict(out.agg.categories)
+    assert any(e.kind == "trend" and e.label == "news_event" for e in out.evidence)

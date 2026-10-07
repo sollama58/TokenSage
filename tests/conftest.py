@@ -41,6 +41,15 @@ DB_AVAILABLE = _db_reachable()
 needs_db = pytest.mark.skipif(not DB_AVAILABLE, reason="no test Postgres reachable")
 
 
+@pytest.fixture(autouse=True)
+def _closed_breakers() -> None:
+    """Every test starts with all circuit breakers closed: failures a previous test provoked
+    (an unmocked source hitting a catch-all 404) must not turn a source off for the next."""
+    from tokensage.net.breaker import breaker
+
+    breaker.states.clear()
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> str:
     if not DB_AVAILABLE:

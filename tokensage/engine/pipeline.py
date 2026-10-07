@@ -89,6 +89,8 @@ class EngineInput:
     logo_features: image_stage.ImageFeatures | None = None
     # Wikipedia articles found for names nothing in the gazetteer knows (full depth)
     wiki_refs: list[wikilookup.WikiRef] | None = None
+    # the coin's name found in recent news headlines (trends.news_hit), full depth
+    news_hits: list[trends.TrendHit] | None = None
     # optional sentence encoder (ENABLE_EMBED); None = no embedding guesses
     encoder: embed.Encoder | None = None
 
@@ -707,6 +709,10 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 if h.term.term not in seen_terms:
                     seen_terms.add(h.term.term)
                     trend_hits.append(h)
+        for h in inp.news_hits or ():
+            if h.term.term.lower() not in {t.lower() for t in seen_terms}:
+                seen_terms.add(h.term.term)
+                trend_hits.append(h)
         evidence += trends.evidence(trend_hits, inp.trend_index)
 
     mt = meta.assess(
@@ -1071,7 +1077,12 @@ def _context(
         c = min(recent_copies, key=lambda r: r.age_s)
         out.append(f"copies {c.what} ({c.via}) launched {_dur(c.age_s)} earlier")
     if trend_hits:
-        out.append(f"matches the trending topic '{trend_hits[0].term.term}'")
+        t = trend_hits[0].term
+        out.append(
+            f"its name is in the news ('{t.term}')"
+            if t.source == "news"
+            else f"matches the trending topic '{t.term}'"
+        )
     return out
 
 
