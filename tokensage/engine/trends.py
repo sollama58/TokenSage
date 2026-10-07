@@ -78,8 +78,9 @@ class TrendIndex:
         best: dict[str, TrendTerm] = {}
         for t in terms:
             for s in surfaces_for(t.term):
-                # two terms can share a surface: keep the stronger spike, not the last added
-                if s not in best or t.spike > best[s].spike:
+                # two terms (or sources) can share a surface: keep the stronger one by its
+                # own source's scale (spike means nothing for a Google Trends term)
+                if s not in best or _strength(t) > _strength(best[s]):
                     best[s] = t
         self._best = best
         for s, t in best.items():
@@ -135,7 +136,14 @@ def surfaces_for(title: str) -> list[str]:
         or (base and len(base) >= 6 and base not in out)
     ):
         out.append(base)
-    return [re.sub(r"[^a-z0-9 ]+", " ", s).strip() for s in out if s]
+    # one space between words, as TrendIndex.match and _clean write their text ("Dr. Dre"
+    # must index as "dr dre", not "dr  dre")
+    cleaned = [" ".join(re.sub(r"[^a-z0-9 ]+", " ", s).split()) for s in out if s]
+    return list(dict.fromkeys(c for c in cleaned if c))
+
+
+def _strength(t: TrendTerm) -> float:
+    return score(TrendHit(t, "", "name"))
 
 
 def score(h: TrendHit, index: TrendIndex | None = None) -> float:

@@ -216,3 +216,26 @@ async def test_metadata_outage_gives_partial_and_schedules_retry(
     assert meta2 and meta2["status"] == "ok"
     n = await db.fetchval("select count(*) from analysis where mint=$1", T22_MINT)
     assert n == 2  # a new version after the retry succeeded
+
+
+async def test_token2022_mint_without_extension_falls_back_to_metaplex(chain: FakeChain) -> None:
+    """A Token-2022 mint with no metadata extension but a Metaplex PDA (a non-pump T22 token,
+    a pair token) reads the PDA that came back in the batched call instead of paying for
+    getAsset and returning nothing on a provider without DAS."""
+    from tests.fixtures.chain import TOKEN_2022, acct, b64, parsed_mint
+    from tokensage.resolve import metaplex
+    from tokensage.resolve.resolver import read_mint_metadata
+    from tokensage.resolve.rpc import SolanaRpc
+
+    mint = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+    chain.accounts[mint] = parsed_mint(TOKEN_2022)
+    chain.accounts[metaplex.metadata_pda(mint)] = acct(
+        metaplex.METAPLEX_PROGRAM,
+        b64(metaplex.encode_metadata_for_tests("Zed", "ZED", "https://meta.test/zed.json")),
+    )
+    with respx.mock(assert_all_called=False) as router:
+        router.post("https://rpc.test/").mock(side_effect=chain.handle)
+        async with httpx.AsyncClient() as http:
+            meta = await read_mint_metadata(SolanaRpc("https://rpc.test/", http), mint)
+    assert meta is not None and meta["name"] == "Zed" and meta["symbol"] == "ZED"
+    assert "getAsset" not in chain.calls

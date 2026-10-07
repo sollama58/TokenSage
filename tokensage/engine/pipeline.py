@@ -1593,6 +1593,7 @@ def _x_match(
         image_bytes=inp.image_bytes,
         created_at=inp.created_at,
         ctx=dataclasses.replace(inp.ctx, originals={}),  # its own read, nothing inherited
+        logo_features=inp.logo_features,  # already hashed: do not decode the logo again
     )
     text = xmatch.post_text(inp.tweet, inp.profile)
     post_meaning = None

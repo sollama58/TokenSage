@@ -196,13 +196,15 @@ async def status(request: Request, response: Response) -> StatusResponse:
     async with _pool(request).acquire() as conn:
         q = await conn.fetchrow(
             """select
-                 count(*) filter (where status='pending') as pending,
+                 count(*) filter (where status='pending' and run_after <= now()) as pending,
                  count(*) filter (where status='running') as running,
                  count(*) filter (where status='failed'
                                   and finished_at > now() - interval '1 day') as failed_24h,
                  count(*) filter (where status='done'
                                   and finished_at > now() - interval '1 day') as done_24h,
-                 extract(epoch from now() - min(created_at) filter (where status='pending'))
+                 extract(epoch from now() - min(greatest(created_at, run_after))
+                                             filter (where status='pending'
+                                                     and run_after <= now()))
                    as oldest_pending_s
                from job"""
         )

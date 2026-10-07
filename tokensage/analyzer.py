@@ -1485,20 +1485,21 @@ async def _name_news(
             "news", "skipped", detail="name not specific enough to search (needs two words)"
         )
     try:
-        heads = await fulldepth.news_for(conn, ctx.http, phrase, exact=True)
+        found = await fulldepth.news_lookup(conn, ctx.http, phrase, exact=True)
     except Exception as e:  # noqa: BLE001 - an optional enrichment
         log.info("news.lookup_failed", error=str(e)[:120])
         return [], trends.SourceStatus("news", "failed", detail=f"{type(e).__name__}")
-    if heads is None:
+    if found is None:
         return [], trends.SourceStatus("news", "failed", detail="Google News unavailable")
-    rel = gnews.relevant(heads, phrase, inp.symbol)
+    rel = gnews.relevant(found.headlines, phrase, inp.symbol)
     hit = trends.news_hit(phrase, rel)
     st = trends.SourceStatus(
         "news",
-        "ok",
-        as_of=datetime.now(UTC),
+        "stale" if found.stale else "ok",
+        as_of=found.as_of,
         terms=len(rel),
-        detail=f"searched '{phrase}'",
+        detail=f"searched '{phrase}'"
+        + ("; Google News unavailable, older cached headlines" if found.stale else ""),
     )
     return ([hit] if hit else []), st
 

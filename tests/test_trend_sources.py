@@ -184,3 +184,25 @@ async def test_trend_index_flags_stale_and_missing_wikipedia(db: asyncpg.Connect
     idx = await fulldepth.trend_index(db)
     w = next(s for s in idx.sources if s.source == "wikipedia")
     assert w.status == "stale" and w.detail and "9 days old" in w.detail
+
+
+@needs_db
+async def test_news_status_is_stale_when_google_news_is_down(db: asyncpg.Connection) -> None:
+    """Google News failing with an hours-old cached search must not report the news source
+    as fresh: the analyzer's status says stale, as of the cached fetch."""
+    from tokensage import fulldepth
+
+    await db.execute(
+        """insert into lookup_cache (key, value, fetched_at)
+           values ('gnews:q:le chonk', $1, now() - interval '3 hours')""",
+        [{"title": "Le Chonk the cat - CNN", "source": "CNN", "published": None}],
+    )
+    with respx.mock(assert_all_called=False) as router:
+        router.get(url__startswith="https://news.google.com/").mock(
+            return_value=httpx.Response(503)
+        )
+        async with httpx.AsyncClient() as http:
+            found = await fulldepth.news_lookup(db, http, "Le Chonk", exact=True)
+    assert found is not None and found.stale
+    assert found.headlines[0]["title"].startswith("Le Chonk")
+    assert datetime.now(UTC) - found.as_of > timedelta(hours=2)

@@ -148,7 +148,11 @@ async def get(conn: asyncpg.Connection, job_id: int) -> Job | None:
 
 
 async def pending_count(conn: asyncpg.Connection) -> int:
-    return await conn.fetchval("select count(*) from job where status = 'pending'")
+    """Jobs waiting for a worker now. A metadata retry or a callback parked on a future
+    run_after is not queue depth: nothing is waiting on a worker for it yet."""
+    return await conn.fetchval(
+        "select count(*) from job where status = 'pending' and run_after <= now()"
+    )
 
 
 async def claim(

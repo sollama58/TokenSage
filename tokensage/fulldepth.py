@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -230,7 +231,7 @@ async def persist_ocr(conn: asyncpg.Connection, content_key: str, lines: list[oc
 
 
 _trend_cache: tuple[float, trends.TrendIndex] | None = None
-_trend_refreshing = False
+_trend_lock = asyncio.Lock()
 GTRENDS_KEY = "gtrends:seen"  # lookup_cache row: the Google Trends searches seen lately
 GTRENDS_KEEP = timedelta(hours=48)
 GTRENDS_POLL = timedelta(minutes=9)  # just under the index TTL: one poll per rebuild
@@ -246,28 +247,32 @@ async def trend_index(
     searches of the last two days (polled here, when an http client is given), with each
     source's status. Rebuilt every TREND_INDEX_TTL_S; concurrent jobs reuse the old index
     while one of them rebuilds it."""
-    global _trend_cache, _trend_refreshing
+    global _trend_cache
     now = time.monotonic()
-    if _trend_cache and (now - _trend_cache[0] < TREND_INDEX_TTL_S or _trend_refreshing):
+    if _trend_cache and now - _trend_cache[0] < TREND_INDEX_TTL_S:
         return _trend_cache[1]
-    _trend_refreshing = True
-    try:
+    if _trend_cache:
+        # expired: serve the old index unless nobody is rebuilding it yet
+        if _trend_lock.locked():
+            return _trend_cache[1]
+    async with _trend_lock:
+        # the first jobs after a worker start all arrive here with no index: one builds it
+        if _trend_cache and time.monotonic() - _trend_cache[0] < TREND_INDEX_TTL_S:
+            return _trend_cache[1]
         wiki_terms, wiki_status = await _wiki_trends(conn)
         g_terms, g_status = await _google_trends(conn, http)
-    finally:
-        _trend_refreshing = False
-    idx = trends.TrendIndex(wiki_terms + g_terms, load_knowledge(), [wiki_status, g_status])
-    for st in idx.sources:
-        log.info(
-            "trends.source",
-            source=st.source,
-            status=st.status,
-            terms=st.terms,
-            as_of=st.as_of.isoformat() if st.as_of else None,
-            detail=st.detail,
-        )
-    _trend_cache = (time.monotonic(), idx)
-    return idx
+        idx = trends.TrendIndex(wiki_terms + g_terms, load_knowledge(), [wiki_status, g_status])
+        for st in idx.sources:
+            log.info(
+                "trends.source",
+                source=st.source,
+                status=st.status,
+                terms=st.terms,
+                as_of=st.as_of.isoformat() if st.as_of else None,
+                detail=st.detail,
+            )
+        _trend_cache = (time.monotonic(), idx)
+        return idx
 
 
 def _day_start(d: date) -> datetime:
@@ -415,18 +420,26 @@ def _parse_iso(raw: Any, default: datetime) -> datetime:
 # ----------------------------------------------------------------- news confirmation
 
 
-async def news_for(
+@dataclass
+class NewsLookup:
+    headlines: list[dict[str, Any]]
+    as_of: datetime  # when Google News was last asked
+    stale: bool  # Google News failed just now; these are older cached headlines
+
+
+async def news_lookup(
     conn: asyncpg.Connection, http: httpx.AsyncClient, term: str, exact: bool = False
-) -> list[dict[str, Any]] | None:
-    """Recent Google News headlines for a term (cached an hour). exact: search the quoted
-    phrase, so "le chonk" does not return stories about "le" and "chonk" separately."""
+) -> NewsLookup | None:
+    """Recent Google News headlines for a term (cached an hour), with when they were fetched.
+    exact: search the quoted phrase, so "le chonk" does not return stories about "le" and
+    "chonk" separately. None when Google News failed and nothing is cached."""
     key = f"gnews:{'q:' if exact else ''}{term.lower()}"
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and datetime.now(UTC) - row["fetched_at"] < NEWS_TTL:
-        return list(row["value"])
+        return NewsLookup(list(row["value"]), row["fetched_at"], stale=False)
     heads = await gnews.search(http, f'"{term}"' if exact else term)
     if heads is None:
-        return list(row["value"]) if row else None
+        return NewsLookup(list(row["value"]), row["fetched_at"], stale=True) if row else None
     value = [{"title": h.title, "source": h.source, "published": h.published} for h in heads]
     await conn.execute(
         """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
@@ -434,7 +447,15 @@ async def news_for(
         key,
         value,
     )
-    return value
+    return NewsLookup(value, datetime.now(UTC), stale=False)
+
+
+async def news_for(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, term: str, exact: bool = False
+) -> list[dict[str, Any]] | None:
+    """news_lookup's headlines alone (an older cached list when Google News is down)."""
+    found = await news_lookup(conn, http, term, exact)
+    return found.headlines if found is not None else None
 
 
 # ----------------------------------------------------------------- Wikipedia lookups
