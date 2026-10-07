@@ -1305,8 +1305,14 @@ _CATEGORY_KIND = {
     "crypto_native": "project",
     "crypto_native/slang": "concept",
     "crypto_native/cto": "concept",
+    "crypto_native/person": "person",
+    "crypto_native/chain_or_coin": "coin",
+    "crypto_native/company": "organization",
+    "crypto_native/launchpad": "project",
+    "crypto_native/trading": "concept",
+    "crypto_native/tech": "concept",
     "ai_agent": "project",
-    "tradfi": "project",
+    "tradfi": "organization",
     "humor_crude_offensive": "concept",
 }
 _THEME_ORDER = [
@@ -1325,8 +1331,14 @@ _KIND_LABEL = {
     "crypto_native": "crypto project",
     "crypto_native/slang": "crypto slang",
     "crypto_native/cto": "community takeover",
+    "crypto_native/person": "crypto figure",
+    "crypto_native/chain_or_coin": "crypto coin",
+    "crypto_native/company": "crypto company",
+    "crypto_native/launchpad": "launchpad",
+    "crypto_native/trading": "crypto trading",
+    "crypto_native/tech": "crypto tech",
     "ai_agent": "AI agent",
-    "tradfi": "stock",
+    "tradfi": "company",
     "humor_crude_offensive": "crude humour",
 }
 # Themes whose matched word is itself a fair generic label ("frog", "beer", "brainrot").
@@ -1334,7 +1346,7 @@ _WORD_LABELS = ("animal", "food_object_abstract", "meme_template")
 # Engine and knowledge kinds as reported.
 REFERENT_KINDS = {
     "famous_animal", "meme", "person", "coin", "event", "concept", "place", "other",
-    "animal", "media", "project", "object",
+    "animal", "media", "project", "object", "organization",
 }  # fmt: skip
 
 
@@ -1404,8 +1416,9 @@ def read_referent(agg: Aggregated, symbol_is_name: bool, k: Knowledge) -> Refere
         kind = r.kind if r.kind in REFERENT_KINDS else "other"
         if kind == "other":
             kind = _theme_kind(r.categories) or (_CATEGORY_KIND[theme[0]] if theme else "other")
-        elif kind == "concept" and _theme_kind(r.categories) == "media":
-            kind = "media"  # a franchise, game or show (Pokémon, Fortnite)
+        elif kind == "concept" and _theme_kind(r.categories) in ("media", "organization"):
+            # a franchise, game or show (Pokémon, Fortnite); a company or exchange (Binance)
+            kind = _theme_kind(r.categories) or kind
         return ReferentRead(r.label, kind, r.desc, r.source, round(raw, 3), inputs)
     if r is not None and r.generic:
         # inherited from the coin this one copies, itself only a kind

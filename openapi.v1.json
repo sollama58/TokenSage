@@ -2793,7 +2793,8 @@
               "animal",
               "media",
               "project",
-              "object"
+              "object",
+              "organization"
             ],
             "title": "Kind",
             "type": "string"
@@ -2994,7 +2995,7 @@
             "type": "boolean"
           },
           "kind": {
-            "description": "famous_animal, meme, person, coin, event, concept, place, other; since rules 0.17.0 also animal (an animal, not a specific famous one), media (a film, game, show or franchise), project (a crypto or AI product, protocol or launchpad) and object (food, an object, an abstract thing)",
+            "description": "famous_animal, meme, person, coin, event, concept, place, other; since rules 0.17.0 also animal (an animal, not a specific famous one), media (a film, game, show or franchise), project (a crypto or AI product, protocol or launchpad), object (food, an object, an abstract thing) and organization (a company, exchange or listed stock)",
             "enum": [
               "famous_animal",
               "meme",
@@ -3007,7 +3008,8 @@
               "animal",
               "media",
               "project",
-              "object"
+              "object",
+              "organization"
             ],
             "title": "Kind",
             "type": "string"

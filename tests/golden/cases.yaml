@@ -462,7 +462,7 @@ cases:
     symbol: VLP
     referent_kind: project
     referent_generic: true
-    referent_label: crypto project
+    referent_label: launchpad
   # nothing readable: null stays for coins with no theme at all
   - name: xqzvbk
     symbol: XQZ
@@ -515,3 +515,34 @@ cases:
     referent_generic: false
     referent_inputs: [copy_of]
     referent_confidence_between: [0.5, 0.69]
+  # crypto_native children (the split in #38) map to referent kinds
+  - name: Satoshi
+    symbol: SATS
+    referent: Satoshi Nakamoto
+    referent_kind: person
+  - name: Solana Summer
+    symbol: SOLS
+    referent: Solana
+    referent_kind: coin
+  - name: Coinbase
+    symbol: COIN
+    referent: Coinbase
+    referent_kind: organization
+  - name: Microsoft
+    symbol: MSFT
+    referent_kind: organization
+  - name: Voltpad Launchpad
+    symbol: VPAD
+    referent_kind: project
+    referent_label: launchpad
+    referent_generic: true
+  - name: Airdrop Hunter
+    symbol: DROP
+    referent_kind: concept
+    referent_label: crypto tech
+    referent_generic: true
+  - name: Floor Price
+    symbol: FLOOR
+    referent_kind: concept
+    referent_label: crypto trading
+    referent_generic: true

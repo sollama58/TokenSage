@@ -101,6 +101,7 @@ _REFERENT_KINDS: dict[str, ReferentKind] = {
     "media": "media",
     "project": "project",
     "object": "object",
+    "organization": "organization",
 }
 _SEVERITIES: dict[str, Severity] = {"info": "info", "warn": "warn", "high": "high"}
 

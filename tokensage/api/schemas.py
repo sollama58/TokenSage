@@ -29,6 +29,7 @@ ReferentKind = Literal[
     "media",
     "project",
     "object",
+    "organization",
 ]
 Severity = Literal["info", "warn", "high"]
 
@@ -136,8 +137,9 @@ class Referent(_Model):
     kind: ReferentKind = Field(
         description="famous_animal, meme, person, coin, event, concept, place, other; since "
         "rules 0.17.0 also animal (an animal, not a specific famous one), media (a film, game, "
-        "show or franchise), project (a crypto or AI product, protocol or launchpad) and "
-        "object (food, an object, an abstract thing)"
+        "show or franchise), project (a crypto or AI product, protocol or launchpad), "
+        "object (food, an object, an abstract thing) and organization (a company, exchange "
+        "or listed stock)"
     )
     desc: str | None = None
     source: str | None = None
