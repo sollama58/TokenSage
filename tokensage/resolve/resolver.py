@@ -119,20 +119,40 @@ def _quote_label(quote_mint: str | None) -> str | None:
     return quote_mint
 
 
+def _raw_bytes(acc: dict) -> bytes:
+    """Account data as bytes. Accounts with no jsonParsed parser (the bonding curve, Metaplex
+    metadata) come back as ["<base64>", "base64"] whichever encoding was asked."""
+    data = acc.get("data")
+    if not isinstance(data, list) or not data:
+        raise ValueError("account data is not base64-encoded")
+    return base64.b64decode(data[0])
+
+
 async def _onchain_metadata(
-    rpc: SolanaRpc, mint: str, token_program: str, info: dict
+    rpc: SolanaRpc,
+    mint: str,
+    token_program: str,
+    info: dict,
+    metaplex_acc: dict | None = None,
+    metaplex_read: bool = False,
 ) -> tuple[dict[str, str] | None, str]:
-    """name / symbol / uri from the Token-2022 extension, the Metaplex PDA, or DAS."""
+    """name / symbol / uri from the Token-2022 extension, the Metaplex PDA, or DAS.
+    metaplex_read: the caller already read the Metaplex PDA into metaplex_acc (None when the
+    account does not exist); otherwise it is read here if needed."""
     meta: dict[str, str] | None = None
     meta_source = "none"
     if token_program == "token-2022":
         meta = _token2022_metadata(info)
         meta_source = "token2022" if meta else "none"
     if meta is None and token_program == "spl-token":
-        md_acc = await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
+        md_acc = (
+            await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
+            if not metaplex_read
+            else metaplex_acc
+        )
         if md_acc:
             try:
-                meta = metaplex.decode_metadata(base64.b64decode(md_acc["data"][0]))
+                meta = metaplex.decode_metadata(_raw_bytes(md_acc))
                 meta_source = "metaplex"
             except (ValueError, struct.error):
                 meta = None
@@ -153,14 +173,19 @@ async def _onchain_metadata(
 async def read_mint_metadata(rpc: SolanaRpc, mint: str) -> dict[str, str] | None:
     """Name / symbol / uri of any SPL or Token-2022 mint (e.g. a pair token), or None when
     the address is not a mint or carries no metadata."""
-    acc = await rpc.get_account_info(mint, encoding="jsonParsed")
+    # one call for the mint and its Metaplex PDA (1 credit instead of 2 for SPL mints)
+    acc, md_acc = await rpc.get_multiple_accounts(
+        [mint, metaplex.metadata_pda(mint)], encoding="jsonParsed"
+    )
     if acc is None:
         return None
     token_program = TOKEN_PROGRAMS.get(acc.get("owner") or "")
     parsed = acc.get("data") if isinstance(acc.get("data"), dict) else None
     if token_program is None or not parsed or parsed.get("parsed", {}).get("type") != "mint":
         return None
-    meta, _ = await _onchain_metadata(rpc, mint, token_program, parsed["parsed"]["info"])
+    meta, _ = await _onchain_metadata(
+        rpc, mint, token_program, parsed["parsed"]["info"], metaplex_acc=md_acc, metaplex_read=True
+    )
     return meta
 
 
@@ -249,8 +274,12 @@ async def resolve(
     API and the (RPC-expensive) signature-history lookup when nothing better is stored."""
     mint = parse_ca(raw_ca)
 
-    # 1. mint account
-    acc = await rpc.get_account_info(mint, encoding="jsonParsed")
+    # 1. mint, bonding curve and Metaplex PDA in one call (1 RPC credit instead of 2-3).
+    # The curve and Metaplex accounts have no jsonParsed parser, so they come back base64.
+    curve_addr = bonding_curve_pda(mint)
+    acc, curve_acc, md_acc = await rpc.get_multiple_accounts(
+        [mint, curve_addr, metaplex.metadata_pda(mint)], encoding="jsonParsed"
+    )
     if acc is None:
         raise ResolveError("token_not_found", "no account found on-chain for this address")
     owner = acc.get("owner")
@@ -265,12 +294,10 @@ async def resolve(
     info = parsed["parsed"]["info"]  # type: ignore[index]
 
     # 2. bonding curve
-    curve_addr = bonding_curve_pda(mint)
-    curve_acc = await rpc.get_account_info(curve_addr, encoding="base64")
     curve: dict | None = None
     if curve_acc and curve_acc.get("owner") == PUMP_PROGRAM:
         try:
-            curve = decode_bonding_curve(base64.b64decode(curve_acc["data"][0]))
+            curve = decode_bonding_curve(_raw_bytes(curve_acc))
         except ValueError:
             curve = None
     is_pumpfun = curve is not None
@@ -293,7 +320,9 @@ async def resolve(
                 curve_progress = 1.0
 
     # 3. on-chain name / symbol / uri
-    meta, meta_source = await _onchain_metadata(rpc, mint, token_program, info)
+    meta, meta_source = await _onchain_metadata(
+        rpc, mint, token_program, info, metaplex_acc=md_acc, metaplex_read=True
+    )
 
     # 4. creation time + creator
     created: datetime | None = None
