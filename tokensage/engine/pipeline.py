@@ -3,6 +3,7 @@ EngineInput, so golden tests run without a database or network."""
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -21,7 +22,8 @@ from tokensage.engine import (
     xsignals,
 )
 from tokensage.engine import image as image_stage
-from tokensage.engine.aggregate import Aggregated, aggregate
+from tokensage.engine import lineage as lineage_stage
+from tokensage.engine.aggregate import NO_PARENT, Aggregated, aggregate
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.gazetteer import Gazetteer
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
@@ -29,7 +31,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.13.0-full"
+RULES_VERSION = "0.14.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -50,6 +52,14 @@ class SameNameToken:
 
 
 @dataclass
+class PriorRead:
+    """TokenSage's stored read of another coin (the one this coin copies)."""
+
+    categories: list[tuple[str, float]] = field(default_factory=list)
+    referent: ReferentCandidate | None = None
+
+
+@dataclass
 class DbContext:
     x_reuse_count: int = 0
     creator_token_count: int = 0
@@ -63,6 +73,8 @@ class DbContext:
     meta_counts: meta.MetaCounts | None = None
     # the day's most-traded pump.fun tokens (top_volume table)
     top_volume: list[meta.TopVolume] = field(default_factory=list)
+    # stored reads of the coins this one may copy (lineage.candidate_mints), by mint
+    originals: dict[str, PriorRead] = field(default_factory=dict)
 
 
 @dataclass
@@ -120,6 +132,7 @@ class EngineOutput:
     trend_hits: list[trends.TrendHit] = field(default_factory=list)
     x_match: xmatch.XMatch | None = None
     pair: pairing.PairAssessment | None = None
+    lineage: lineage_stage.Lineage | None = None
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -552,7 +565,7 @@ def _ocr_pass(
         evs.append(
             Ev(
                 "ocr",
-                "crypto_native/pumpfun_meta",
+                "logo_text",
                 0.15,
                 f"the logo text reads '{text[:60]}', matching the ticker",
                 "ocr",
@@ -563,7 +576,7 @@ def _ocr_pass(
         evs.append(
             Ev(
                 "ocr",
-                "crypto_native/pumpfun_meta",
+                "logo_text",
                 0.1,
                 f"the logo text reads '{text[:60]}', matching the name",
                 "ocr",
@@ -664,13 +677,17 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     tk = ticker.explain(n, k)
 
     max_dist = int(k.scoring.get("logo_phash_edited", 14))
-    img = image_stage.analyze(inp.image_bytes, inp.ctx.image_candidates, max_dist)
-    if img.features is None and inp.logo_features is not None:
-        # the logo's hashes came from cache: compare those instead of skipping the check
-        img = image_stage.ImageResult(
-            features=inp.logo_features,
-            near=image_stage.near_duplicates(inp.logo_features, inp.ctx.image_candidates, max_dist),
-        )
+    if inp.logo_features is not None:
+        # the logo's hashes came from cache (or the analyzer already hashed it)
+        img = image_stage.ImageResult(features=inp.logo_features)
+    else:
+        img = image_stage.analyze(inp.image_bytes, [], max_dist)
+    logo_near = (
+        image_stage.all_near(img.features, inp.ctx.image_candidates, max_dist)
+        if img.features is not None
+        else []
+    )
+    img.near = logo_near[:10]
     img_evs, recent_copies = _image_evidence(img, k, inp)
     evidence += img_evs
 
@@ -736,8 +753,28 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 c["rank"], c["rank_of"] = mt.rank.rank, mt.rank.of
                 c["rank_window_hours"] = mt.rank.window_hours
                 c["signals"].append(f"copycat_rank:{mt.rank.rank}/{mt.rank.of}")
+    lin = lineage_stage.assess(
+        inp.mint,
+        inp.created_at,
+        n,
+        inp.ctx.same_name,
+        logo_near,
+        k,
+        window_days=inp.ctx.copycat_window_days,
+        rank=(mt.rank.rank, mt.rank.of, mt.rank.window_hours) if mt.rank else None,
+        self_coins=_self_coins(matches, n, inp.ctx.extra_coins),
+        references=[m.coin for m in matches if not known_coins.is_self(m, n)],
+        has_logo=img.features is not None,
+        top=inp.ctx.top_volume,
+    )
+    if not is_famous:
+        _enrich_copies(copies, lin, n, inp, logo_near)
 
     agg = aggregate(evidence, k)
+    inherited = _inherit(agg, lin, inp.ctx.originals, k)
+    if inherited:
+        evidence += inherited
+        agg = aggregate(evidence, k)
     if inp.encoder is not None:
         emb = embed.guesses(
             inp.encoder,
@@ -751,6 +788,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             agg = aggregate(evidence, k)
     _demote_description_only_referent(agg, head)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
+    flags += _lineage_flags(lin, k)
     if pair is not None and pair.meaningful:
         flags.append(
             FlagOut(
@@ -820,7 +858,156 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         x=xa,
         trend_hits=trend_hits,
         pair=pair,
+        lineage=lin,
     )
+
+
+def _self_coins(
+    matches: list[known_coins.CopyMatch], n: Normalized, extra: list[KnownCoin]
+) -> list[KnownCoin]:
+    """The established coins this token is by name and ticker, plus the database's rows of
+    them (a seed coin's row there may know its mint)."""
+    selfs = [m.coin for m in matches if known_coins.is_self(m, n)]
+    keys = {(c.symbol, c.name) for c in selfs}
+    return selfs + [c for c in extra if c.mint and (c.symbol, c.name) in keys and c not in selfs]
+
+
+def _enrich_copies(
+    copies: list[dict],
+    lin: lineage_stage.Lineage,
+    n: Normalized,
+    inp: EngineInput,
+    logo_near: list[image_stage.NearDup],
+) -> None:
+    """Each recent copy relation carries its lineage facts (age of the original, which inputs
+    match, logo distance); a coin copied by logo alone gets its own copy_of entry."""
+    dist: dict[str, int] = {}
+    for nd in logo_near:
+        if nd.candidate.mint and nd.candidate.mint not in dist:
+            dist[nd.candidate.mint] = nd.distance
+    for c in copies:
+        if not c.get("recent") or not c.get("mint"):
+            continue
+        when = c.get("created_at")
+        if when is not None and inp.created_at is not None:
+            c["original_age_s"] = int((_aware(inp.created_at) - _aware(when)).total_seconds())
+        c["match"] = lineage_stage.match_inputs(n, c.get("name"), c.get("ticker"))
+        if c["mint"] in dist:
+            c["match"].append("image")
+            c["image_distance"] = dist[c["mint"]]
+    have = {c.get("mint") for c in copies}
+    for o in (lin.original, lin.logo_original):
+        if o is None or o.mint in have or "image" not in o.match:
+            continue
+        have.add(o.mint)
+        copies.append(
+            {
+                "ticker": o.ticker,
+                "name": o.name,
+                "mint": o.mint,
+                "signals": ["logo_recent", f"phash_distance:{o.image_distance}"],
+                "created_at": o.created_at,
+                "recent": True,
+                "original_age_s": o.age_s,
+                "match": list(o.match),
+                "image_distance": o.image_distance,
+            }
+        )
+
+
+def _lineage_flags(lin: lineage_stage.Lineage, k: Knowledge) -> list[FlagOut]:
+    out: list[FlagOut] = []
+    o = lin.original
+    if lin.kind == "late_copy" and o is not None:
+        what = f"${o.ticker}" if o.ticker else (o.name or o.mint[:6] + "…")
+        rank = f"#{lin.rank} of {lin.rank_of} within {lin.window_hours} h, " if lin.rank else ""
+        out.append(
+            FlagOut(
+                "late_copy",
+                "warn",
+                f"a late copy of {what}: {rank}launched {_dur(o.age_s or 0)} after it",
+            )
+        )
+    floor = int(lineage_stage.config(k).get("logo_reused_min", 3))
+    if lin.logo_reuse_24h is not None and lin.logo_reuse_24h >= floor:
+        out.append(
+            FlagOut(
+                "logo_reused",
+                "info",
+                f"{lin.logo_reuse_24h} other coins used a near-identical logo in the 24 h "
+                "before it",
+            )
+        )
+    return out
+
+
+# Categories that describe the copy relation or the launch corpus, not the coin's theme.
+_RELATION_PREFIXES = ("derivative",)
+
+
+def _inherit(
+    agg: Aggregated,
+    lin: lineage_stage.Lineage,
+    originals: dict[str, PriorRead],
+    k: Knowledge,
+) -> list[Ev]:
+    """A copy is about what its original is about (a copy of a dog coin is a dog coin). When
+    the coin's own inputs give no theme, it inherits the original's categories; when they
+    name no referent (or only a weak guess), the original's referent. Both at a lowered
+    confidence, with where="copy_of" so supported_by says so."""
+    o = lin.original
+    prior = originals.get(o.mint) if o is not None else None
+    if o is None or prior is None:
+        return []
+    factor = float(lineage_stage.config(k).get("inherit_factor", 0.8))
+    who = f"${o.ticker}" if o.ticker else (o.name or o.mint[:6] + "…")
+    evs: list[Ev] = []
+    own_theme = [lbl for lbl, _ in agg.categories if not lbl.startswith(_RELATION_PREFIXES)]
+    if not own_theme:
+        labels = [lbl for lbl, _ in prior.categories]
+        for lbl, conf in prior.categories:
+            if lbl.startswith(_RELATION_PREFIXES) or lbl == meta.LABEL or lbl in NO_PARENT:
+                continue  # the relation, old corpus-rule labels and the pair's ecosystem
+            if any(other.startswith(lbl + "/") for other in labels):
+                continue  # the parent is lifted again by its child; adding both inflates it
+            evs.append(
+                Ev(
+                    kind="copy_inherit",
+                    label=lbl,
+                    weight=round(conf * factor, 3),
+                    detail=f"inherited from {who}, the coin it copies ({lbl} {conf:.2f})",
+                    source=f"copy_of:{o.mint}",
+                    where="copy_of",
+                )
+            )
+    r = prior.referent
+    own = agg.referent
+    weak = float(k.scoring.get("weak_referent", 0.45))
+    if (
+        r is not None
+        and not r.label.startswith(meta.REFERENT_PREFIX)
+        and (own is None or own.score < weak)
+    ):
+        ref = ReferentCandidate(
+            label=r.label,
+            kind=r.kind,
+            desc=r.desc,
+            source=f"copy_of:{o.mint}",
+            score=round(r.score * factor, 3),
+            categories=list(r.categories),
+        )
+        evs.append(
+            Ev(
+                kind="referent",
+                label="referent",
+                weight=ref.score,
+                detail=f"{r.label}: inherited from {who}, the coin it copies",
+                source=f"copy_of:{o.mint}",
+                where="copy_of",
+                referent=ref,
+            )
+        )
+    return evs
 
 
 # The quoted / replied-to author is usually the narrative; the posting account is often the
@@ -1122,7 +1309,7 @@ def _x_match(
         description=None,
         image_bytes=inp.image_bytes,
         created_at=inp.created_at,
-        ctx=inp.ctx,
+        ctx=dataclasses.replace(inp.ctx, originals={}),  # its own read, nothing inherited
     )
     text = xmatch.post_text(inp.tweet, inp.profile)
     post_meaning = None

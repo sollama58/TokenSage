@@ -24,13 +24,16 @@ from tokensage.api.schemas import (
     Evidence,
     Flag,
     ImageInfo,
+    Lineage,
     Market,
     NearDuplicate,
+    OriginalMarket,
     Pair,
     PairReferent,
     RawFields,
     Referent,
     ReferentKind,
+    ReferentWave,
     Severity,
     Versions,
     XAccount,
@@ -57,6 +60,8 @@ from tokensage.api.schemas import (
 from tokensage.config import Settings
 from tokensage.engine import embed, meta, pairing, trends, wikilookup, xmatch, xsignals
 from tokensage.engine import image as image_stage
+from tokensage.engine import lineage as lineage_stage
+from tokensage.engine.context import ReferentCandidate
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.meta import MetaCounts, MetaWord, TopVolume
 from tokensage.engine.pipeline import (
@@ -64,6 +69,7 @@ from tokensage.engine.pipeline import (
     DbContext,
     EngineInput,
     EngineOutput,
+    PriorRead,
     SameNameToken,
     run_basic,
     run_full,
@@ -71,7 +77,7 @@ from tokensage.engine.pipeline import (
 from tokensage.engine.xref import parse_x_ref, snowflake_time
 from tokensage.resolve import metadata as md
 from tokensage.resolve import pair as pair_lookup
-from tokensage.resolve.resolver import Resolved, ResolveError, resolve
+from tokensage.resolve.resolver import Resolved, ResolveError, curve_now, resolve
 from tokensage.resolve.rpc import SolanaRpc
 from tokensage.sources import gnews, lookups
 
@@ -184,6 +190,7 @@ async def _db_context(
     ticker: str | None,
     name_compact: str,
     meta_words: list[str] | None = None,
+    logo: image_stage.ImageFeatures | None = None,
 ) -> DbContext:
     dbc = DbContext()
     # X link reuse across other tokens
@@ -217,14 +224,20 @@ async def _db_context(
     }
     if ticker or name_compact:
         # an empty name or ticker must not match every token whose name/ticker is empty
+        # the earliest namesakes launched within the copycat window before this one: the
+        # candidates for the coin it copies (an older namesake is never its original)
         rows = await conn.fetch(
             """select mint, name, symbol, created_at from token
                where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
                      regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
-               order by created_at nulls last limit 50""",
+                 and created_at >= coalesce($4, now()) - make_interval(days => $5)
+                 and created_at <= coalesce($4, now())
+               order by created_at limit 50""",
             r.mint,
             (ticker or "").upper(),
             name_compact,
+            r.created_at,
+            ctx.settings.copycat_window_days,
         )
         # ... and every namesake launched around this one, for its copycat rank and the
         # current-meta count (the query above keeps only the oldest 50)
@@ -313,31 +326,115 @@ async def _db_context(
             dbc.image_candidates.append(
                 image_stage.Candidate(f"known:{c.symbol}", c.logo_phash, known_coin=c.symbol)
             )
-    # Logos of tokens launched in the copycat window before this one: a logo shared with an
-    # older token is not a copy of a live coin (and scanning only recent logos keeps this
-    # query and the comparison small).
-    this_key = m.image_content_key if m else None
-    rows = await conn.fetch(
-        """select i.content_key, i.phash, tm.mint, t.created_at from image i
+    # Logos of tokens launched before this one (within the logo scan window) that are
+    # near-duplicates of its own, plain or mirrored. Postgres does the Hamming filter, so
+    # only matches come back, however many coins launched. The same image file (same
+    # content key) is the plainest logo reuse of all and counts too.
+    if logo is not None:
+        k = load_knowledge()
+        scan_days = min(
+            ctx.settings.copycat_window_days,
+            int(lineage_stage.config(k).get("logo_scan_days", 7)),
+        )
+        logo_sql = """from image i
            join token_metadata tm on tm.image_content_key = i.content_key
            join token t on t.mint = tm.mint
-           where i.phash is not null and i.content_key <> coalesce($1, '')
-             and tm.mint <> $2
-             and t.created_at >= coalesce($3, now()) - make_interval(days => $4)
-             and t.created_at <= coalesce($3, now())
-           order by t.created_at desc limit 20000""",
-        this_key,
-        r.mint,
-        r.created_at,
-        ctx.settings.copycat_window_days,
-    )
-    for row in rows:
-        dbc.image_candidates.append(
-            image_stage.Candidate(
-                row["content_key"], row["phash"], mint=row["mint"], created_at=row["created_at"]
-            )
+           where i.phash is not null and tm.mint <> $1
+             and t.created_at >= coalesce($2, now()) - make_interval(days => $3)
+             and t.created_at <= coalesce($2, now())
+             and least(bit_count((i.phash # $4::bigint)::bit(64)),
+                       bit_count((i.phash # $5::bigint)::bit(64))) <= $6"""
+        args = (
+            r.mint,
+            r.created_at,
+            scan_days,
+            logo.phash,
+            logo.phash_mirror,
+            int(k.scoring.get("logo_phash_edited", 14)),
         )
+        rows = await conn.fetch(
+            f"""select i.content_key, i.phash, tm.mint, t.created_at, t.name, t.symbol
+                {logo_sql} order by t.created_at desc limit {LOGO_ROWS}""",
+            *args,
+        )
+        if len(rows) == LOGO_ROWS:
+            # a logo reused thousands of times: keep the recent ones (the counts) and add
+            # the earliest (the original, logo_first_seen_at)
+            rows = [
+                *rows,
+                *await conn.fetch(
+                    f"""select i.content_key, i.phash, tm.mint, t.created_at, t.name, t.symbol
+                        {logo_sql} order by t.created_at limit 10""",
+                    *args,
+                ),
+            ]
+        for row in rows:
+            dbc.image_candidates.append(
+                image_stage.Candidate(
+                    row["content_key"],
+                    row["phash"],
+                    mint=row["mint"],
+                    created_at=row["created_at"],
+                    name=row["name"],
+                    symbol=row["symbol"],
+                )
+            )
+    dbc.originals = await _prior_reads(
+        conn,
+        lineage_stage.candidate_mints(
+            r.mint,
+            r.created_at,
+            dbc.same_name,
+            [(c.mint, c.created_at) for c in dbc.image_candidates if c.mint],
+            ctx.settings.copycat_window_days,
+            top_mints=[
+                t.mint
+                for t in dbc.top_volume
+                if (ticker and t.symbol.upper() == ticker.upper())
+                or (name_compact and _compact(t.name) == name_compact)
+            ],
+        ),
+    )
     return dbc
+
+
+LOGO_ROWS = 5000
+
+
+def _compact(s: str) -> str:
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+async def _prior_reads(conn: asyncpg.Connection, mints: list[str]) -> dict[str, PriorRead]:
+    """The latest stored read of each mint: what a copy of it inherits."""
+    if not mints:
+        return {}
+    rows = await conn.fetch(
+        """select distinct on (mint) mint, doc->'categories' as cats, doc->'referent' as ref
+           from analysis where mint = any($1::text[]) order by mint, version desc""",
+        mints,
+    )
+    out: dict[str, PriorRead] = {}
+    for row in rows:
+        cats = row["cats"] if isinstance(row["cats"], list) else []
+        prior = PriorRead(
+            categories=[
+                (str(c["label"]), float(c["confidence"]))
+                for c in cats
+                if isinstance(c, dict) and "label" in c and "confidence" in c
+            ]
+        )
+        ref = row["ref"]
+        if isinstance(ref, dict) and ref.get("label"):
+            prior.referent = ReferentCandidate(
+                label=str(ref["label"]),
+                kind=str(ref.get("kind") or "other"),
+                desc=ref.get("desc"),
+                source=str(ref.get("source") or "analysis"),
+                score=float(ref.get("confidence") or 0.0),
+            )
+        out[row["mint"]] = prior
+    return out
 
 
 async def _meta_counts(
@@ -477,8 +574,10 @@ def build_document(
     out: EngineOutput | None,
     x: XInfo | None,
     hint_use: HintUse | None = None,
+    extras: ReadExtras | None = None,
 ) -> Analysis:
     now = datetime.now(UTC)
+    ex = extras or ReadExtras()
     flags: list[Flag] = []
     caveats: list[str] = []
     evidence: list[Evidence] = []
@@ -563,6 +662,7 @@ def build_document(
     referent = None
     categories: list[Category] = []
     copy_of: list[CopyOf] = []
+    lineage: Lineage | None = None
     ticker_explanation = None
     doc_trend = TrendOut()
     summary = f"{raw.name or '?'} (${raw.symbol or '?'}): resolved, but the engine did not run."
@@ -582,8 +682,12 @@ def build_document(
                         if ev.referent is not None and ev.referent.label == agg.referent.label
                     )
                 ),
+                wave=ex.wave,
             )
-        categories = [Category(label=lbl, confidence=s) for lbl, s in agg.categories]
+        categories = [
+            Category(label=lbl, confidence=s, wave_1h=ex.category_waves.get(lbl))
+            for lbl, s in agg.categories
+        ]
         copy_of = [
             CopyOf(
                 ticker=c.get("ticker"),
@@ -595,9 +699,14 @@ def build_document(
                 rank=c.get("rank"),
                 rank_of=c.get("rank_of"),
                 rank_window_hours=c.get("rank_window_hours"),
+                original_age_s=c.get("original_age_s"),
+                original_market=ex.markets.get(c.get("mint") or "") if c.get("recent") else None,
+                match=c.get("match") or [],
+                image_distance=c.get("image_distance"),
             )
             for c in out.copy_of
         ]
+        lineage = _lineage_out(out.lineage)
         ticker_explanation = out.ticker_explanation
         for ev in out.evidence:
             evidence.append(
@@ -705,6 +814,7 @@ def build_document(
         categories=categories,
         ticker_explanation=ticker_explanation,
         copy_of=copy_of,
+        lineage=lineage,
         image=image,
         x=x,
         trend=doc_trend,
@@ -723,6 +833,29 @@ def build_document(
     if partial:
         doc.caveats.append("partial: metadata pending; the next request may be more complete")
     return doc
+
+
+def _lineage_out(lin: lineage_stage.Lineage | None) -> Lineage | None:
+    if lin is None:
+        return None
+    o = lin.original
+    ref = lin.reference
+    return Lineage(
+        kind=lin.kind,  # type: ignore[arg-type]
+        of_mint=o.mint if o else (ref.mint if ref else None),
+        of_name=o.name if o else (ref.name if ref else None),
+        of_ticker=o.ticker if o else (ref.symbol if ref else None),
+        of_created_at=o.created_at if o else None,
+        match=list(o.match) if o else [],  # type: ignore[arg-type]
+        rank=lin.rank,
+        rank_of=lin.rank_of,
+        window_hours=lin.window_hours,
+        siblings_1h=lin.siblings_1h,
+        siblings_6h=lin.siblings_6h,
+        siblings_24h=lin.siblings_24h,
+        logo_reuse_24h=lin.logo_reuse_24h,
+        logo_first_seen_at=lin.logo_first_seen_at,
+    )
 
 
 def _pair_out(p: pairing.PairAssessment | None) -> Pair | None:
@@ -774,7 +907,29 @@ async def _store_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
     async with conn.transaction():
         # basic and full jobs for one mint can finish together: serialise max(version)+1
         await conn.execute("select pg_advisory_xact_lock(hashtext('analysis:' || $1))", doc.mint)
-        return await _insert_analysis(conn, doc)
+        version = await _insert_analysis(conn, doc)
+        await _store_read(conn, doc)
+        return version
+
+
+async def _store_read(conn: asyncpg.Connection, doc: Analysis) -> None:
+    """The coin's latest read by launch time: what the referent and category waves count.
+    A coin with no known launch time is not counted (it would look new on every re-read)."""
+    if doc.created_at is None:
+        return
+    await conn.execute(
+        """insert into token_read (mint, launched_at, referent_key, referent_label, categories,
+                                   updated_at)
+           values ($1, $2, $3, $4, $5, now())
+           on conflict (mint) do update set launched_at=excluded.launched_at,
+             referent_key=excluded.referent_key, referent_label=excluded.referent_label,
+             categories=excluded.categories, updated_at=now()""",
+        doc.mint,
+        doc.created_at,
+        referent_key(doc.referent.label) if doc.referent else None,
+        doc.referent.label if doc.referent else None,
+        [c.label for c in doc.categories],
+    )
 
 
 async def _insert_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
@@ -1016,6 +1171,11 @@ async def analyze(
     from tokensage.engine.normalize import clean_ticker, normalize
 
     n0 = normalize(name, symbol, None)
+    logo_feats = cached_feats
+    if logo_feats is None and image_bytes:
+        # hash the logo up front: the database looks up its near-duplicates (lineage), and
+        # the engine reuses these hashes instead of decoding the image again
+        logo_feats = (await asyncio.to_thread(image_stage.analyze, image_bytes, [], 0)).features
     dbc = await _db_context(
         conn,
         ctx,
@@ -1025,6 +1185,7 @@ async def analyze(
         clean_ticker(symbol or ""),
         n0.name_compact,
         meta.candidate_words(n0, load_knowledge()),
+        logo=logo_feats,
     )
     inp = EngineInput(
         mint=r.mint,
@@ -1038,7 +1199,7 @@ async def analyze(
         ctx=dbc,
         pair=await pair_lookup.lookup(conn, ctx.rpc, r.quote_mint),
     )
-    inp.logo_features = cached_feats  # hashes from cache: still compared with other logos
+    inp.logo_features = logo_feats  # hashed above or cached: compared with other logos
     if ctx.settings.enable_embed:
         # first call loads the ONNX model from disk: keep that off the event loop
         inp.encoder = await asyncio.to_thread(embed.default_encoder, ctx.settings)
@@ -1077,7 +1238,8 @@ async def analyze(
     if m and m.image_content_key and out.image.features and image_bytes:
         await _persist_image(conn, m.image_content_key, out)
 
-    doc = build_document(r, m, depth, out, x, hint_use)
+    extras = await _read_extras(conn, ctx, r, out)
+    doc = build_document(r, m, depth, out, x, hint_use, extras)
     score = doc.referent.confidence if doc.referent else None
     log.info(
         "analysis.referent",
@@ -1089,6 +1251,98 @@ async def analyze(
     )
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
+
+
+@dataclass
+class ReadExtras:
+    """Facts gathered after the engine ran: the copied coins' curves now, and the waves."""
+
+    markets: dict[str, OriginalMarket] = field(default_factory=dict)
+    wave: ReferentWave | None = None
+    category_waves: dict[str, int] = field(default_factory=dict)
+
+
+CURVE_TIMEOUT_S = 3.0
+
+
+def referent_key(label: str) -> str:
+    """TokenSage's normalised referent: the resolved label, case and punctuation folded. Every
+    alias resolves to one entity label first ("Elon", "Musk", "elonmusk" -> "Elon Musk")."""
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in label.casefold()).split())
+
+
+async def _read_extras(
+    conn: asyncpg.Connection, ctx: Context, r: Resolved, out: EngineOutput
+) -> ReadExtras:
+    ex = ReadExtras()
+    now = datetime.now(UTC)
+    mints = [c["mint"] for c in out.copy_of if c.get("recent") and c.get("mint")]
+    if out.lineage is not None and out.lineage.original is not None:
+        mints.append(out.lineage.original.mint)
+
+    async def curve(mint: str) -> None:
+        try:
+            state = await asyncio.wait_for(curve_now(conn, ctx.rpc, mint), CURVE_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001 - an optional enrichment
+            log.info("lineage.curve_failed", mint=mint, error=str(e)[:120])
+            return
+        if state is not None:
+            complete, progress, as_of = state
+            ex.markets[mint] = OriginalMarket(
+                complete=complete, curve_progress=progress, graduated_pool=None, as_of=as_of
+            )
+
+    # one connection: the reads share it, so they run one after another under one bound
+    for mint in list(dict.fromkeys(mints))[:3]:
+        await curve(mint)
+    launched = r.created_at
+
+    def within(hours: int) -> int:
+        return int(launched is not None and now - timedelta(hours=hours) < launched <= now)
+
+    ref = out.agg.referent
+    if ref is not None:
+        row = await conn.fetchrow(
+            """with p as (select $3::timestamptz as now, coalesce($4::timestamptz, $3) as me)
+               select count(*) filter (where launched_at > p.now - interval '1 hour') as h1,
+                      count(*) filter (where launched_at > p.now - interval '6 hours') as h6,
+                      count(*) filter (where launched_at > p.now - interval '24 hours') as h24,
+                      count(*) filter (where launched_at > p.now - interval '24 hours'
+                                         and launched_at < p.me) as before24,
+                      min(launched_at) as first
+               from token_read, p
+               where referent_key = $1 and mint <> $2
+                 and launched_at > p.now - interval '7 days' and launched_at <= p.now""",
+            referent_key(ref.label),
+            r.mint,
+            now,
+            launched,
+        )
+        first = row["first"]
+        if launched is not None and within(24 * 7) and (first is None or launched < first):
+            first = launched
+        ex.wave = ReferentWave(
+            launches_1h=int(row["h1"]) + within(1),
+            launches_6h=int(row["h6"]) + within(6),
+            launches_24h=int(row["h24"]) + within(24),
+            first_seen_at=first,
+            rank_24h=int(row["before24"]) + 1 if within(24) else None,
+        )
+    labels = [lbl for lbl, _ in out.agg.categories]
+    if labels:
+        rows = await conn.fetch(
+            """select l, count(*) as n from token_read, unnest(categories) as l
+               where launched_at > $1::timestamptz - interval '1 hour'
+                 and launched_at <= $1::timestamptz
+                 and mint <> $2 and l = any($3::text[])
+               group by l""",
+            now,
+            r.mint,
+            labels,
+        )
+        found = {row["l"]: int(row["n"]) for row in rows}
+        ex.category_waves = {lbl: found.get(lbl, 0) + within(1) for lbl in labels}
+    return ex
 
 
 async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput | None) -> None:

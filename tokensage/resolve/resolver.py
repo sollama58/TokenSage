@@ -279,18 +279,12 @@ async def resolve(
 
     complete = curve_progress = creator = quote_mint = is_mayhem = None
     if curve:
-        complete = bool(curve.get("complete"))
+        complete, curve_progress = await _curve_state(rpc, curve)
         creator = curve.get("creator")
         if creator and set(creator) == {"1"}:
             creator = None
         is_mayhem = curve.get("is_mayhem_mode")
         quote_mint = _quote_label(curve.get("quote_mint")) or "SOL"
-        real = curve.get("real_token_reserves")
-        if real is not None:
-            init = await initial_real_token_reserves(rpc)
-            curve_progress = max(0.0, min(1.0, 1 - real / init)) if init else None
-            if complete:
-                curve_progress = 1.0
 
     # 3. on-chain name / symbol / uri
     meta, meta_source = await _onchain_metadata(rpc, mint, token_program, info)
@@ -345,6 +339,57 @@ async def resolve(
     )
     await persist(conn, res)
     return res
+
+
+async def _curve_state(rpc: SolanaRpc, curve: dict) -> tuple[bool, float | None]:
+    complete = bool(curve.get("complete"))
+    progress: float | None = None
+    real = curve.get("real_token_reserves")
+    if real is not None:
+        init = await initial_real_token_reserves(rpc)
+        progress = max(0.0, min(1.0, 1 - real / init)) if init else None
+        if complete:
+            progress = 1.0
+    return complete, progress
+
+
+async def curve_now(
+    conn: asyncpg.Connection, rpc: SolanaRpc | None, mint: str, max_age_s: int = 300
+) -> tuple[bool | None, float | None, datetime | None] | None:
+    """Another coin's bonding curve (complete, curve_progress, as_of): the stored state when
+    it is fresher than max_age_s, else one RPC read (stored back). None when unknown."""
+    row = await conn.fetchrow(
+        "select complete, curve_progress, updated_at from token_market where mint=$1", mint
+    )
+    now = datetime.now(UTC)
+    if row and row["updated_at"] and (now - row["updated_at"]).total_seconds() <= max_age_s:
+        return row["complete"], row["curve_progress"], row["updated_at"]
+    if rpc is not None:
+        try:
+            acc = await rpc.get_account_info(bonding_curve_pda(mint), encoding="base64")
+            if acc and acc.get("owner") == PUMP_PROGRAM:
+                curve = decode_bonding_curve(base64.b64decode(acc["data"][0]))
+                complete, progress = await _curve_state(rpc, curve)
+                if row is not None or await conn.fetchval(
+                    "select 1 from token where mint=$1", mint
+                ):
+                    await conn.execute(
+                        """insert into token_market (mint, complete, curve_progress, updated_at)
+                           values ($1,$2,$3,$4)
+                           on conflict (mint) do update set complete=excluded.complete,
+                             curve_progress=excluded.curve_progress,
+                             updated_at=excluded.updated_at""",
+                        mint,
+                        complete,
+                        progress,
+                        now,
+                    )
+                return complete, progress, now
+        except (RpcError, ValueError, KeyError, IndexError, TypeError) as e:
+            log.info("curve_now.failed", mint=mint, error=str(e)[:120])
+    if row:
+        return row["complete"], row["curve_progress"], row["updated_at"]
+    return None
 
 
 async def persist(conn: asyncpg.Connection, r: Resolved) -> None:
