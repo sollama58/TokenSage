@@ -61,7 +61,10 @@ class SolanaRpc:
         res = await self.call(
             "getMultipleAccounts", [pubkeys, {"encoding": encoding, "commitment": self.commitment}]
         )
-        return (res or {}).get("value") or [None] * len(pubkeys)
+        value = (res or {}).get("value") or [None] * len(pubkeys)
+        if len(value) != len(pubkeys):
+            raise RpcError(f"getMultipleAccounts returned {len(value)} of {len(pubkeys)} accounts")
+        return value
 
     async def get_asset(self, mint: str) -> dict | None:
         """DAS getAsset (Helius and some others). Returns None when unsupported."""

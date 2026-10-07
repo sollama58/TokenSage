@@ -115,7 +115,11 @@ async def test_legacy_spl_pump_coin_uses_metaplex(
     assert a.market.curve_progress == 1.0
     tok = await db.fetchrow("select * from token where mint=$1", SPL_MINT)
     assert tok and tok["token_program"] == "spl-token" and tok["name"] == "StreamerCoin"
-    assert "getAsset" in chain.calls or tok["uri"] == META_URI
+    assert tok["uri"] == META_URI
+    # mint, bonding curve and Metaplex PDA come from one getMultipleAccounts call; only the
+    # pump.fun Global account (read once per process) may still use getAccountInfo
+    assert chain.calls.count("getMultipleAccounts") == 1
+    assert chain.calls.count("getAccountInfo") <= 1 and "getAsset" not in chain.calls
 
 
 async def test_non_pump_mint_is_best_effort_by_default(
