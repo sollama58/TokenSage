@@ -144,7 +144,9 @@ async def _onchain_metadata(
     if token_program == "token-2022":
         meta = _token2022_metadata(info)
         meta_source = "token2022" if meta else "none"
-    if meta is None and token_program == "spl-token":
+    if meta is None:
+        # a Token-2022 mint without the metadata extension can still carry a Metaplex PDA
+        # (non-pump T22 tokens, pair tokens); it came back in the same batched read
         md_acc = (
             await rpc.get_account_info(metaplex.metadata_pda(mint), encoding="base64")
             if not metaplex_read

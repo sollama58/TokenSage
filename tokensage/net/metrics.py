@@ -10,6 +10,7 @@ counted twice."""
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -227,7 +228,11 @@ class MeteredTransport(httpx.AsyncBaseTransport):
     JSON-RPC method and its credit cost."""
 
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None, **kwargs: object):
-        self.inner = inner or httpx.AsyncHTTPTransport(**kwargs)  # type: ignore[arg-type]
+        # httpx only reads HTTPS_PROXY itself when no transport is given, so an explicit one
+        # has to honour it (a deployment that egresses through a proxy lost every upstream
+        # call otherwise); every upstream here is https
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or None
+        self.inner = inner or httpx.AsyncHTTPTransport(proxy=proxy, **kwargs)  # type: ignore[arg-type]
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
