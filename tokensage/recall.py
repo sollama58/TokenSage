@@ -11,10 +11,11 @@ from typing import Any
 
 import asyncpg
 
-# A referent at or above `resolved` is reported as "refers to" / "most likely refers to";
-# between `guess` and `resolved` as "may refer to"; below `guess` only as a weak guess.
-RESOLVED = 0.6
-GUESS = 0.45
+# The reported confidence bands (rules 0.17.0): two or more independent inputs agree at
+# `resolved` and above; a named referent from one input between `guess` and `resolved`;
+# below `guess` only the kind is known (a generic referent) or a weak guess.
+RESOLVED = 0.7
+GUESS = 0.5
 STATUSES = ("resolved", "weak", "guess", "none")
 
 

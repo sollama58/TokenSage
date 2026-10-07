@@ -17,7 +17,18 @@ Depth = Literal["basic", "full"]
 Status = Literal["complete", "partial", "pending", "failed"]
 JobStatus = Literal["pending", "running", "done", "failed"]
 ReferentKind = Literal[
-    "famous_animal", "meme", "person", "coin", "event", "concept", "place", "other"
+    "famous_animal",
+    "meme",
+    "person",
+    "coin",
+    "event",
+    "concept",
+    "place",
+    "other",
+    "animal",
+    "media",
+    "project",
+    "object",
 ]
 Severity = Literal["info", "warn", "high"]
 
@@ -118,16 +129,35 @@ class ReferentWave(_Model):
 
 
 class Referent(_Model):
-    label: str
-    kind: ReferentKind
+    label: str = Field(
+        description="What the coin refers to; when `generic` is true, a generic word for its "
+        'kind ("frog", "crypto project") rather than a specific entity'
+    )
+    kind: ReferentKind = Field(
+        description="famous_animal, meme, person, coin, event, concept, place, other; since "
+        "rules 0.17.0 also animal (an animal, not a specific famous one), media (a film, game, "
+        "show or franchise), project (a crypto or AI product, protocol or launchpad) and "
+        "object (food, an object, an abstract thing)"
+    )
     desc: str | None = None
     source: str | None = None
-    confidence: float = Field(ge=0, le=1)
+    confidence: float = Field(
+        ge=0,
+        le=1,
+        description="Bands: 0.3-0.49 only the kind is known (`generic`) or a weak guess; "
+        "0.5-0.69 a named referent from one input; 0.7+ two or more independent inputs agree",
+    )
     supported_by: list[str] = Field(
         default=[],
-        description="Inputs that point at this referent (name, symbol, description, image, "
-        "x, trend, chain, db, copy_of); several independent ones make it more trustworthy. "
-        "copy_of = inherited from the coin this one copies",
+        description="The independent inputs that point at this referent (name, symbol, "
+        "description, image, x, trend, db, copy_of), strongest first for a generic one. A "
+        "ticker that spells the name counts as the name. copy_of = inherited from the coin "
+        "this one copies",
+    )
+    generic: bool = Field(
+        default=False,
+        description="Only the kind is known: the name, ticker, image or description make it "
+        "plain what sort of coin this is, but no specific entity was identified",
     )
     wave: ReferentWave | None = Field(
         default=None,

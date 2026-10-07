@@ -97,6 +97,10 @@ _REFERENT_KINDS: dict[str, ReferentKind] = {
     "concept": "concept",
     "place": "place",
     "other": "other",
+    "animal": "animal",
+    "media": "media",
+    "project": "project",
+    "object": "object",
 }
 _SEVERITIES: dict[str, Severity] = {"info": "info", "warn": "warn", "high": "high"}
 
@@ -467,6 +471,7 @@ async def _prior_reads(conn: asyncpg.Connection, mints: list[str]) -> dict[str, 
                 desc=ref.get("desc"),
                 source=str(ref.get("source") or "analysis"),
                 score=float(ref.get("confidence") or 0.0),
+                generic=bool(ref.get("generic")),
             )
         out[row["mint"]] = prior
     return out
@@ -704,21 +709,17 @@ def build_document(
     summary = f"{raw.name or '?'} (${raw.symbol or '?'}): resolved, but the engine did not run."
     if out is not None:
         agg = out.agg
-        if agg.referent:
+        rr = out.referent_read
+        if rr is not None:
             referent = Referent(
-                label=agg.referent.label,
-                kind=_REFERENT_KINDS.get(agg.referent.kind, "other"),
-                desc=agg.referent.desc,
-                source=agg.referent.source,
-                confidence=agg.referent.score,
-                supported_by=list(
-                    dict.fromkeys(
-                        ev.where
-                        for ev in out.evidence
-                        if ev.referent is not None and ev.referent.label == agg.referent.label
-                    )
-                ),
-                wave=ex.wave,
+                label=rr.label,
+                kind=_REFERENT_KINDS.get(rr.kind, "other"),
+                desc=rr.desc,
+                source=rr.source,
+                confidence=rr.confidence,
+                supported_by=rr.supported_by,
+                generic=rr.generic,
+                wave=None if rr.generic else ex.wave,
             )
         categories = [
             Category(
@@ -968,8 +969,9 @@ async def _store_read(conn: asyncpg.Connection, doc: Analysis) -> None:
              categories=excluded.categories, updated_at=now()""",
         doc.mint,
         doc.created_at,
-        referent_key(doc.referent.label) if doc.referent else None,
-        doc.referent.label if doc.referent else None,
+        # a generic referent ("frog") is a kind, not one idea coins pile onto
+        referent_key(doc.referent.label) if doc.referent and not doc.referent.generic else None,
+        doc.referent.label if doc.referent and not doc.referent.generic else None,
         [c.label for c in doc.categories],
     )
 
@@ -1346,7 +1348,7 @@ async def _read_extras(
         return int(launched is not None and now - timedelta(hours=hours) < launched <= now)
 
     ref = out.agg.referent
-    if ref is not None:
+    if ref is not None and not ref.generic:
         row = await conn.fetchrow(
             """with p as (select $3::timestamptz as now, coalesce($4::timestamptz, $3) as me)
                select count(*) filter (where launched_at > p.now - interval '1 hour') as h1,

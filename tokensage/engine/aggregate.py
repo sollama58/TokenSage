@@ -199,6 +199,7 @@ def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) ->
             score=round(min(cap, top_s), 3),
             categories=rc[top_l].categories,
             surface=surf.get(top_l),
+            generic=rc[top_l].generic,
         )
         if len(ranked) > 1:
             s2, l2 = ranked[1]

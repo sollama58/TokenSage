@@ -123,7 +123,8 @@ entities:
   # --- events / products
   - {label: Bitcoin, kind: coin, aliases: [bitcoin, btc, satoshi], categories: [crypto_native/slang], desc: "bitcoin", popularity: 0.5}
   - {label: Robinhood Chain, kind: concept, aliases: [robinhood chain], categories: [crypto_native/slang], desc: "Robinhood's blockchain", popularity: 0.4}
-  - {label: Ethereum, kind: coin, aliases: [ethereum, eth], categories: [crypto_native/slang], desc: "ethereum", popularity: 0.4}
+  - {label: Ethereum, kind: coin, aliases: [ethereum, eth, ether], categories: [crypto_native/slang], desc: "ethereum", popularity: 0.4}
+  - {label: Zcash, kind: coin, aliases: [zcash], categories: [crypto_native/slang], desc: "privacy coin", popularity: 0.4}
   - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/slang], desc: "solana", popularity: 0.4}
   - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
   - {label: Coinbase, kind: concept, aliases: [coinbase], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}

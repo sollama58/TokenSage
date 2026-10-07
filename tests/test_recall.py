@@ -15,10 +15,10 @@ from tokensage import recall
 def test_status_buckets() -> None:
     assert recall.status(None) == "none"
     assert recall.status(0.2) == "guess"
-    assert recall.status(0.44) == "guess"
-    assert recall.status(0.45) == "weak"
-    assert recall.status(0.59) == "weak"
-    assert recall.status(0.6) == "resolved"
+    assert recall.status(0.49) == "guess"  # only the kind, or a weak guess
+    assert recall.status(0.5) == "weak"  # named from one input
+    assert recall.status(0.69) == "weak"
+    assert recall.status(0.7) == "resolved"  # two or more inputs agree
     assert recall.status(0.97) == "resolved"
 
 

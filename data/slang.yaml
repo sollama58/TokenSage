@@ -97,6 +97,11 @@ terms:
   npc: {meaning: "NPC meme (mindless person)", categories: [meme_template/npc], weight: 0.7}
   bobo: {meaning: "bear mascot (bearish)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
   mumu: {meaning: "bull mascot (bullish)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
+  bull: {meaning: "bull (the bullish market mascot)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
+  bulls: {meaning: "bulls (the bullish market mascot)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
+  bear: {meaning: "bear (the bearish market mascot)", categories: [animal/bear_bull, crypto_native/slang], weight: 0.5}
+  troll: {meaning: "Trollface / internet troll meme", categories: [meme_template/other], weight: 0.55}
+  trollface: {meaning: "Trollface meme", categories: [meme_template/other], weight: 0.8, kind: character}
   wif: {meaning: "'with' (dogwifhat spelling); marks the 'X wif hat' template", categories: [meme_template/x_wif_hat, derivative/template_family], weight: 0.7, kind: template}
   fwog: {meaning: "frog (baby-talk)", categories: [animal/frog], weight: 0.8}
   smol: {meaning: "small (baby-talk)", categories: [meme_template/other], weight: 0.4}
@@ -208,8 +213,6 @@ terms:
   usdc: {meaning: "the USDC stablecoin", categories: [crypto_native/slang], weight: 0.45}
   usdt: {meaning: "the USDT stablecoin", categories: [crypto_native/slang], weight: 0.45}
   wbtc: {meaning: "wrapped bitcoin", categories: [crypto_native/slang], weight: 0.5}
-  ether: {meaning: "Ethereum's coin", categories: [crypto_native/slang], weight: 0.45}
-  zcash: {meaning: "the Zcash privacy coin", categories: [crypto_native/slang], weight: 0.6}
   buy and hold: {meaning: "the hold-forever slogan", categories: [crypto_native/slang], weight: 0.5}
   floor price: {meaning: "lowest listed price", categories: [crypto_native/slang], weight: 0.5}
   rugs: {meaning: "rug pulls", categories: [crypto_native/slang], weight: 0.6}
