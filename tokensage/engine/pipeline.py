@@ -118,6 +118,8 @@ class EngineOutput:
     ocr_error: str | None = None
     x: xsignals.XAssessment | None = None
     trend_hits: list[trends.TrendHit] = field(default_factory=list)
+    # per-source status of the trend lookups (filled in by the analyzer, which ran them)
+    trend_sources: list[trends.SourceStatus] = field(default_factory=list)
     x_match: xmatch.XMatch | None = None
     pair: pairing.PairAssessment | None = None
 
@@ -713,6 +715,13 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             if h.term.term.lower() not in {t.lower() for t in seen_terms}:
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
+        # the coin's text may not spell the trend ("Elon", $PNUT): its referent can
+        for h in trends.referent_hits(evidence, inp.trend_index, k):
+            if h.term.term not in seen_terms:
+                seen_terms.add(h.term.term)
+                trend_hits.append(h)
+        for h in trend_hits:
+            h.score = trends.score(h, inp.trend_index)
         evidence += trends.evidence(trend_hits, inp.trend_index)
 
     mt = meta.assess(
@@ -1077,12 +1086,16 @@ def _context(
         c = min(recent_copies, key=lambda r: r.age_s)
         out.append(f"copies {c.what} ({c.via}) launched {_dur(c.age_s)} earlier")
     if trend_hits:
-        t = trend_hits[0].term
-        out.append(
-            f"its name is in the news ('{t.term}')"
-            if t.source == "news"
-            else f"matches the trending topic '{t.term}'"
-        )
+        h = trend_hits[0]
+        t = h.term
+        if t.source == "news":
+            out.append(f"its name is in the news ('{t.term}')")
+        elif h.via is not None:
+            out.append(f"what it refers to is trending ('{t.term}')")
+        elif t.source == "google_trends":
+            out.append(f"matches the trending search '{t.term}'")
+        else:
+            out.append(f"matches the trending topic '{t.term}'")
     return out
 
 

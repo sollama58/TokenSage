@@ -3,8 +3,9 @@ news confirmation (guide §4.3, §5.8, §6.3). All database-aware; the engine st
 
 from __future__ import annotations
 
+import asyncio
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -15,7 +16,7 @@ from tokensage.api.schemas import XInfo
 from tokensage.config import Settings
 from tokensage.engine import ocr, trends
 from tokensage.engine.knowledge import load_knowledge
-from tokensage.sources import gnews, wikipedia
+from tokensage.sources import gnews, gtrends, wikipedia
 from tokensage.sources.x import ProfileData, TweetData, fetch_profile, fetch_tweet
 
 log = structlog.get_logger("fulldepth")
@@ -229,31 +230,186 @@ async def persist_ocr(conn: asyncpg.Connection, content_key: str, lines: list[oc
 
 
 _trend_cache: tuple[float, trends.TrendIndex] | None = None
+_trend_refreshing = False
+GTRENDS_KEY = "gtrends:seen"  # lookup_cache row: the Google Trends searches seen lately
+GTRENDS_KEEP = timedelta(hours=48)
+GTRENDS_POLL = timedelta(minutes=9)  # just under the index TTL: one poll per rebuild
+# the knowledge cron loads yesterday's Wikipedia top-1000 at 03:17 UTC, so the newest day is
+# normally 1-2 days old; older than this and the cron is not running (or Wikipedia is down)
+WIKI_STALE_DAYS = 3
 
 
-async def trend_index(conn: asyncpg.Connection) -> trends.TrendIndex:
-    global _trend_cache
+async def trend_index(
+    conn: asyncpg.Connection, http: httpx.AsyncClient | None = None
+) -> trends.TrendIndex:
+    """Wikipedia's spiking articles (daily, from the knowledge cron) plus the Google Trends
+    searches of the last two days (polled here, when an http client is given), with each
+    source's status. Rebuilt every TREND_INDEX_TTL_S; concurrent jobs reuse the old index
+    while one of them rebuilds it."""
+    global _trend_cache, _trend_refreshing
     now = time.monotonic()
-    if _trend_cache and now - _trend_cache[0] < TREND_INDEX_TTL_S:
+    if _trend_cache and (now - _trend_cache[0] < TREND_INDEX_TTL_S or _trend_refreshing):
         return _trend_cache[1]
+    _trend_refreshing = True
+    try:
+        wiki_terms, wiki_status = await _wiki_trends(conn)
+        g_terms, g_status = await _google_trends(conn, http)
+    finally:
+        _trend_refreshing = False
+    idx = trends.TrendIndex(wiki_terms + g_terms, load_knowledge(), [wiki_status, g_status])
+    for st in idx.sources:
+        log.info(
+            "trends.source",
+            source=st.source,
+            status=st.status,
+            terms=st.terms,
+            as_of=st.as_of.isoformat() if st.as_of else None,
+            detail=st.detail,
+        )
+    _trend_cache = (time.monotonic(), idx)
+    return idx
+
+
+def _day_start(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day, tzinfo=UTC)
+
+
+async def _wiki_trends(
+    conn: asyncpg.Connection,
+) -> tuple[list[trends.TrendTerm], trends.SourceStatus]:
+    latest = await conn.fetchval("select max(day) from trend_term where source='wikipedia'")
+    if latest is None:
+        return [], trends.SourceStatus(
+            "wikipedia", "unavailable", detail="no pageview data loaded (knowledge cron)"
+        )
     rows = await conn.fetch(
-        """with latest as (select max(day) d from trend_term where source='wikipedia'),
-           best as (
+        """with best as (
              -- one row per term (its strongest day): duplicates across days would otherwise
              -- overwrite each other in the index, last (weakest) wins
-             select distinct on (term) term, spike, views from trend_term, latest
-             where source='wikipedia' and day >= latest.d - 2
+             select distinct on (term) term, spike, views, day from trend_term
+             where source='wikipedia' and day >= $1::date - 2
                and (spike >= 2 or views >= 150000)
              order by term, spike desc nulls last)
-           select term, spike, views from best
-           order by spike desc nulls last limit 1500"""
+           select term, spike, views, day from best
+           order by spike desc nulls last limit 1500""",
+        latest,
     )
     terms = [
-        trends.TrendTerm(r["term"], float(r["spike"] or 1.0), int(r["views"] or 0)) for r in rows
+        trends.TrendTerm(
+            r["term"],
+            float(r["spike"] or 1.0),
+            int(r["views"] or 0),
+            seen_at=_day_start(r["day"]),
+        )
+        for r in rows
     ]
-    idx = trends.TrendIndex(terms, load_knowledge())
-    _trend_cache = (now, idx)
-    return idx
+    age = (datetime.now(UTC).date() - latest).days
+    stale = age > WIKI_STALE_DAYS
+    return terms, trends.SourceStatus(
+        "wikipedia",
+        "stale" if stale else "ok",
+        as_of=_day_start(latest),
+        terms=len(terms),
+        detail=f"newest daily top-1000 is {age} days old" if stale else None,
+    )
+
+
+async def _google_trends(
+    conn: asyncpg.Connection, http: httpx.AsyncClient | None
+) -> tuple[list[trends.TrendTerm], trends.SourceStatus]:
+    """Poll the Google Trends feeds (when the last poll is older than GTRENDS_POLL) and merge
+    them into what was seen in the last GTRENDS_KEEP. A search keeps the time it was first
+    listed (its seen_at) and the highest search count seen since."""
+    now = datetime.now(UTC)
+    row = await conn.fetchrow(
+        "select value, fetched_at from lookup_cache where key=$1", GTRENDS_KEY
+    )
+    seen: dict[str, dict[str, Any]] = {
+        str(d["term"]).lower(): dict(d) for d in (row["value"] if row else []) or []
+    }
+    polled_at: datetime | None = row["fetched_at"] if row else None
+    status: trends.SourceState = "ok"
+    detail: str | None = None
+    if http is None:
+        status, detail = "skipped", "not polled by this process"
+    elif polled_at is None or now - polled_at >= GTRENDS_POLL:
+        results = await asyncio.gather(
+            *(gtrends.trending(http, g) for g in gtrends.GEOS), return_exceptions=True
+        )
+        got = [r for r in results if isinstance(r, list)]
+        if got:
+            for items in got:
+                for it in items:
+                    _merge_search(seen, it, now)
+            seen = {
+                k: v
+                for k, v in seen.items()
+                if now - _parse_iso(v.get("seen_at"), now) < GTRENDS_KEEP
+            }
+            await conn.execute(
+                """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
+                   on conflict (key) do update set value=excluded.value, fetched_at=now()""",
+                GTRENDS_KEY,
+                list(seen.values()),
+            )
+            polled_at = now
+            if len(got) < len(results):
+                detail = f"{len(results) - len(got)} of {len(results)} country feeds failed"
+        else:
+            errs = [type(r).__name__ for r in results if isinstance(r, BaseException)]
+            log.info("gtrends.poll_failed", errors=errs[:4])
+            status = "failed" if not seen else "stale"
+            detail = "feed unavailable" + (
+                f"; using the searches seen until {polled_at:%Y-%m-%d %H:%M} UTC"
+                if seen and polled_at
+                else ""
+            )
+    terms = [
+        trends.TrendTerm(
+            str(v["term"]),
+            0.0,
+            int(v.get("traffic") or 0),
+            source="google_trends",
+            seen_at=_parse_iso(v.get("seen_at"), now),
+            headline=v.get("headline"),
+        )
+        for v in seen.values()
+        if now - _parse_iso(v.get("seen_at"), now) < GTRENDS_KEEP
+    ]
+    if status == "ok" and polled_at is not None and now - polled_at > 6 * GTRENDS_POLL:
+        status, detail = "stale", f"last polled {polled_at:%Y-%m-%d %H:%M} UTC"
+    return terms, trends.SourceStatus(
+        "google_trends", status, as_of=polled_at, terms=len(terms), detail=detail
+    )
+
+
+def _merge_search(
+    seen: dict[str, dict[str, Any]], it: gtrends.TrendingSearch, now: datetime
+) -> None:
+    key = it.term.lower()
+    started = it.started_at or now
+    have = seen.get(key)
+    if have is None:
+        seen[key] = {
+            "term": it.term,
+            "traffic": it.traffic,
+            "seen_at": started.isoformat(),
+            "headline": it.headline,
+            "geo": it.geo,
+        }
+        return
+    have["traffic"] = max(int(have.get("traffic") or 0), it.traffic)
+    if started < _parse_iso(have.get("seen_at"), now):
+        have["seen_at"] = started.isoformat()
+    have["headline"] = have.get("headline") or it.headline
+
+
+def _parse_iso(raw: Any, default: datetime) -> datetime:
+    try:
+        d = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return default
+    return d if d.tzinfo else d.replace(tzinfo=UTC)
 
 
 # ----------------------------------------------------------------- news confirmation
@@ -347,8 +503,6 @@ async def media_hashes(
 ) -> list[Any]:
     """Fetch (SSRF-guarded, same size/time caps as logos) and hash each media URL. Cached by
     URL: hashes forever, failures retried after 6 h."""
-    import asyncio
-
     from tokensage.engine import image as image_stage
     from tokensage.engine.xmatch import MediaHash
     from tokensage.net.safe_fetch import FetchError, UnsafeUrl

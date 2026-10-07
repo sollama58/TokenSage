@@ -45,10 +45,12 @@ async def search(http: httpx.AsyncClient, query: str, when: str = "2d") -> list[
         r = await http.get(URL.format(q=quote_plus(query), when=when), timeout=8.0)
     except httpx.HTTPError as e:
         breaker.failure(src)
-        log.info("gnews.error", error=str(e)[:120])
+        # a timeout's str() is empty: keep the type, or the log says nothing
+        log.info("gnews.error", error=f"{type(e).__name__}: {e}"[:120])
         return None
     if r.status_code != 200 or "<rss" not in r.text[:500]:
         breaker.failure(src)
+        log.info("gnews.bad_response", status=r.status_code)
         return None
     breaker.success(src)
     out: list[Headline] = []
