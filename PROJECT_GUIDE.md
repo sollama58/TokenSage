@@ -591,7 +591,7 @@ Analysis depth is chosen **per request** by the consumer:
 All paths are under `/v1`. FastAPI serves the OpenAPI schema at `/openapi.json`, so the consumer app can generate a typed client. Every response is JSON.
 
 **Authentication:** `Authorization: Bearer <api_key>`.
-- v1 can read keys from an env var (`API_KEYS`, comma-separated `name:key` pairs). Move them to the `api_key` table (stored as SHA-256 hashes) when there is more than one consumer.
+- v1 reads keys from an env var (`API_KEYS`, comma-separated `name:key` pairs) and from the `api_key` table (SHA-256 hashes only), which the admin API (`/admin/v1/keys`, built 2026-10-07) manages. See `docs/API.md`.
 - Each key has its own rate limit and daily quota of `depth=full` and `refresh=true` calls. A token bucket in process memory is enough while the API runs as one instance.
 
 **Endpoints:**

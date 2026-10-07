@@ -285,6 +285,35 @@ def verify(api_key: str, headers: dict, raw_body: bytes) -> bool:
 Deliveries can arrive out of order and, in rare retry cases, twice; key your handling on
 `job_id` (or `result.ca` + `result.depth`).
 
+## Admin API (owner only)
+
+Everything under `/admin/v1` needs `Authorization: Bearer <ADMIN_KEY>` (on Render the
+`ADMIN_KEY` env var is generated; copy it from the dashboard). Any other key gets `403
+forbidden`. Use it from your own server to issue keys and watch the service; never ship the
+admin key to a browser or app. All schemas are in `/openapi.json` under the `admin` tag.
+
+| Call | Purpose |
+|---|---|
+| `GET /admin/v1/status` | Queue (pending, running, done and failed in the last 24 h, age of the oldest pending job), upstream source health, today's usage per key, the last day's referent recall, and versions |
+| `GET /admin/v1/keys` (`?include_revoked=true`) | Every consumer key with its limits and today's usage. `source` is `env` (from `API_KEYS`, read-only) or `db` (managed here) |
+| `POST /admin/v1/keys` with `{"name": "app-server", "rate_per_min": 300, "full_per_day": 20000, "refresh_per_day": 200}` | Create a key; omitted limits take the service defaults. `201` with the raw key in `key`. **It is shown once**; only its SHA-256 is stored. Names are `[A-Za-z0-9_.-]{1,64}` and never reused, even after a revoke (`409 key_exists`) |
+| `PATCH /admin/v1/keys/{name}` with any of the three limits | Change a managed key's limits; effective on its next request |
+| `POST /admin/v1/keys/{name}/rotate` | New secret for a managed key, returned once in `key`; the old one stops working at once. Limits and usage carry over |
+| `DELETE /admin/v1/keys/{name}` | Revoke a managed key at once; its usage history is kept |
+| `GET /admin/v1/usage?days=7&key=app-server` | Daily `requests`, `full_calls` and `refreshes` per key (UTC days, newest first, up to 90) |
+| `GET /admin/v1/jobs?status=failed&mint=…&depth=…&limit=50` | Recent jobs, newest first, with `error_code` and `last_error` |
+| `POST /admin/v1/jobs/{id}/retry` | Enqueue a failed job again with its original hints. Returns the new job (or the open one for the same token and depth); `409 job_not_failed` otherwise |
+| `GET /admin/v1/recall?hours=24` | How often the engine resolved what coins refer to, per depth |
+
+Changing an env key (`PATCH`, `rotate`, `DELETE`) returns `409 read_only`; edit `API_KEYS`
+instead. Key changes apply immediately on the instance that made them and within 30 s on any
+other API instance.
+
+```bash
+curl -s -X POST "$BASE/admin/v1/keys" -H "Authorization: Bearer $ADMIN_KEY" \
+  -H 'Content-Type: application/json' -d '{"name": "app-server", "full_per_day": 20000}'
+```
+
 ## Recommended client behaviour
 
 ```python

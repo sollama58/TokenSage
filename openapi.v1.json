@@ -1,6 +1,131 @@
 {
   "components": {
     "schemas": {
+      "AdminJob": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "mint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mint"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "result_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Version"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "mint",
+          "depth",
+          "status",
+          "priority",
+          "attempts",
+          "error_code",
+          "last_error",
+          "requested_by",
+          "result_version",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AdminJob",
+        "type": "object"
+      },
       "Analysis": {
         "additionalProperties": false,
         "properties": {
@@ -764,6 +889,23 @@
         "title": "ImageLabel",
         "type": "object"
       },
+      "JobList": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/AdminJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "title": "JobList",
+        "type": "object"
+      },
       "JobResponse": {
         "additionalProperties": false,
         "properties": {
@@ -839,6 +981,269 @@
           "request_id"
         ],
         "title": "JobResponse",
+        "type": "object"
+      },
+      "KeyCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "full_per_day": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Per Day"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "rate_per_min": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Per Min"
+          },
+          "refresh_per_day": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Per Day"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "KeyCreate",
+        "type": "object"
+      },
+      "KeyInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "full_per_day": {
+            "title": "Full Per Day",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rate_per_min": {
+            "title": "Rate Per Min",
+            "type": "integer"
+          },
+          "refresh_per_day": {
+            "title": "Refresh Per Day",
+            "type": "integer"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "source": {
+            "enum": [
+              "env",
+              "db"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "usage_today": {
+            "$ref": "#/components/schemas/UsageToday",
+            "default": {
+              "full_calls": 0,
+              "refreshes": 0,
+              "requests": 0
+            }
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "rate_per_min",
+          "full_per_day",
+          "refresh_per_day"
+        ],
+        "title": "KeyInfo",
+        "type": "object"
+      },
+      "KeyList": {
+        "additionalProperties": false,
+        "properties": {
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/KeyInfo"
+            },
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys"
+        ],
+        "title": "KeyList",
+        "type": "object"
+      },
+      "KeySecret": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "full_per_day": {
+            "title": "Full Per Day",
+            "type": "integer"
+          },
+          "key": {
+            "description": "The raw API key. Shown only once; store it now.",
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rate_per_min": {
+            "title": "Rate Per Min",
+            "type": "integer"
+          },
+          "refresh_per_day": {
+            "title": "Refresh Per Day",
+            "type": "integer"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "source": {
+            "enum": [
+              "env",
+              "db"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "usage_today": {
+            "$ref": "#/components/schemas/UsageToday",
+            "default": {
+              "full_calls": 0,
+              "refreshes": 0,
+              "requests": 0
+            }
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "rate_per_min",
+          "full_per_day",
+          "refresh_per_day",
+          "key"
+        ],
+        "title": "KeySecret",
+        "type": "object"
+      },
+      "KeyUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "full_per_day": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Per Day"
+          },
+          "rate_per_min": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Per Min"
+          },
+          "refresh_per_day": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Per Day"
+          }
+        },
+        "title": "KeyUpdate",
         "type": "object"
       },
       "Market": {
@@ -1249,6 +1654,47 @@
         "title": "PairReferent",
         "type": "object"
       },
+      "QueueStats": {
+        "additionalProperties": false,
+        "properties": {
+          "done_24h": {
+            "title": "Done 24H",
+            "type": "integer"
+          },
+          "failed_24h": {
+            "title": "Failed 24H",
+            "type": "integer"
+          },
+          "oldest_pending_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Pending S"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "running",
+          "failed_24h",
+          "done_24h",
+          "oldest_pending_s"
+        ],
+        "title": "QueueStats",
+        "type": "object"
+      },
       "RawFields": {
         "additionalProperties": false,
         "properties": {
@@ -1398,6 +1844,126 @@
           "confidence"
         ],
         "title": "Referent",
+        "type": "object"
+      },
+      "SourceHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "calls_today": {
+            "title": "Calls Today",
+            "type": "integer"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "open_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Until"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "spend_today_usd": {
+            "title": "Spend Today Usd",
+            "type": "number"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "source",
+          "state",
+          "failures",
+          "open_until",
+          "calls_today",
+          "spend_today_usd"
+        ],
+        "title": "SourceHealth",
+        "type": "object"
+      },
+      "StatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "default_depth": {
+            "title": "Default Depth",
+            "type": "string"
+          },
+          "inline_analyzer": {
+            "title": "Inline Analyzer",
+            "type": "boolean"
+          },
+          "lexicon_version": {
+            "title": "Lexicon Version",
+            "type": "string"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueStats"
+          },
+          "recall_24h": {
+            "additionalProperties": true,
+            "title": "Recall 24H",
+            "type": "object"
+          },
+          "rules_version": {
+            "title": "Rules Version",
+            "type": "string"
+          },
+          "service_version": {
+            "title": "Service Version",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceHealth"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "const": "ok",
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          },
+          "usage_today": {
+            "items": {
+              "$ref": "#/components/schemas/UsageDay"
+            },
+            "title": "Usage Today",
+            "type": "array"
+          }
+        },
+        "required": [
+          "service_version",
+          "rules_version",
+          "lexicon_version",
+          "default_depth",
+          "inline_analyzer",
+          "queue",
+          "sources",
+          "usage_today",
+          "recall_24h"
+        ],
+        "title": "StatusResponse",
         "type": "object"
       },
       "TaxonomyEntry": {
@@ -1715,6 +2281,85 @@
           "code"
         ],
         "title": "UpstreamError",
+        "type": "object"
+      },
+      "UsageDay": {
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "full_calls": {
+            "title": "Full Calls",
+            "type": "integer"
+          },
+          "key_name": {
+            "title": "Key Name",
+            "type": "string"
+          },
+          "refreshes": {
+            "title": "Refreshes",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key_name",
+          "day",
+          "requests",
+          "full_calls",
+          "refreshes"
+        ],
+        "title": "UsageDay",
+        "type": "object"
+      },
+      "UsageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/UsageDay"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "days",
+          "rows"
+        ],
+        "title": "UsageResponse",
+        "type": "object"
+      },
+      "UsageToday": {
+        "additionalProperties": false,
+        "properties": {
+          "full_calls": {
+            "default": 0,
+            "title": "Full Calls",
+            "type": "integer"
+          },
+          "refreshes": {
+            "default": 0,
+            "title": "Refreshes",
+            "type": "integer"
+          },
+          "requests": {
+            "default": 0,
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "title": "UsageToday",
         "type": "object"
       },
       "ValidationError": {
@@ -2461,6 +3106,613 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/v1/jobs": {
+      "get": {
+        "description": "Recent jobs, newest first.",
+        "operationId": "list_jobs_admin_v1_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "done",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mint"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "basic",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Jobs",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/jobs/{job_id}/retry": {
+      "post": {
+        "description": "Enqueue a failed job again (same kind, mint, depth and hints). Returns the new job,\nor the already-open one for the same token and depth.",
+        "operationId": "retry_job_admin_v1_jobs__job_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "404": {
+            "description": "job_not_found"
+          },
+          "409": {
+            "description": "job_not_failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Job",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/keys": {
+      "get": {
+        "description": "Every consumer key (env and managed) with its limits and today's usage.",
+        "operationId": "list_keys_admin_v1_keys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_revoked",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Revoked",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Keys",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Create a consumer key. Limits default to the service defaults. The raw key is in the\nresponse and is never shown again. Names are never reused, even after a revoke, so\nusage history stays attributable.",
+        "operationId": "create_key_admin_v1_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeySecret"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "409": {
+            "description": "key_exists"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Key",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/keys/{name}": {
+      "delete": {
+        "description": "Revoke a managed key. It stops working at once; its usage history is kept.",
+        "operationId": "revoke_key_admin_v1_keys__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "404": {
+            "description": "key_not_found"
+          },
+          "409": {
+            "description": "read_only"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Key",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "description": "Change a managed key's limits. Takes effect on the key's next request, with a full\nrate bucket.",
+        "operationId": "update_key_admin_v1_keys__name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "404": {
+            "description": "key_not_found"
+          },
+          "409": {
+            "description": "read_only"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Key",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/keys/{name}/rotate": {
+      "post": {
+        "description": "Replace a managed key's secret. The old key stops working at once; limits and usage\ncarry over. Callbacks for jobs enqueued before the rotation stay signed with the old\nkey's digest.",
+        "operationId": "rotate_key_admin_v1_keys__name__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeySecret"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "404": {
+            "description": "key_not_found"
+          },
+          "409": {
+            "description": "read_only"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rotate Key",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/recall": {
+      "get": {
+        "description": "How often the engine resolved what a coin refers to, per depth, over `hours`.",
+        "operationId": "get_recall_admin_v1_recall_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 720,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Recall Admin V1 Recall Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Recall",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/status": {
+      "get": {
+        "description": "Queue depth, upstream source health, today's usage per key and the last day's\nreferent recall.",
+        "operationId": "status_admin_v1_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/usage": {
+      "get": {
+        "description": "Daily request, full-depth and refresh counts per key (UTC days, newest first).",
+        "operationId": "get_usage_admin_v1_usage_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "forbidden (admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Usage",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/jobs/{job_id}": {
       "get": {
         "operationId": "get_job_v1_jobs__job_id__get",

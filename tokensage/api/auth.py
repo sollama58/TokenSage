@@ -1,18 +1,21 @@
 """Bearer API keys and per-key rate limiting.
 
-v1 reads keys from the API_KEYS env var ("name:key,name2:key2"). Keys are matched by
-SHA-256 digest in constant time. The rate limiter is an in-process token bucket, which
-is enough while the API runs as one instance.
+Keys come from two places: the API_KEYS env var ("name:key,name2:key2"), read-only, and the
+api_key table, managed through the admin API (/admin/v1/keys). Only SHA-256 digests are kept.
+The rate limiter is an in-process token bucket, which is enough while the API runs as one
+instance; table keys are re-read periodically so another instance's changes still land.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Annotated
+from typing import Annotated, Literal
 
+import asyncpg
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -33,6 +36,14 @@ class ApiKey:
     full_per_day: int
     refresh_per_day: int
     digest: str = ""  # sha256 hex of the raw key; also the HMAC secret for callbacks
+    source: Literal["env", "db"] = "env"
+
+
+KEY_PREFIX = "tsk_"
+
+
+def new_raw_key() -> str:
+    return KEY_PREFIX + secrets.token_urlsafe(32)
 
 
 @dataclass
@@ -63,16 +74,17 @@ class RateLimiter:
 
 class KeyStore:
     def __init__(self, settings: Settings):
-        self._by_digest: dict[str, ApiKey] = {}
+        self._env: dict[str, ApiKey] = {}
         for name, raw in settings.api_key_pairs.items():
             d = sha256_hex(raw)
-            self._by_digest[d] = ApiKey(
+            self._env[d] = ApiKey(
                 name=name,
                 rate_per_min=settings.rate_per_min_default,
                 full_per_day=settings.full_per_day_default,
                 refresh_per_day=settings.refresh_per_day_default,
                 digest=d,
             )
+        self._by_digest: dict[str, ApiKey] = dict(self._env)
         self._admin_digest = sha256_hex(settings.admin_key) if settings.admin_key else None
         self.limiter = RateLimiter()
 
@@ -82,6 +94,35 @@ class KeyStore:
             if hmac.compare_digest(d, digest):
                 return key
         return None
+
+    @property
+    def has_keys(self) -> bool:
+        return bool(self._by_digest)
+
+    @property
+    def env_keys(self) -> list[ApiKey]:
+        return list(self._env.values())
+
+    async def reload(self, conn: asyncpg.Connection) -> None:
+        """Re-read the active keys from the api_key table. An env key wins a name clash."""
+        rows = await conn.fetch(
+            """select name, key_sha256, rate_per_min, full_per_day, refresh_per_day
+               from api_key where revoked_at is null"""
+        )
+        env_names = {k.name for k in self._env.values()}
+        db = {
+            r["key_sha256"]: ApiKey(
+                name=r["name"],
+                rate_per_min=r["rate_per_min"],
+                full_per_day=r["full_per_day"],
+                refresh_per_day=r["refresh_per_day"],
+                digest=r["key_sha256"],
+                source="db",
+            )
+            for r in rows
+            if r["name"] not in env_names
+        }
+        self._by_digest = {**db, **self._env}
 
     def is_admin(self, raw: str) -> bool:
         return bool(self._admin_digest) and hmac.compare_digest(
