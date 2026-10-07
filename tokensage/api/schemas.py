@@ -342,6 +342,16 @@ class XMatch(_Model):
     )
     fit: float = Field(ge=0, le=1, description="Overall match, 0-1 (uncalibrated until Phase 6)")
     verdict: Literal["about_this_coin", "related", "unrelated", "unknown"]
+    basis: list[
+        Literal[
+            "profile_name", "profile_bio", "profile_image", "post_text", "post_image", "cashtag"
+        ]
+    ] = Field(
+        default=[],
+        description="What the fit rests on. A profile matched only by its own name, handle "
+        "or avatar (no bio match) on an account not older than the token by a day is capped "
+        "below about_this_coin",
+    )
 
 
 class XQuoted(_Model):
@@ -371,6 +381,29 @@ class XAccount(_Model):
     verified_type: str | None = None
 
 
+class XLinkAccount(_Model):
+    """The account behind the link: the linked profile, or the linked post's author."""
+
+    handle: str | None = None
+    created_at: datetime | None = None
+    age_at_launch_s: int | None = Field(
+        default=None,
+        description="Seconds from the account's creation to the token's; negative if the "
+        "account is younger than the token",
+    )
+    posts_total: int | None = Field(default=None, description="Posts on the account, when known")
+    posts_about_coin: int | None = Field(
+        default=None, description="Posts about the coin; null until a source provides counts"
+    )
+    name_changes: int | None = None
+    verified_type: str | None = None
+    made_for_coin: bool = Field(
+        default=False,
+        description="Created less than a day before the token (or after it) with a handle or "
+        "display name that is the coin's name or ticker",
+    )
+
+
 class XInfo(_Model):
     ref: XRef
     object_time: datetime | None = None
@@ -389,6 +422,14 @@ class XInfo(_Model):
         | None
     ) = None
     reuse_count: int = 0
+    reuse_rank: int | None = Field(
+        default=None,
+        description="This coin's place by launch time among the analysed coins linking the "
+        "same post/profile/community (1 = the first)",
+    )
+    reuse_first_at: datetime | None = Field(
+        default=None, description="Launch time of the first analysed coin to link it"
+    )
     fetch_source: str | None = None
     status: Literal["ok", "deleted", "suspended", "not_fetched", "failed", "none"] = "none"
     quoted: XQuoted | None = Field(
@@ -406,18 +447,77 @@ class XInfo(_Model):
         default=None,
         description="Post/profile vs token comparison (full depth, tweet or profile links)",
     )
+    account: XLinkAccount | None = Field(
+        default=None,
+        description="The account behind the link (full depth, when the author or profile is known)",
+    )
+    credibility: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="How much the account behind the link is worth, apart from whether it "
+        "matches: age at launch, followers, posts, verification, renames, link reuse "
+        "(uncalibrated until Phase 6)",
+    )
 
 
 class TrendTerm(_Model):
     term: str
-    spike: float | None = None
-    source: str
+    spike: float | None = Field(
+        default=None, description="Wikipedia only: the day's views over the usual (median)"
+    )
+    source: str = Field(description="wikipedia, google_trends or news")
     headline: str | None = None
+    score: float | None = Field(
+        default=None,
+        description="Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends "
+        "by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1); halved for "
+        "perennially popular articles",
+    )
+    seen_at: datetime | None = Field(
+        default=None,
+        description="How fresh the hit is: the UTC day of the Wikipedia spike (day "
+        "granularity), when Google Trends first listed the search, or the newest matching "
+        "news headline",
+    )
+    matched_on: str | None = Field(
+        default=None,
+        description="What matched: name, description or x (the coin's own text), referent "
+        "(the referent it resolves to) or alias (an alias of that referent)",
+    )
+    searches: int | None = Field(
+        default=None, description="Google Trends only: Google's approximate search count"
+    )
+
+
+class TrendSource(_Model):
+    source: str = Field(description="wikipedia, google_trends or news")
+    status: Literal["ok", "stale", "failed", "skipped", "unavailable"] = Field(
+        description="ok: the source had current data; stale: only old data (see detail); "
+        "failed: the lookup failed and nothing was cached; skipped: not looked up for this "
+        "coin (news: the name is too generic to search); unavailable: no data loaded at all"
+    )
+    as_of: datetime | None = Field(
+        default=None, description="The newest data the source gave (Wikipedia: its UTC day)"
+    )
+    terms: int | None = Field(
+        default=None,
+        description="Trending terms the source contributed (news: relevant headlines found)",
+    )
+    detail: str | None = None
 
 
 class Trend(_Model):
     matched: bool = False
+    score: float | None = Field(
+        default=None,
+        description="Strength of the strongest matching trend, 0-1 (full depth; 0 when "
+        "nothing matched)",
+    )
     terms: list[TrendTerm] = []
+    sources: list[TrendSource] = Field(
+        default=[], description="Per-source status of the trend lookups (full depth)"
+    )
 
 
 class Flag(_Model):

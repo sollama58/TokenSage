@@ -113,6 +113,12 @@ async def test_full_depth_fills_x_trend_and_caches(
     assert a.x is not None and a.x.status == "ok" and a.x.fetch_source == "fxtwitter"
     assert a.x.author and a.x.author.handle == "elonmusk" and a.x.author.followers == 190000000
     assert a.x.text and "Peanut" in a.x.text
+    # the account behind the link and how much it is worth, apart from the match
+    assert a.x.account is not None and a.x.account.handle == "elonmusk"
+    assert not a.x.account.made_for_coin
+    assert a.x.credibility is not None and a.x.credibility >= 0.5
+    assert a.x.match is not None and "post_text" in a.x.match.basis
+    assert a.x.reuse_count == 0
     # the fake token's created_at is null (no history), so timing-based relation is launch/official;
     # with no created_at the engine cannot claim narrative; at least no spoof is raised
     codes = {f.code for f in a.flags}
@@ -131,6 +137,14 @@ async def test_full_depth_fills_x_trend_and_caches(
     assert await db.fetchval("select count(*) from lookup_cache") == 2
     assert [t.source for t in a.trend.terms] == ["wikipedia"]
     assert a.trend.terms[0].headline == "Peanut the squirrel story"
+    # 40x its usual views: a strong spike, seen today, on the coin's own name
+    t0 = a.trend.terms[0]
+    assert a.trend.score == t0.score and t0.score is not None and t0.score > 0.9
+    assert t0.seen_at is not None and t0.seen_at.date() == date.today()
+    assert t0.matched_on == "name"
+    # every source reports whether it had data (the Google Trends feed is a 404 here)
+    status = {s.source: s.status for s in a.trend.sources}
+    assert status == {"wikipedia": "ok", "google_trends": "failed", "news": "ok"}
     assert len(fx_calls) == 1
 
     # second full analysis: tweet comes from cache, FxTwitter not called again

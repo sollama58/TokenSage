@@ -278,6 +278,7 @@
             "$ref": "#/components/schemas/Trend",
             "default": {
               "matched": false,
+              "sources": [],
               "terms": []
             }
           },
@@ -2564,6 +2565,27 @@
             "title": "Matched",
             "type": "boolean"
           },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Strength of the strongest matching trend, 0-1 (full depth; 0 when nothing matched)",
+            "title": "Score"
+          },
+          "sources": {
+            "default": [],
+            "description": "Per-source status of the trend lookups (full depth)",
+            "items": {
+              "$ref": "#/components/schemas/TrendSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
           "terms": {
             "default": [],
             "items": {
@@ -2574,6 +2596,70 @@
           }
         },
         "title": "Trend",
+        "type": "object"
+      },
+      "TrendSource": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest data the source gave (Wikipedia: its UTC day)",
+            "title": "As Of"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "source": {
+            "description": "wikipedia, google_trends or news",
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "description": "ok: the source had current data; stale: only old data (see detail); failed: the lookup failed and nothing was cached; skipped: not looked up for this coin (news: the name is too generic to search); unavailable: no data loaded at all",
+            "enum": [
+              "ok",
+              "stale",
+              "failed",
+              "skipped",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "terms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trending terms the source contributed (news: relevant headlines found)",
+            "title": "Terms"
+          }
+        },
+        "required": [
+          "source",
+          "status"
+        ],
+        "title": "TrendSource",
         "type": "object"
       },
       "TrendTerm": {
@@ -2590,7 +2676,57 @@
             ],
             "title": "Headline"
           },
+          "matched_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What matched: name, description or x (the coin's own text), referent (the referent it resolves to) or alias (an alias of that referent)",
+            "title": "Matched On"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1); halved for perennially popular articles",
+            "title": "Score"
+          },
+          "searches": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Google Trends only: Google's approximate search count",
+            "title": "Searches"
+          },
+          "seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How fresh the hit is: the UTC day of the Wikipedia spike (day granularity), when Google Trends first listed the search, or the newest matching news headline",
+            "title": "Seen At"
+          },
           "source": {
+            "description": "wikipedia, google_trends or news",
             "title": "Source",
             "type": "string"
           },
@@ -2603,6 +2739,7 @@
                 "type": "null"
               }
             ],
+            "description": "Wikipedia only: the day's views over the usual (median)",
             "title": "Spike"
           },
           "term": {
@@ -2958,6 +3095,17 @@
       "XInfo": {
         "additionalProperties": false,
         "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XLinkAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account behind the link (full depth, when the author or profile is known)"
+          },
           "accounts": {
             "default": [],
             "description": "Accounts involved: author (or linked profile), quoted and replied-to authors, @mentions (full depth)",
@@ -2976,6 +3124,20 @@
                 "type": "null"
               }
             ]
+          },
+          "credibility": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How much the account behind the link is worth, apart from whether it matches: age at launch, followers, posts, verification, renames, link reuse (uncalibrated until Phase 6)",
+            "title": "Credibility"
           },
           "fetch_source": {
             "anyOf": [
@@ -3071,6 +3233,31 @@
             "title": "Reuse Count",
             "type": "integer"
           },
+          "reuse_first_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Launch time of the first analysed coin to link it",
+            "title": "Reuse First At"
+          },
+          "reuse_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This coin's place by launch time among the analysed coins linking the same post/profile/community (1 = the first)",
+            "title": "Reuse Rank"
+          },
           "status": {
             "default": "none",
             "enum": [
@@ -3102,10 +3289,122 @@
         "title": "XInfo",
         "type": "object"
       },
+      "XLinkAccount": {
+        "additionalProperties": false,
+        "description": "The account behind the link: the linked profile, or the linked post's author.",
+        "properties": {
+          "age_at_launch_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds from the account's creation to the token's; negative if the account is younger than the token",
+            "title": "Age At Launch S"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "made_for_coin": {
+            "default": false,
+            "description": "Created less than a day before the token (or after it) with a handle or display name that is the coin's name or ticker",
+            "title": "Made For Coin",
+            "type": "boolean"
+          },
+          "name_changes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Changes"
+          },
+          "posts_about_coin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Posts about the coin; null until a source provides counts",
+            "title": "Posts About Coin"
+          },
+          "posts_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Posts on the account, when known",
+            "title": "Posts Total"
+          },
+          "verified_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Type"
+          }
+        },
+        "title": "XLinkAccount",
+        "type": "object"
+      },
       "XMatch": {
         "additionalProperties": false,
         "description": "How well the linked X post (or profile) matches the token (depth=full).",
         "properties": {
+          "basis": {
+            "default": [],
+            "description": "What the fit rests on. A profile matched only by its own name, handle or avatar (no bio match) on an account not older than the token by a day is capped below about_this_coin",
+            "items": {
+              "enum": [
+                "profile_name",
+                "profile_bio",
+                "profile_image",
+                "post_text",
+                "post_image",
+                "cashtag"
+              ],
+              "type": "string"
+            },
+            "title": "Basis",
+            "type": "array"
+          },
           "fit": {
             "description": "Overall match, 0-1 (uncalibrated until Phase 6)",
             "maximum": 1.0,

@@ -39,6 +39,7 @@ from tokensage.api.schemas import (
     XAccount,
     XAuthor,
     XInfo,
+    XLinkAccount,
     XMatchField,
     XMatchImage,
     XMatchReferent,
@@ -50,6 +51,9 @@ from tokensage.api.schemas import (
 )
 from tokensage.api.schemas import (
     Trend as TrendOut,
+)
+from tokensage.api.schemas import (
+    TrendSource as TrendSourceOut,
 )
 from tokensage.api.schemas import (
     TrendTerm as TrendTermOut,
@@ -178,6 +182,41 @@ def _x_info(twitter: str | None, token_created: datetime | None) -> XInfo | None
     )
 
 
+async def _x_reuse(
+    conn: asyncpg.Connection, x: XInfo, mint: str, created_at: datetime | None
+) -> tuple[int, int | None, datetime | None]:
+    """Other analysed tokens linking the same post/profile/community: how many, this coin's
+    place among them all by launch time (1 = the first), and when the first one launched.
+    Rank and first launch are None when this coin's own launch time is unknown."""
+    if x.ref.kind not in ("tweet", "profile", "community"):
+        return 0, None, None
+    if created_at is not None and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    if x.ref.tweet_id:
+        where, key = "x.tweet_id=$1", x.ref.tweet_id
+    elif x.ref.community_id:
+        where, key = "x.community_id=$1", x.ref.community_id
+    elif x.ref.handle:
+        where, key = "lower(x.handle)=lower($1)", x.ref.handle
+    else:
+        return 0, None, None
+    row = await conn.fetchrow(
+        f"""select count(*) as n,
+                  count(*) filter (where t.created_at < $3) as earlier,
+                  min(t.created_at) as first_at
+           from x_ref x left join token t on t.mint = x.mint
+           where {where} and x.mint<>$2""",
+        key,
+        mint,
+        created_at,
+    )
+    n = int(row["n"]) if row else 0
+    if created_at is None or row is None:
+        return n, None, None
+    first = row["first_at"]
+    return n, int(row["earlier"]) + 1, min(first, created_at) if first is not None else created_at
+
+
 # ----------------------------------------------------------------- database context
 
 
@@ -193,24 +232,10 @@ async def _db_context(
     logo: image_stage.ImageFeatures | None = None,
 ) -> DbContext:
     dbc = DbContext()
-    # X link reuse across other tokens
-    if x is not None and x.ref.kind in ("tweet", "profile", "community"):
-        if x.ref.tweet_id:
-            dbc.x_reuse_count = await conn.fetchval(
-                "select count(*) from x_ref where tweet_id=$1 and mint<>$2", x.ref.tweet_id, r.mint
-            )
-        elif x.ref.community_id:
-            dbc.x_reuse_count = await conn.fetchval(
-                "select count(*) from x_ref where community_id=$1 and mint<>$2",
-                x.ref.community_id,
-                r.mint,
-            )
-        elif x.ref.handle:
-            dbc.x_reuse_count = await conn.fetchval(
-                "select count(*) from x_ref where lower(handle)=lower($1) and mint<>$2",
-                x.ref.handle,
-                r.mint,
-            )
+    if x is not None:
+        dbc.x_reuse_count, dbc.x_reuse_rank, dbc.x_reuse_first_at = await _x_reuse(
+            conn, x, r.mint, r.created_at
+        )
     # creator history
     if r.creator:
         dbc.creator_token_count = await conn.fetchval(
@@ -537,6 +562,7 @@ def _match_out(m: xmatch.XMatch) -> XMatchOut:
         x_categories=[Category(label=lbl, confidence=c) for lbl, c in m.x_categories],
         fit=m.fit,
         verdict=m.verdict,  # type: ignore[arg-type]
+        basis=m.basis,  # type: ignore[arg-type]
     )
 
 
@@ -760,21 +786,22 @@ def build_document(
             ]
         if out.x_match is not None and x is not None:
             x.match = _match_out(out.x_match)
-        if out.trend_hits:
-            doc_trend = TrendOut(
-                matched=True,
-                terms=[
-                    TrendTermOut(
-                        term=h.term.term,
-                        spike=None if h.term.source == "news" else h.term.spike,
-                        source=h.term.source,
-                        headline=h.headline,
-                    )
-                    for h in out.trend_hits
-                ],
+        if x is not None and out.x_account is not None:
+            acc = out.x_account
+            x.account = XLinkAccount(
+                handle=acc.handle,
+                created_at=acc.created_at,
+                age_at_launch_s=acc.age_at_launch_s,
+                posts_total=acc.posts_total,
+                posts_about_coin=acc.posts_about_coin,
+                name_changes=acc.name_changes,
+                verified_type=acc.verified_type,
+                made_for_coin=acc.made_for_coin,
             )
-        else:
-            doc_trend = TrendOut()
+        if x is not None:
+            x.credibility = out.x_credibility
+        if out.depth == "full":
+            doc_trend = _trend_out(out)
         feats = out.image.features
         if feats:
             image.phash = f"{feats.phash & ((1 << 64) - 1):016x}"
@@ -1210,22 +1237,25 @@ async def analyze(
         inp.tweet, inp.profile = tweet, profile
         inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
         inp.run_ocr = inp.ocr_lines is None and image_bytes is not None
-        inp.trend_index = await fulldepth.trend_index(conn)
+        inp.trend_index = await fulldepth.trend_index(conn, ctx.http)
         inp.x_media = await fulldepth.media_hashes(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
         )
         inp.wiki_refs = await _wiki_refs(conn, ctx, inp)
-        inp.news_hits = await _name_news(conn, ctx, inp)
+        inp.news_hits, news_status = await _name_news(conn, ctx, inp)
         # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
         # worker's other concurrent jobs keep making network progress meanwhile.
         out = await asyncio.to_thread(run_full, inp)
         if inp.run_ocr and m and m.image_content_key and not out.ocr_error:
             await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
         await _attach_news(conn, ctx, out)
+        out.trend_sources = [*inp.trend_index.sources, news_status]
     else:
         out = await asyncio.to_thread(run_basic, inp)
     if x is not None:
         x.reuse_count = dbc.x_reuse_count
+        x.reuse_rank = dbc.x_reuse_rank
+        x.reuse_first_at = dbc.x_reuse_first_at
     if cached_feats is not None and out.image.features is None:
         out.image = image_stage.ImageResult(
             features=cached_feats,
@@ -1345,6 +1375,33 @@ async def _read_extras(
     return ex
 
 
+def _trend_out(out: EngineOutput) -> TrendOut:
+    terms = [
+        TrendTermOut(
+            term=h.term.term,
+            spike=h.term.spike if h.term.source == "wikipedia" else None,
+            source=h.term.source,
+            headline=h.headline or h.term.headline,
+            score=h.score if h.score is not None else trends.score(h),
+            seen_at=h.term.seen_at,
+            matched_on=h.matched_on,
+            searches=h.term.views if h.term.source == "google_trends" else None,
+        )
+        for h in out.trend_hits
+    ]
+    return TrendOut(
+        matched=bool(terms),
+        score=max((t.score or 0.0 for t in terms), default=0.0),
+        terms=terms,
+        sources=[
+            TrendSourceOut(
+                source=s.source, status=s.status, as_of=s.as_of, terms=s.terms, detail=s.detail
+            )
+            for s in out.trend_sources
+        ],
+    )
+
+
 async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput | None) -> None:
     """A pair token we have never analysed but that is itself a pump.fun coin: analyse it in
     the background (basic depth, lowest priority) so the next coin paired with it gets the
@@ -1403,22 +1460,32 @@ async def _wiki_refs(
 
 async def _name_news(
     conn: asyncpg.Connection, ctx: Context, inp: EngineInput
-) -> list[trends.TrendHit]:
+) -> tuple[list[trends.TrendHit], trends.SourceStatus]:
     """Search Google News for the coin's name (when it is specific enough to search): a coin
     named after a story that broke today is "in the news" long before, or without ever, its
-    subject reaching Wikipedia's daily top 1000."""
+    subject reaching Wikipedia's daily top 1000. Also returns the search's status."""
     phrase = gnews.name_query(inp.name)
     if phrase is None:
-        return []
+        return [], trends.SourceStatus(
+            "news", "skipped", detail="name not specific enough to search (needs two words)"
+        )
     try:
         heads = await fulldepth.news_for(conn, ctx.http, phrase, exact=True)
     except Exception as e:  # noqa: BLE001 - an optional enrichment
         log.info("news.lookup_failed", error=str(e)[:120])
-        return []
-    if not heads:
-        return []
-    hit = trends.news_hit(phrase, gnews.relevant(heads, phrase, inp.symbol))
-    return [hit] if hit else []
+        return [], trends.SourceStatus("news", "failed", detail=f"{type(e).__name__}")
+    if heads is None:
+        return [], trends.SourceStatus("news", "failed", detail="Google News unavailable")
+    rel = gnews.relevant(heads, phrase, inp.symbol)
+    hit = trends.news_hit(phrase, rel)
+    st = trends.SourceStatus(
+        "news",
+        "ok",
+        as_of=datetime.now(UTC),
+        terms=len(rel),
+        detail=f"searched '{phrase}'",
+    )
+    return ([hit] if hit else []), st
 
 
 async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput) -> None:

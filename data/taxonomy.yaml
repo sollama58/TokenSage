@@ -130,6 +130,9 @@ flags:
   - code: x_link_reused
     severity: warn
     description: The same tweet, handle or community is linked by many other tokens.
+  - code: x_account_made_for_coin
+    severity: info
+    description: The linked X account (or the linked post's author) was created less than a day before the token, or after it, and is named after the coin; a self-made profile is not evidence of anything (see x.account, x.credibility).
   - code: tweet_deleted
     severity: warn
     description: The linked tweet no longer exists.
