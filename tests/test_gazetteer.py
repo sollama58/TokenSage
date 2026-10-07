@@ -136,8 +136,8 @@ def test_lexicon_merges_gazetteer_hits(gaz: Gazetteer) -> None:
     k = load_knowledge()
     hits = lexicon.find("ice spice coin", k, gaz)
     assert [(h.surface, h.kind) for h in hits if h.kind != "slang"] == [("ice spice", "entity")]
-    # without the gazetteer WordNet reads "spice" as food
-    assert any(h.kind == "wordnet" for h in lexicon.find("ice spice coin", k))
+    # without the gazetteer nothing names the rapper
+    assert not any(h.surface == "ice spice" for h in lexicon.find("ice spice coin", k))
     # name-only surfaces are skipped outside the name
     found = lexicon.find("back at the office", k, gaz, name_pass=False)
     assert not [h for h in found if h.kind == "entity"]

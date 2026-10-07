@@ -486,6 +486,21 @@
             "title": "Confidence",
             "type": "number"
           },
+          "inputs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The independent inputs that agree on this label, strongest first: name, symbol, description, image, x, trend, db, copy_of. A ticker that spells the name counts as the name. More agreeing inputs make the label more trustworthy",
+            "title": "Inputs"
+          },
           "label": {
             "title": "Label",
             "type": "string"

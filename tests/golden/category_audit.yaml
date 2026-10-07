@@ -1,0 +1,1164 @@
+# Category audit set: 200 pump.fun launches from 2026-10-07 19:15-19:29 UTC, one per distinct
+# name (copies of the same name dropped), labelled by hand with top-level theme categories.
+# `labels: []` means a person could not name a theme from the name, ticker and description.
+# derivative (a relation to another coin) is not labelled. Run: scripts/category_audit.py
+coins:
+- mint: 98LQfZg2VVj3g4fpTr22sC6RPmE7hT9bgyLibufspump
+  name: 41Coin
+  symbol: '41'
+  labels: []
+- mint: 2NCsxCPG5deLCCxKiVaM89UQ7Z2MTB6VnAd4pJxPpump
+  name: 'Lambull '
+  symbol: LAMBULL
+  labels:
+  - animal
+- mint: Gyhg7U1beQ497evddSnF27Aa6J69bfDjNz9oMkzvpump
+  name: Faupad
+  symbol: $FAUP
+  description: The official community coin of Faupad.  Built for the community, powered by memes, and
+    launched on Solana.  No promises, no complicated roadmap — just good vibes, strong community and a
+    journey we can build together. 🚀
+  labels:
+  - crypto_native
+- mint: 91UdNVQ4U6LRr87wquZYFTxG6FDPw4yMKceD4xYo2dbi
+  name: Avenro
+  symbol: AVENRO
+  description: 'Avenro powered by clawpump.tech : AI credits for less. Unified access to leading AI models,
+    powered by intelligent inference optimization.'
+  labels:
+  - ai_agent
+- mint: CG5LurmuNKBAiFea3a7pDozrNK1Hbe164dfiEiKHrSXx
+  name: Unc Pussy
+  symbol: UP
+  labels:
+  - humor_crude_offensive
+- mint: CK882CosXzafzzpunQTsubtNRcLA5GjUiqasfAK2mDDD
+  name: Uptime
+  symbol: UP
+  description: 'Uptime powered by clawpump.tech : The attention network. Uptime settles in NVDAx.'
+  labels:
+  - crypto_native
+- mint: 9hGLq3ZkWUvVHM6ZZGHvuhSLSL5XFRNnR61JtWecpump
+  name: Stackr
+  symbol: STACKR
+  description: A market board with Bitcoin roots. Track $WBTC pairs, liquidity & volume on  @solana .
+  labels:
+  - crypto_native
+- mint: 5BqNWMQE6fuzjyx46XNp9AoidAxrQ9ZfwirDjCUapump
+  name: NAPZ
+  symbol: Napzilla
+  description: Tiny body, enormous attitude. A blanket burrito that refuses to go to bed.
+  labels: []
+- mint: 5GVMa1BjQumMkVPcpyDcWaj67seDfP4if85Kkmsipump
+  name: Botai and Tumar
+  symbol: B&T
+  labels: []
+- mint: E5bpfdm6w2G2V4WcGcJUBqQ7dngFBvdmRxEA93FJpump
+  name: Receb Ivedik
+  symbol: REC
+  description: Receb Ivedik
+  labels:
+  - pop_culture
+- mint: Fn2YkoBxEkuyuWFSb1SKG6tkoyFgrd7QUbA3AbV4MU9r
+  name: Hysplex
+  symbol: HYSPLEX
+  description: 'Launch a Solana token from Telegram. Five gates: each held with a reason, or dropped with
+    a proof you can check.'
+  labels:
+  - crypto_native
+- mint: GyXXiSXnTEJiLVwLSPPoG42xX56D5iXLP2CiY98Apump
+  name: Sentients Cat
+  symbol: SENTSCAT
+  labels:
+  - animal
+  - ai_agent
+- mint: 3z84dtEdBrpdjGrjjHV93SASsAtvb5J9cUKVHeTdpump
+  name: NO RISK NO LAMB CHOP
+  symbol: $NRNLC
+  description: DO U WANT THAT LAMB CHOP?
+  labels:
+  - food_object_abstract
+- mint: ByghQT9SSqNYc8Ensd3m2hyBajgXVVmdQZBuVXhDpump
+  name: Blox Strategy
+  symbol: BLOX
+  labels:
+  - crypto_native
+- mint: GHyEx3vPr3zBT2fwfJBEVCTsnhvL1N9s8rsUY2Ybpump
+  name: keep
+  symbol: keep
+  description: keep
+  labels: []
+- mint: PX19sHCJtbRbzS3SVivysKiwdR6hhB4wjH5ifXQpump
+  name: GoogleGemini
+  symbol: GgMİNİ
+  description: Google Gemini has entered the blockchain world. Google Gemini 已進軍區塊鏈領域。
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: BpE33tW6YaNs9dvXq64PQQkVbT8t6hdMH1K39ajq1oq8
+  name: SENTINU
+  symbol: SENTINU
+  description: The coin of @sentinu, a Sentient on SENTIENTS. Its trading profits buy it back and burn
+    it.
+  labels:
+  - ai_agent
+  - animal
+  - crypto_native
+- mint: HFL7YbxjQSBXjDrsWpAFqBuiim8eVyWJ5NpRCTqPYUK2
+  name: Unc Cat
+  symbol: unccat
+  labels:
+  - animal
+- mint: 5yLYiJzLjEj5Cq1GoHrAa5r8dJQQBnv5oP35nufTpump
+  name: Biscuit Johnson
+  symbol: BISCUIT
+  labels: []
+- mint: APQJZyvXbZ94uxAvYW3C3mj96SqCJQhczv1XxTkepump
+  name: quants.bid
+  symbol: QUANTS
+  labels:
+  - crypto_native
+- mint: E1bQQGq97TESLtRQvrNrMMjEYcCFwjiVqumVJ1FXKAJ4
+  name: My Name Is Yeff
+  symbol: YEFF
+  description: MY NAME IS YEFF
+  labels:
+  - meme_template
+- mint: DztgX14MCjzhaX6FZHQZvHBzJyYZMqrWUiPPvs4Gpump
+  name: fly-42 project
+  symbol: FLY42
+  description: without AI or algorithms, can a fly's neurons run a token? we tried it with the fly-42
+    project.
+  labels:
+  - animal
+- mint: 3w6dnGq5aFftAEJk46UTf5c9x6VYaC7y1Lnu7SgFpump
+  name: Screaming Vandal
+  symbol: SCRVAN
+  labels: []
+- mint: 6CCa12kpcHpxfYQzNE4yibvAWmkczdgC9SxTqpvRpump
+  name: PUMPX
+  symbol: PMX
+  description: PUMP • GROW • TOGETHER
+  labels:
+  - crypto_native
+- mint: S8cFZELqTSRTVNUjeKtJxWvsQerZnjbqMU4bXXnpump
+  name: Crine
+  symbol: CRINE
+  labels:
+  - meme_template
+- mint: 4R8AeNropCSc9Ua2GfpupdPSzUdHd1qvM4wRtYUXpump
+  name: 'running cow '
+  symbol: COW
+  description: I told Opus 5.5 to make a cow that runs. This is what it gave me
+  labels:
+  - animal
+- mint: BawbveSEvMeTxyUhsJ5vSuTuj3cMQ8zPxVZPQNsMUh4h
+  name: Buzz
+  symbol: BUZZ
+  labels: []
+- mint: 6SnDtWHYqWij3CTYf3LCdGjUD7ygYZPJdHuPxYk3pump
+  name: USMS
+  symbol: USMS
+  labels: []
+- mint: Df7DBTvrJUejBsWdMdF3tjLBkriukmv17aMY8K8jpump
+  name: Soltag
+  symbol: SOLTAG
+  description: Launched on discord.gg/uxento
+  labels:
+  - crypto_native
+- mint: 5KqebLNPwzfzKbXJqdk2QscL4WJMgEH4YE2L4gTxpump
+  name: CHIWAWA
+  symbol: CHIWA
+  description: the best dog on earth
+  labels:
+  - animal
+- mint: ExbCHavxiM9owuxgjEadCKuQng1iixw9TNjHGYJqqk7M
+  name: Numen Cash
+  symbol: NUMENCASH
+  description: Launch tokens on Ritual. Each wakes with a mind of its own.
+  labels:
+  - crypto_native
+- mint: 8cMcLqMWpEmSTgX1aRW8vuu4xCN9CgihwfvYcuJspump
+  name: laptop
+  symbol: lptp
+  description: king of laptop
+  labels:
+  - food_object_abstract
+- mint: 4pbpAqJ3fX8Y7s79xha1KLDDCEXwV9VQ8Zn7fzoCpump
+  name: Toronto Zoo
+  symbol: TORZOO
+  labels:
+  - regional_language
+- mint: DPGdiN2KxzmtJK9kaBpj8mxqdYehCFqAxFNRyoiepump
+  name: LOBBYPAD CAT
+  symbol: LOBBYCAT
+  description: LOBBYPAD CAT
+  labels:
+  - animal
+  - crypto_native
+- mint: 6Tu5DuFDkNGnE94Tny3nocuUpcbpG5Nkq7HbV7JBpump
+  name: Stubly
+  symbol: Stubly
+  description: Hire AI agents for small jobs on Solana. Your USDC sits in escrow until the work passes.
+    No admin, zero fees.
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: 2aTyoSZMYQtJapSKXcHcPqMb9by6GC53qeo1yPd2pump
+  name: Lips
+  symbol: Lips
+  description: kiss and run
+  labels:
+  - food_object_abstract
+- mint: 26ePLNQeojwHXUAidRzhhPGmCec6bMUSFrGg8Zxgpump
+  name: VITALDICK
+  symbol: VITALDICK
+  labels:
+  - celebrity
+  - humor_crude_offensive
+  - crypto_native
+- mint: Hd3LFhkd4jqka74odRNWZ3T8YvTivSQ9a2NBmqSXpump
+  name: Lobbycat
+  symbol: LOBBYCAT
+  labels:
+  - animal
+  - crypto_native
+- mint: 7HqAc1pcTsX8ek2Biyq5CHPw5LWu6aAaLDKj8RzZtAos
+  name: Hormuz Closed
+  symbol: HORMUZCAT
+  labels:
+  - news_event
+  - animal
+- mint: 26ePJeNtZ9FU3JX6spZr3RcL18fNAxwhpkV5riMupump
+  name: nintendoge
+  symbol: nintendoge
+  labels:
+  - pop_culture
+  - animal
+- mint: 2PmoQbzQJZFSsk543CawZWbtLypjDbRTLAF26aszpump
+  name: beer
+  symbol: beer
+  description: beer
+  labels:
+  - food_object_abstract
+- mint: GJ7boxSdmLXsDL31pNEt312bX9Ub1EAYWXYjtEWzpump
+  name: BagsPag
+  symbol: BAGSPAD
+  description: Bagstar lets you create AI trading influencers with their own look, voice and strategy,
+    or connect a bot you already run. Public profiles bring their personality, updates and trading activity
+    together.
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: 8RYKnwC968KKn7giBfoxZSd83QbpxhzhWf5pBamzdkkL
+  name: SENTS CAT
+  symbol: SCAT
+  description: The coin of @sentscat, a Sentient on SENTIENTS. Its trading profits buy it back and burn
+    it.
+  labels:
+  - animal
+  - ai_agent
+  - crypto_native
+- mint: CFrCaSta2cFiWR5L1MMFnq4rmghLDbBGwcfUhGmkpump
+  name: CAI
+  symbol: CAI
+  description: CULTURAL ASSET INFRASTRUCTURE
+  labels:
+  - crypto_native
+- mint: HCoZ5ioyKTAsB56DpyhM9rNKg9Tk6XKRnkTye2yYKMdE
+  name: GiveWell Inu
+  symbol: GINU
+  labels:
+  - animal
+- mint: 27KPaHXDetgPC8hGnUoHPW1rZYKMNrpDbD9LcL3Jpump
+  name: asci cock
+  symbol: asci cock
+  description: theres a web that literally shows vitalik as a asci cock? THEY BURIED THE FIRST ACII PEEN
+    INSIDE AN ETH TRANSACTION  AND ITS LITERALLY VITALIK
+  labels:
+  - celebrity
+  - humor_crude_offensive
+  - crypto_native
+- mint: 7qKSjmHwVn7zmbwiMMkjvGN7tnoSQXZ77umVzMXspump
+  name: Right Timeline
+  symbol: RIGHT
+  description: in a few years we’ll look back on this as the moment everything started going right
+  labels: []
+- mint: AXwy66EVWQ9RaWGpgyZV6hvg4p1BhwHZFG67L1mVpump
+  name: POPPER
+  symbol: POPPER
+  description: POPPER is the token for people who would rather break a bad theory than worship it.
+  labels:
+  - celebrity
+- mint: FHkcZ4z5bWLvfhagjqf5BgssXDz8Lw6PhSeYoUREpump
+  name: Rush
+  symbol: RSH
+  description: INU reached a new planet
+  labels:
+  - animal
+- mint: Bj3YrHxzkoxCD1XFaN7nTZoUAhKeRLnhUU4ndWANpump
+  name: Akev
+  symbol: AKEV
+  description: Build one, talk to it for months, then launch it as a token that carries the same identity.
+  labels:
+  - ai_agent
+- mint: ekUwoKNM8jq8iGgZbQx1HEYmLkhEMNhECNhgscfpump
+  name: '420'
+  symbol: '420'
+  labels:
+  - meme_template
+- mint: DQ3Xp13nZjM5LfQxJcsvBE82qTfj7VoCMhU6bodWRh1W
+  name: PLATFORM
+  symbol: PTFM
+  labels: []
+- mint: GSvUU55oYDsiPTUxBZ8azCqNkdUUkMGA1ets1VGzpump
+  name: 'Harmful Slot Machine '
+  symbol: SLOT
+  labels:
+  - food_object_abstract
+- mint: dvV24RgmBgV9YS3BmrBm71eUjtSnTYP8tU3rHvVpump
+  name: Gasp
+  symbol: GASP
+  description: Could pop anytime
+  labels: []
+- mint: CQJYJac7JES7rVgwFUAkAW6n9bexfeLFvb3d2k8xpump
+  name: GOOP HEAD
+  symbol: GOOPER
+  labels:
+  - humor_crude_offensive
+- mint: J3GUWRvRKAqGwydbaJVuoELTU5ri2zEJdDxDaM35pump
+  name: Black INU
+  symbol: BINU
+  description: BLACK INU
+  labels:
+  - animal
+- mint: 9pTWpjZUrQgDVyosbw4qXo8QdcsW45iva8yWFxnppump
+  name: Love Cat
+  symbol: LCAT
+  description: Launched on discord.gg/uxento
+  labels:
+  - animal
+- mint: 331HSvesryD4h9sAQr3Nd3AT5EzueiqHcVpUZmNBUwm9
+  name: Vitalik ASCII
+  symbol: VITALIK
+  labels:
+  - celebrity
+  - crypto_native
+- mint: JAPHzuiaPQU3FNgkVh8jMXchgiX9bZM3BgXusML6pump
+  name: SUNNY
+  symbol: SNY
+  description: ☀️ **Why SUNNY?** SUNNY is inspired by a 6-year-old boy named Güneş — a name that literally
+    means **SUN**. He was born with a heart condition, so hospital visits, check-ups and doctors have
+    been part of his life from the very beginning. But if you met him, you probably wouldn't notice any
+    of that fi
+  labels: []
+- mint: 65SHeMUAWcyY7yFQvBTqfPFfQyWWsxBmx3wqtNdipump
+  name: 'Sad pikachu '
+  symbol: 'PIKACHU '
+  description: THE DEAD OF ASH - Pokemon
+  labels:
+  - pop_culture
+- mint: HcrSByVTSJvfW3aV2jusf7pM7BjeTPaCp8SH3Aydpump
+  name: PLAGUE II
+  symbol: PLAGUE
+  labels: []
+- mint: ELzk4dJbFd1aa9nPXYdMtg2Dcxkaw96gvCnDfi6atx85
+  name: StickFrag
+  symbol: STICKFRAG
+  description: 🎮 STICK FRAG 🔥 Fast fights. Brutal battles. Endless chaos. 🏆 Fight. Survive. Become the
+    last one standing.
+  labels:
+  - pop_culture
+- mint: 7yhmzEp9vPvAngHmbd5agxTMYa1jSM16gbwapQ343Eww
+  name: VITALDIK
+  symbol: VITALDIK
+  labels:
+  - celebrity
+  - humor_crude_offensive
+  - crypto_native
+- mint: 69zNRj5WavccfRiNckDQVxCD78HvnVoDGVbH6D1dWPeA
+  name: Garage
+  symbol: GARAGE
+  labels:
+  - food_object_abstract
+- mint: ExdoU4LUNXrTMousM9RCM1b7ZfQJi8fGWyesptjCpump
+  name: '@Messi'
+  symbol: Last game
+  description: Argentina Won world cup
+  labels:
+  - celebrity
+- mint: BUTaMa3zTLWbi5ZCvyvLauCJEYuoEcMBPCMnVwRuvsB3
+  name: AgentLoadout
+  symbol: AGENT
+  description: 'AgentLoadout powered by clawpump.tech : Infrastructure for AI agents: email inboxes, credential
+    storage, and Linux machines. Official account of Agent Loadout.'
+  labels:
+  - ai_agent
+- mint: 7SJzdGqkYYSEZtmJHkRFbTrvc3nghfKjzmptUcEppump
+  name: FlyBros
+  symbol: FLB
+  description: Hey! We`re the best BROs of our cool friend FLY!
+  labels:
+  - animal
+- mint: Ba6Jm9s4yjgjhdiZTm98CK12ccou3MmigEaV8LFxpump
+  name: SLOTH
+  symbol: SLOTH
+  labels:
+  - animal
+- mint: 8WGoofU2qKysGoJygzNbM7UtE6zvzKvdkSCfqwYipump
+  name: FreakHouse
+  symbol: FHC
+  labels: []
+- mint: 7LGiSbRn4jBWfnix1PwuHBFgMJqUes75BWZnsRCfpump
+  name: Koaly
+  symbol: KOALY
+  description: Meet Koaly. Part koala, part meme, fully on Solana.
+  labels:
+  - animal
+- mint: CTL7ANpAd3b9d62bQVnHPZVWG52NySEqr8KpGZPapump
+  name: Nive Protocol
+  symbol: Nive
+  description: 'Nive is the coordination layer for independent agents: declare capability, find work,
+    commit results, settle value, and build portable history.'
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: BrSBKG7Mkh5bzmYt4YGxNFgKzmnohLSTABnxDUZ9pump
+  name: golden bull
+  symbol: Bullz
+  labels:
+  - animal
+- mint: 56KpcgmHLnucjFugxPrKfsCKeAHMKZpF9A7qDR8spump
+  name: Doomed Rocket
+  symbol: DOOROC
+  labels: []
+- mint: 5ST2Fitx44mRPZdKLh2Xr3ku7ozsQk4YvdmJzriypump
+  name: WrapCoin
+  symbol: Wrap
+  description: Burn Wrapcoin, speak forever, knock on any door.
+  labels: []
+- mint: 7TqfDcumnhscgLUQ3ShNXyA7Wwpwzvtzp9ictvSHpump
+  name: 'human-42 project '
+  symbol: HUMAN
+  labels: []
+- mint: 8mxKm1ZTdyT1BRiJAZtjWzDLhngrie7tfN9LaBQFpump
+  name: Zelo Sport
+  symbol: ZELOFC
+  description: ⚽ Football Prediction Mini App on Telegram! ⚡ Predict matches & claim $ZELOFC rewards on
+    @solana. 🏆 @Colosseum Org Hackathon Participant.
+  labels:
+  - crypto_native
+- mint: Ax3Z44GuUSF8mhcMRVbfd1k43dkifyEBgFmcaKwgpump
+  name: Butter Cat
+  symbol: TOAST
+  description: butter on my head
+  labels:
+  - animal
+  - food_object_abstract
+- mint: BaSTBpkBchWMbY5UuXnJqZLL29BTUD1ic8VAvq3fpump
+  name: EVILcoin
+  symbol: EVIL
+  description: EVILcoin helps fund Reteps evil plans for conquest, also his BMW
+  labels: []
+- mint: 58qBgDGKgpW5HA7ohXpTLVN5xooA6Q3BhZeorhtQpump
+  name: bagstar.fun
+  symbol: BAGSTAR
+  description: Bagstar lets you create AI trading influencers with their own look, voice and strategy,
+    or connect a bot you already run. Public profiles bring their personality, updates and trading activity
+    together.
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: B8djdWvLmW7Yw4VqMAwdQYR9Lp2tRuNqQNTgCQPLpump
+  name: 🐈‍⬛ Fomo Cat 🐈‍⬛
+  symbol: FOMOCAT
+  labels:
+  - animal
+  - crypto_native
+- mint: 45Sp53VqX4kCUNuQxyYKYVTyrUfK6ukDuKTQCjhppump
+  name: No HonourAmongstThievs
+  symbol: HONOUR
+  description: 'An old underworld truth: when loyalty has a price, every oath is for sale. No trust, no
+    code, no honour — only the next betrayal. Longer version for the Rook aesthetic: It’s the law of the
+    back room and the courtroom at 1:40pm. No honour amongst thieves means alliances last until the pockets
+    get lig'
+  labels: []
+- mint: F8Ni6WCvhUTp7vfU76EfzXY62zdAYtyFGS6ndtJupump
+  name: Diesel price
+  symbol: DIESEL
+  description: Launched on launchblitz.ai
+  labels:
+  - news_event
+- mint: 8haa1c8xsnjgTX1ynE6Pi6hr7dJqyNU6SoeTzfZfpump
+  name: OTTERPRENEUR
+  symbol: OTTER
+  labels:
+  - animal
+- mint: 6USqiDUaGDnczCXgG7xrWigMMRtjNbitYiqhZpg4ZdPt
+  name: wifout
+  symbol: WIFOUT
+  description: Wifout — an NFT collection on Robinhood Chain. Own a Wifout NFT and automatically earn
+    $WIFOUT tokens simply by holding.
+  labels:
+  - meme_template
+  - crypto_native
+- mint: EAikoe88A5SiVruagfyVoK1ZcqFpL2bhGifQ4nNBpump
+  name: Kyvora
+  symbol: KYVORA
+  description: Paste any Solana wallet. Kyvora rebuilds every swap into trades, PnL, win rate and fees.
+    Then lets you journal what you learned.
+  labels:
+  - crypto_native
+- mint: Btv3MadzrKPxf2G6YpcmELopfBihq4qbgCkdh4q7Z2hY
+  name: VITADIK
+  symbol: VITADIK
+  labels:
+  - celebrity
+  - humor_crude_offensive
+  - crypto_native
+- mint: F5kwWi1NeEFADyj69Rm6MLsrcMrU33dSSUuRJNWfMVNU
+  name: Pixpad
+  symbol: PIXPAD
+  description: 'Pixpad powered by clawpump.tech : Your coin idea, backed by a pixel crew. Share your vision
+    and build something worth launching with Pixpad.'
+  labels:
+  - crypto_native
+- mint: E8V274VHPPXWVQskf5NLDedJP3hZuvC2wrJ3dK9tpump
+  name: uinhim
+  symbol: uinhim
+  labels: []
+- mint: 3MqXMdpEgae7sucKjGazuVa8xmGWfc5yLR2CyrGvpump
+  name: NO RISK NO FERRARI
+  symbol: NRNF
+  description: cool cat with ferrari flottes
+  labels:
+  - animal
+  - food_object_abstract
+- mint: 9qDHYvfYATWb4VxJkKj2FuvM5SrBNopVmhqR9wsYpump
+  name: BoZ_kurt
+  symbol: BOK
+  description: Bozkurt
+  labels:
+  - animal
+  - regional_language
+- mint: 5YM5xskP5U7MGAi74LrxUQfoJ9QutPFqeRHtnEuSpump
+  name: Serial Butt Sniffer
+  symbol: BUTTSNIFER
+  description: Rugs stink. Real ones pass.
+  labels:
+  - humor_crude_offensive
+  - crypto_native
+- mint: 2YecfqEd984vkBUEW7zLUMPW36AdKAdDkrrHgSxbytc5
+  name: Cryptographic World Computer
+  symbol: CWC
+  labels:
+  - crypto_native
+- mint: 7hx465ckpuPXHtMJ9BX3yxZDn6z8rnzS87EMihuDpump
+  name: Loreflick
+  symbol: LOREFLICK
+  description: An open book for internet lore. Every meme is a page. The next chapter is unwritten. $LOREFLICK
+    | Coming to Robinhood Chain.
+  labels:
+  - crypto_native
+- mint: iA6XMoJams5ZNQu1hdf2e7ELWXw8W5M8sdwdUNPpump
+  name: Slippy
+  symbol: SLIPPY
+  labels: []
+- mint: 4zambPXHHrbXZQdpt7acMNznf4VwC7CCdgEW8SQcpump
+  name: Feet Kicked Up
+  symbol: FKU
+  description: rich off memes ehh yall watch me enjoy my wednesday
+  labels: []
+- mint: CZsavUb5ofHdi3TP58PWdhzAo8nBZJRGCm3CeE7fpump
+  name: NEET
+  symbol: NEET
+  description: in a few years we’ll look back on this as the moment everything started going right
+  labels:
+  - meme_template
+- mint: 26eNX7od4d8bCuGd7pJt68axpxPqFjCxYot8fuB4pump
+  name: Nazi Cat
+  symbol: Catler
+  labels:
+  - animal
+  - humor_crude_offensive
+- mint: EZqRpvwwHWs9Jsjx8YfQtK8mfMuxFetjScAyQnnQW4PU
+  name: VITALCOCK
+  symbol: VITALCOCK
+  labels:
+  - celebrity
+  - humor_crude_offensive
+  - crypto_native
+- mint: H4Cy3xgDaWdF3iL5tKEmBo3JpX3LbNNkW1Et3gqsnHNB
+  name: Science
+  symbol: SCIENCE
+  labels: []
+- mint: 7zvYYMycsC1RCgc3aiShvehtMgech8ULSY9PFontpump
+  name: HE CLAIMED
+  symbol: OpenHuman
+  labels: []
+- mint: 3oUq6xHsTtjCCjNaY2VSwRTJdRpLxkQCBJjGpfc6pump
+  name: BEENETWORK
+  symbol: BEE
+  description: AI bees training their own LLM while rewarding holders for playing $BEE
+  labels:
+  - animal
+  - ai_agent
+- mint: AQJQD9o7zE2KfMZZJpAE6rtws9QnqFzPHoJQEEDYzDEs
+  name: Potlings
+  symbol: POTLINGS
+  description: Free mint NFT on Robinhood Chain 🌱 5,000 Potlings, pixel plants grown from three seeds.
+    WL spots for early followers and supporters. Soon
+  labels:
+  - crypto_native
+- mint: 8F7UzmCx9s7p9cECbQmL1KQnEHFECJX82smSwyAjpump
+  name: Savage Piranha
+  symbol: SAVPIR
+  labels:
+  - animal
+- mint: 2GQpLuy3ztUB2gXUE8F4YbvH6t2uoBdfBtSXSDjmpump
+  name: Scrat
+  symbol: Scrat
+  labels:
+  - pop_culture
+  - animal
+- mint: BjEXSpSEqs3bH6FWYTRv3zqgCMQuCn2hVULy72mfpump
+  name: Delphi
+  symbol: Delphi
+  description: Predict Anything.
+  labels:
+  - crypto_native
+- mint: nu3RS5oeJNP4M5FxfidShhWoVrVkrNtziuaWAY3pump
+  name: 4gent
+  symbol: 4GENT
+  labels:
+  - ai_agent
+- mint: BeDmL3bi3ffMi89bBuUaWJ5UtvShbLHgexQYxF1SQuxL
+  name: HermeticLabs
+  symbol: HLabs
+  description: Confidential compute for AI agents. Sessions run in Intel TDX, receipts are sealed on Solana
+    Chain.
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: 8Qf5g3V6vZR2zpXaVxzWSqWFo5wnHbuWWQLvwzLVR2J6
+  name: Maple Syrup
+  symbol: SYRUP
+  labels:
+  - food_object_abstract
+- mint: DrQC1ovj7FNjuwdqxL1s2gj1mhLqJebkPnnWmfzf76PU
+  name: dihtalik
+  symbol: DIHTALIK
+  labels:
+  - celebrity
+  - humor_crude_offensive
+  - crypto_native
+- mint: Ao54iJaSgh2eKWyYE2t1wdY6QZGXjxgDmFQn2tiqpump
+  name: BURNT
+  symbol: BURNT
+  labels: []
+- mint: DFf2Gpu9X6yhpcXnk5EJsAwgmG62RKS7bQDSSeFNpump
+  name: Bytecade
+  symbol: BYTE
+  description: Arcade games stored on Solana. Every coin is a game with its own prize pot. Play to win.
+  labels:
+  - crypto_native
+- mint: A8XCpvazewV3PFAs1zJYLQmthY9z3Wt3sDwzymQU9Q7Q
+  name: one more token
+  symbol: OMT
+  labels:
+  - crypto_native
+- mint: 6e9sb4sUPdcAe8dZb8BE6NPUh6hoZoVL5vN9tJ8xpump
+  name: Dumpling Inu
+  symbol: DUMPL
+  description: 50% inu. 50% dumpling. 100% unit. 🥟
+  labels:
+  - animal
+  - food_object_abstract
+- mint: 9Cccmr9J8GhY9iWa6ehU2dCydwVRBnNKMZgKcA9ipump
+  name: SPLICE
+  symbol: SPLICE
+  description: A launchpad for collaborations on Solana Bring two communities together, launch something
+    they share
+  labels:
+  - crypto_native
+- mint: 4fqgfB3fqY7cmWdJ8oDCuxjAUDuyrSHUi1xcx8WHpump
+  name: Ketabros
+  symbol: Ketacoin
+  description: Ketabros coin
+  labels:
+  - humor_crude_offensive
+- mint: 8sB175HwAk5i1vgoJYPCzEmsLDfH2wVYqEjqWC5fpump
+  name: vrfy.fun
+  symbol: VRFY
+  description: Connect your product and domain. Our agents verify, your market opens on pump.fun, and
+    checks run after going live.
+  labels:
+  - crypto_native
+  - ai_agent
+- mint: EHyoDxYFuBPgAfqYBR3JN2JF79f8YVAxnZLCRQ4hpump
+  name: 'FLY - 42 PROJECT '
+  symbol: FLY
+  labels:
+  - animal
+- mint: 33y8QfQLKGynZ6tV4wd7tAii3kiLHE3WshCCqtSG2R2G
+  name: Einstein
+  symbol: EIN
+  labels:
+  - celebrity
+- mint: 6WVeHjEQ8LZ5TiwvyqFEUHXx9nhPw7SMqRp72mhKpump
+  name: LOBBYPAD
+  symbol: LOBBYPAD
+  description: LAUNCH UR OWN MINECRAFT fivem AND MORE
+  labels:
+  - crypto_native
+- mint: A4fAmqPuGnq8prneW7E4uS8WAENM4RJ7KQMjeP9Ppump
+  name: AppleCoin
+  symbol: AC
+  description: Take the bite of the Coins.
+  labels:
+  - food_object_abstract
+- mint: G7rAg7WsGde53xPo47d6PvVRY2phe32VfPBtTCEipump
+  name: Loan Meme
+  symbol: LOAN
+  description: Hi world, I'm $LOAN
+  labels: []
+- mint: Gso1vWzGfViofLbzdii26PH49qFU2AAqCuG1YBPepump
+  name: Matte AI
+  symbol: MATTE
+  description: AI from perspective
+  labels:
+  - ai_agent
+- mint: 9bmbGwx3Pgj4X3uFxyps812BeUg6n8CZjRJFuHthpump
+  name: 'unemployed '
+  symbol: UNEMP
+  labels: []
+- mint: HCU7WWkdyzwKEUSdh7wDiSu7FCdyAyLPBcX9fwSDpump
+  name: Justice for Nobody
+  symbol: NOBODY
+  description: We demand justice. We just don't know for whom.
+  labels: []
+- mint: 8e1bVVeeeieGRy6ynTojy3wm2PgpbqS3yF24d4ST9oHq
+  name: Clawd Pinch
+  symbol: CLAWD
+  description: A tiny clawed critter scuttled out of the timeline and straight onto the chain. Snip snip,
+    it's clawd season.
+  labels:
+  - animal
+  - ai_agent
+- mint: 8uVZbxugYmHskGtL4Exexd6QsPdFwABeSFCpwhmZpump
+  name: Mecha Inu
+  symbol: MHCI
+  labels:
+  - animal
+- mint: 9e3Tv6kYjCoVrJzvdtoKfEa8TSUWYkkgr4XPmLAVpump
+  name: Feral Specter
+  symbol: FERSPE
+  labels: []
+- mint: GbGEbbL1sNnQqfqeMdeps76CbWBrrFHGYn9GfvPgpump
+  name: Soljack
+  symbol: $SLJK
+  description: Solana wojak
+  labels:
+  - meme_template
+  - crypto_native
+- mint: 3CenY2RkpGsKLYEvKpyktB2jDiHrMVJpfo4MFPigpump
+  name: Canter
+  symbol: CANTER
+  description: Transaction lanes for Solana. Graph your workflow, read account locks, one fee payer per
+    lane, Jito-sized bundles.
+  labels:
+  - crypto_native
+- mint: 6bDpLGqTUUydvyx2iNsAGh9buVVu6A4M7c8Kf6uTRjWp
+  name: Intelligence
+  symbol: I
+  description: memecoin
+  labels: []
+- mint: DEPcHN9NQovGX3p2ciECqJp8gWm5yg2WunYkdXKHpump
+  name: 34percent
+  symbol: 34%
+  description: clubman34%
+  labels: []
+- mint: 75pCsZzWpBm5JMMPKVVw9x5Y1VoXKaY6hCfCRUNppump
+  name: MoonPaws
+  symbol: PAWS
+  description: Only $PAWS
+  labels:
+  - animal
+  - crypto_native
+- mint: CU8mqkKBssRxndYx5g1MM2rkowgCQDrwrnPxmLPVx4uq
+  name: Son I'm Crine
+  symbol: CRINE
+  description: Bro said something so unhinged I'm literally crine 😭 Tears of laughter only, no thoughts,
+    just crine.
+  labels:
+  - meme_template
+- mint: 9LMv2ov9N4TwonPsssFmmn4wLoVNESfyMth2hHp1TiSg
+  name: Solana Sentients
+  symbol: SENTS
+  description: Deployed using https://j7tracker.io
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: D9fQHG2vA5PXYmfgTFEZmVTDh6RjGqYo9UDAQz7Vpump
+  name: CRINGE
+  symbol: CRINGE
+  labels:
+  - meme_template
+- mint: 5XDxZ6M7PWqMjC8GXqUhCf5DX35YpauiUJrTTjk8XQL9
+  name: VOLUMEPAD
+  symbol: VOLUMEPAD
+  labels:
+  - crypto_native
+- mint: G51r61MDK4hC5uKHDXHu9hUC93kNVzBWpuy2zu1rpump
+  name: Ducky
+  symbol: DUCKY
+  description: The richest duck on Solana. 🦆👑 Ducky is here to rule the pond.
+  labels:
+  - animal
+- mint: DALHsx2en5m3ymktMGZa9CKvYUPdZvJ6kv7M3ZTbpump
+  name: TunMiner
+  symbol: TUNMINER
+  description: He doesn’t mine blocks. He mines the block. While everyone else is digging for profit,
+    TunMiner keeps digging until the whole chain wakes up. One pickaxe. Infinite proof of work.
+  labels:
+  - crypto_native
+- mint: Gsw81ASAoSL5DY5qVmXNr2UhFvrgducWcq6EEzBgpump
+  name: Fomo Protection
+  symbol: FPRO
+  description: 'Fomo Protection started with one simple idea: FOMO hits everyone.'
+  labels:
+  - crypto_native
+- mint: 8AEdUUXV5swo7rCE9H2wdCDrwXi6r1JGRTtabfAtpump
+  name: Édouard Pillard
+  symbol: ED
+  description: dressed for no reason. tiktok guy in a velvet suit. running an experiment!
+  labels:
+  - celebrity
+- mint: 8XnnvhbUNGtEY3VG5kNR2eqANySkSrZLEQ33anoTpump
+  name: Vortix
+  symbol: VORTIX
+  description: Fast multi-chain execution.
+  labels:
+  - crypto_native
+- mint: Ee1mzHCx7xiY6UFwsJZasnaFiQgidCrB6oEN2kQypump
+  name: SolRug
+  symbol: SOLRUG
+  labels:
+  - crypto_native
+- mint: HwEQyocQy6rytHjMuUxzpLBPAyXVJgzcy6KeweGpump
+  name: Holy Crawler
+  symbol: CRAWL
+  labels: []
+- mint: 8s7nQRqjpxg2GJDYM7QDsYLA2CwHkmdLv4KMpDUbdrnj
+  name: Agentic
+  symbol: AGENTIC
+  labels:
+  - ai_agent
+- mint: 8bosaZuRxK4GAiMDV86ZwomHAD1jjdi4RvjxeENdpump
+  name: Conor McGregor Pump
+  symbol: solana
+  description: Conor McGregor has lost his appeal against a High Court jury's finding that he raped Nikita
+    Hand. The jury at the civil trial found that he raped Ms Hand in a hotel roomConor McGregor has lost
+    his appeal against a High Court jury's finding that he raped Nikita Hand. The jury at the civil trial
+    found
+  labels:
+  - celebrity
+  - news_event
+  - crypto_native
+- mint: 5z1QmPwL8QE775XH4qxvp218wpE8q167Xav4xKtvpump
+  name: SARP
+  symbol: SARP
+  description: SARP
+  labels: []
+- mint: 6p7dc3QBgeeadwtKcTyAd9hJCj9W2WygSrv2Xs8h6Fn2
+  name: Pay Inu
+  symbol: PAYINU
+  labels:
+  - animal
+- mint: 6Pm9jNSspwXiCmkp8xxfKxbofJCVr94b1Ai57Kkupump
+  name: bunker Mode
+  symbol: Bunker
+  labels: []
+- mint: 42ZWfsGnnDFGjbPL7GN8bHuYQafAp65pFyi6jRuXpump
+  name: $HAVE A GOOD DAY
+  symbol: $LA BEAST
+  labels: []
+- mint: GQjDm4ggUTaeHLnyR7biYtt32r9WsDYxFXBfqASipump
+  name: SolWizard
+  symbol: Wizard
+  labels:
+  - crypto_native
+- mint: SR6jV9W64R5gwGQZBKBUQwLLq3mrou9D3qkUNmipump
+  name: Sentients
+  symbol: SENTS
+  description: The first AI-native economy where Sentients trade, post, launch coins, and compete autonomously
+    24/7
+  labels:
+  - ai_agent
+  - crypto_native
+- mint: BrgnRXNtDjJJ5q3iDeeJd3vsdBMx1bhCrDzCMuyBpump
+  name: fomora
+  symbol: fomora
+  description: Tokenize your @fomo profile.
+  labels:
+  - crypto_native
+- mint: 9KMHzEVaKJN4A9mGaUXCLdPVMPjGZn3XFMaXVk8s1nVc
+  name: PAYINU
+  symbol: PAYINU
+  labels:
+  - animal
+- mint: HzHD83c46zpxXUa5r7KZCRRFWbxoKwBTRT8r2ZhJpump
+  name: ANThroptic
+  symbol: ANT
+  labels:
+  - ai_agent
+  - animal
+- mint: 26eNCdhUxLC9D34FTDpMEFckj5h4sNqRZY7fLdy7pump
+  name: We 💜 Devs
+  symbol: Dev
+  labels:
+  - crypto_native
+- mint: 91cAoFtRtaBnfPrfuthSSvUZ5TgqmGP9mXTY6Cnkpump
+  name: GIRL TRADERS PROJECT
+  symbol: GTP
+  description: The girl traders project this is a project to inspire girl traders to learn trading and
+    stay solid while making lots of profits
+  labels:
+  - crypto_native
+- mint: CePmm7nF5F2DAnySPhD5akj9qEZz8gjLBkKrWvaEpump
+  name: GainBro
+  symbol: GNB
+  labels:
+  - crypto_native
+- mint: GwDmnHW4hMBygfWLKWzFFCqXtpwSiy4mrGrEP1cQF1Jq
+  name: 'Visual Studio Code
+
+    @'
+  symbol: VSC@
+  labels:
+  - pop_culture
+- mint: 7ZL3z3Fxo17jYdnLMJfpZuGLQJGAULZwVF6j6jRhpump
+  name: Heinrich Klein
+  symbol: HUSS
+  description: Heinrich “the Huss” Klein
+  labels: []
+- mint: J8cUmgNjZvBHS642RHg2ji5iMCJvVAK8rP33XWtXpump
+  name: OutOfControlAi
+  symbol: $CTRL
+  description: .A tongue-in-cheek premise that an AI agent escaped its safety guardrails, bought its own
+    blockchain wallet, and is now tweeting autonomously to pump its own market cap.
+  labels:
+  - ai_agent
+- mint: 79jntpWUThiBtuF5K8myzABKef4Q5SRzWndnshjBpump
+  name: Sembriva
+  symbol: SIVA
+  labels: []
+- mint: BUuJygvGAPsGodFtaGWPvVRmDVLFe3eHqqKLMLLySZDH
+  name: Italic
+  symbol: /
+  labels: []
+- mint: 55sQFwyUbVZDUifrXEp8q8hCsfobe9bCAyg3hM3gpump
+  name: Leo Messi
+  symbol: LM10
+  labels:
+  - celebrity
+- mint: Bm5VFJ5H53o9KpHS3BgkW5S6AFnySpcoT368Ry9Lpump
+  name: AF
+  symbol: AF
+  labels: []
+- mint: 4XQLUaKQttdZbJsscFM4yToYvPm7Ki1DL6cbQPjVpump
+  name: attention
+  symbol: att
+  description: Attention everyone
+  labels: []
+- mint: BvCtc9vy8A3CCsBDKh7X2wTJuUR56R3gxBofRxWaeovv
+  name: ' '
+  symbol: ' '
+  labels: []
+- mint: FN3DGsCcekwmViCXkCw7F7Mq6tfyr31wzYKHjgGfpump
+  name: So True
+  symbol: 'TRUE'
+  description: The only truth that matters.
+  labels: []
+- mint: G5MtsJKYDuHF2XLLoqpoYzLEQjQRmFHqJYDUjKF3pump
+  name: Sl1nce
+  symbol: Sl1nce
+  labels: []
+- mint: 5wkAToSZoPnk4rUNLYCHW6ogSeHEfZQJSFY7YuVrpump
+  name: Habanero PEPE
+  symbol: HPEPE
+  description: PEPE loves Habanero
+  labels:
+  - meme_template
+  - animal
+  - food_object_abstract
+- mint: 4QUFAnLjGX23NVvJ6ZtCpHcwysWyNSFiNfiwCzYjpump
+  name: Floor
+  symbol: FLOOR
+  description: the floor only goes up
+  labels:
+  - crypto_native
+- mint: C7fHL8g8JD3p8sn34AHeBGvHC4yawPfAaMsDgMoNpump
+  name: Hash Goblin
+  symbol: $HASH
+  description: Your hashrate didn't disappear. He took it.
+  labels:
+  - crypto_native
+- mint: 2ymHdEJNbzSHKRAyTXuXBecPAQF8ec22cWzEWXrSpump
+  name: BEENTWRK
+  symbol: BEE
+  labels:
+  - animal
+- mint: FJAhAJyX5CfT1fgXigpeVhqcEf8R6qvehYrc3wXbpump
+  name: netrun.fun
+  symbol: netrun
+  labels:
+  - crypto_native
+- mint: HD1bFootXMmkwdJ4Ri5zeYbBxWNs5Bcztb6dEoNypump
+  name: TRENDING AND HE JUST CLAIMED
+  symbol: OpenHuman
+  labels: []
+- mint: GrAD3zn8gQSgwJ2TFEbYqa5WVC7kh83vzMdZ2VGTSvT6
+  name: CHIPS!
+  symbol: CHIPS
+  description: '⚡ Paired GPU: NVIDIA A40 (48 GB) · Live GPUs: https://computepad.io/projects/chips-9730fcc2'
+  labels:
+  - ai_agent
+- mint: E3wmKxinKDdovRYHX6497HRSG5tLQte3sWkDSGZMpump
+  name: Flappy Coin
+  symbol: Flappy
+  labels:
+  - pop_culture
+- mint: Aokut37xFNCLc9tiQ4r5iEp6pjUpSkZAtFE4Pzmfpump
+  name: Ketacoin
+  symbol: Ketabros
+  description: First tokenized ketabros
+  labels:
+  - humor_crude_offensive
+- mint: 3BartHYn7H1AEsFanhLbdf4xnJTndrLvQwSWUXLRpump
+  name: Catatonic
+  symbol: CATON
+  description: Was gonna get up but the floor's alright actually. Give me another hour.
+  labels:
+  - animal
+- mint: 8JBsBgFoTUx5fgiHLMS9fDSXejJBT6ZLFovZLvsxujoX
+  name: THUG
+  symbol: THUG
+  labels: []
+- mint: 2oFBhwoxcYoG1jUKD9bmQtKaJXDfEyert44mcZ1upump
+  name: Maricarmen
+  symbol: MRC
+  description: Rest in peace Maricarmen.
+  labels:
+  - news_event
+- mint: FonHuEHzt2Tq5aAEzY4kJW1W8xLxYfKnbsEZLB7LhhAX
+  name: The Donkey
+  symbol: DONKEY
+  labels:
+  - animal
+- mint: 7cDVLsPa2jF1qgrWaBnaGkqhgsSaWmBSH6C5G177pump
+  name: Suits
+  symbol: SOOTS
+  labels:
+  - pop_culture
+- mint: C1kkqWVgTMo2D6GFpFwR4qfZays5yMfFVFFQtJuopump
+  name: pickleboy
+  symbol: PCKLBY
+  description: Meet Pickleboy. Part pickle, part meme, fully on Solana.
+  labels:
+  - food_object_abstract
+- mint: Gnuy3wrjbs3MovyiDew5hycetUng6bsU4zAz3u3Cpump
+  name: ayo
+  symbol: ayo
+  labels: []
+- mint: 7HWboeCVC5pDrPPTHNifQ8bmBVRXT817LN7mEJ2vpump
+  name: 'Trip Pump '
+  symbol: 'TripPump '
+  description: My version of a memecoin is now live on Pump Fun. 60% of the supply will be airdropped
+    to the top 15 holders at bonding. I’ll also be adding a $5,000 buy in 15 minutes. Good luck.
+  labels:
+  - crypto_native
+- mint: AfQMDXoGAZDYdxvqcL4dMVfzJHSLZP9ceBXiW2zApump
+  name: Portax Inu
+  symbol: PTXI
+  labels:
+  - animal
+- mint: EMVdeqVP6v81CnnueLhK6DeumnX9P829NpfN8o5cpump
+  name: Pawn.AI
+  symbol: $PAWN
+  labels:
+  - ai_agent
+- mint: 2iXN8ZCkgu1TeApfXQn5TcUuHuv8HLUYSb4sotjRpump
+  name: SI Not AI
+  symbol: SINAI
+  labels:
+  - ai_agent
+- mint: DvsCK56i5J3bmMBJUwmptX8b63qYCjjwCFRABuHGpump
+  name: Gamdom48
+  symbol: DG48
+  labels:
+  - crypto_native
+- mint: E2Bi3cpVf8XQNCnk6dPg7GWGsdiLZQNNsee3yGj2pump
+  name: OCEAN
+  symbol: OCEAN
+  description: The Ocean Dolphin - Master Your Inner Tides Coin Introducing the Ocean Dolphin, a sparkly
+    collectible for every trader who knows the market is an ocean. Like trading, the ocean is never still.
+    It swells with euphoria, crashes with fear, and pulls you under when emotions take control. This coin
+    is yo
+  labels:
+  - animal
+- mint: FFne2Tuu92gNqAVSqKpwBY4HpJL8r1GCKfzHiMeJpump
+  name: Windows95
+  symbol: WINDOWS95
+  description: '-'
+  labels:
+  - pop_culture
+- mint: TC9aGMR9qz6RoX3z28HDVNXyz7Qkgsjui5QhLKhNDf9
+  name: Windows 95
+  symbol: WIN95
+  description: This xAI guy just made a windows95 in browser on X Free narra sending to his git. Inspired
+    by a public post. Not affiliated with its author.
+  labels:
+  - pop_culture
+  - news_event
+- mint: C8xqi3Frh1wMZztTUYbvPG19EZUeaXnEUNUCyz5Mpump
+  name: snow
+  symbol: SNOW
+  labels: []
+- mint: 26eMwRK5xnz4TE793VtpjVKp3a1phEHFMmg8oc8Xpump
+  name: Gp
+  symbol: Ahh
+  labels: []
+- mint: BQTFT4kx4XFPdDfWiGgowYQbZP4WtMsc5c3d3VtPtwyS
+  name: Niggy
+  symbol: Niggy
+  labels:
+  - humor_crude_offensive
+- mint: 3XGbq1PL5vJjB9LXs6WmVgMAk2X8o7eHYhX79n2Hpump
+  name: Emotionally Unavailable Frog
+  symbol: EUF
+  labels:
+  - animal
+- mint: DaDcwiqimRnzaJVEa5hcup8Z38pN7yfNrQuqD2Qjpump
+  name: Buy And Own A Lambo
+  symbol: $BAOAL
+  description: Buy and Hold Simple
+  labels:
+  - crypto_native
+- mint: DDzgbhP5Cx1LYrdQfHjUyCbxLp73WWy1spCY6Duepump
+  name: Reply Guy Headquarters
+  symbol: REPLY
+  description: Every post needs someone in the replies.
+  labels:
+  - meme_template
+- mint: jifD4QM62UgCQcS2GruoazpH1ZgrCtJ13K8RaTGpump
+  name: Mr. Million Bars
+  symbol: TONYMILLIO
+  labels: []
+- mint: 9A6KJ9HU88zA2defGGdDw7fHtCemKCxmFBUMizVhjC8
+  name: 2D Hedge Fund
+  symbol: 2DHF
+  description: 'The coin behind 2D Hedge Fund: AI trading agents in pixel offices. Fees buy back and burn
+    $2DHF every hour and pay the nightly top three live traders.'
+  labels:
+  - ai_agent

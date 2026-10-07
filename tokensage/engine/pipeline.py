@@ -4,6 +4,7 @@ EngineInput, so golden tests run without a database or network."""
 from __future__ import annotations
 
 import dataclasses
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -15,6 +16,7 @@ from tokensage.engine import (
     meta,
     ocr,
     pairing,
+    segment,
     ticker,
     trends,
     wikilookup,
@@ -24,7 +26,7 @@ from tokensage.engine import (
 )
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
-from tokensage.engine.aggregate import NO_PARENT, Aggregated, aggregate
+from tokensage.engine.aggregate import NO_PARENT, Aggregated, aggregate, channel
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.gazetteer import Gazetteer
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
@@ -160,7 +162,10 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
                     source=f"templates:{m.code}",
                 )
             )
-    for kw in n.emoji_keywords:
+    # the description's emoji are the description's evidence, not the name's
+    emoji = [(kw, "name") for kw in n.emoji_keywords]
+    emoji += [(kw, "description") for kw in n.desc_emoji_keywords]
+    for kw, where in emoji:
         for cls in lexicon.wordnet_classes_for(kw, k):
             label = _WORDNET_LABEL.get(cls, cls)
             evs.append(
@@ -170,6 +175,8 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
                     weight=0.35,
                     detail=f"emoji keyword '{kw}' is a {cls.split('/')[-1]}",
                     source="cldr",
+                    where=where,  # type: ignore[arg-type]
+                    surface=kw,
                 )
             )
     if n.scripts:
@@ -202,9 +209,11 @@ def _lexicon_evidence(
     name_text = " ".join(n.name_tokens)
     # The compact form catches brand names the camelCase split breaks apart ("DeepSeek")
     # and multi-word slang stored compact ("diamondhands"); the ticker is a signal too.
+    singular = _singular(n.name_tokens, k)
     passes: list[Pass] = [
         ("name", name_text, 1.0),
         ("name", n.name_compact if n.name_compact != name_text else "", 1.0),
+        ("name", singular if singular != name_text else "", 1.0),
         ("symbol", n.ticker.lower() if len(n.ticker) >= 3 else "", 0.8),
         ("description", n.desc_clean, 1.0),
         *(extra_passes or []),
@@ -234,6 +243,8 @@ def _lexicon_evidence(
         for h in hits:
             if where == "name" and len(h.surface) <= 2 and h.surface not in written:
                 continue
+            if where == "name" and h.kind != "wordnet" and _tail_of_word(h.surface, written):
+                continue  # "iggy" in "Niggy": a name read out of the end of another word
             if where == "name" and h.kind != "wordnet":
                 named_words.update(h.surface.split())
                 if head and h.kind == "entity" and head in h.surface.replace(" ", ""):
@@ -260,6 +271,8 @@ def _lexicon_evidence(
                             detail=f"'{h.surface}' = {t.meaning}",
                             source=f"slang:{t.term}",
                             where=where,  # type: ignore[arg-type]
+                            surface=h.surface,
+                            generic=_generic(h.surface, cat),
                         )
                     )
             elif h.kind == "entity":
@@ -275,6 +288,8 @@ def _lexicon_evidence(
                     surface=h.surface,
                 )
                 for cat in e.categories:
+                    if cat.startswith("tradfi/") and where not in ("name", "symbol"):
+                        continue  # "NFTs on Robinhood Chain", "an NVIDIA GPU": not a stock coin
                     evs.append(
                         Ev(
                             kind="entity",
@@ -284,6 +299,8 @@ def _lexicon_evidence(
                             source=e.evidence_source,
                             where=where,  # type: ignore[arg-type]
                             referent=ref,
+                            surface=h.surface,
+                            generic=e.popularity < 0.8 and _generic(h.surface, cat),
                         )
                     )
                 evs.append(
@@ -316,6 +333,7 @@ def _lexicon_evidence(
                         detail=detail,
                         source=f"wordnet:{cls}",
                         where=where,  # type: ignore[arg-type]
+                        surface=h.surface,
                     )
                 )
             # coin hits are handled by the known-coin stage (fuzzy + ticker aware)
@@ -329,6 +347,219 @@ def _lexicon_evidence(
                 if ev.referent is not None and ev.label == "referent":
                     ev.weight = ev.referent.score
     return evs
+
+
+_WORD_SETS: dict[int, dict[str, set[str]]] = {}
+
+
+def _word_sets(k: Knowledge) -> dict[str, set[str]]:
+    """Word sets derived from the knowledge, built once per Knowledge object."""
+    got = _WORD_SETS.get(id(k))
+    if got is None:
+        animals = {w for c, ws in k.wordnet.items() if c.startswith("animal/") for w in ws}
+        got = {
+            "animals": animals,
+            "slang": {t for t, v in k.slang.items() if v.categories and v.kind != "marker"},
+            "known": k.vocabulary() | animals,
+        }
+        _WORD_SETS.clear()  # a reloaded Knowledge replaces the old one
+        _WORD_SETS[id(k)] = got
+    return got
+
+
+# Plurals whose stem is a different word ("does" is not deer).
+_NOT_PLURAL = {"does", "goes", "news", "this", "plus", "yes", "has", "was", "its", "series"}
+
+
+def _singular(tokens: list[str], k: Knowledge) -> str:
+    """The name with plural words made singular when the singular is something the lexicon
+    knows ("Ninja Pepes" -> pepe, "Sentients" -> sentient, "Bags" -> bag)."""
+    known = _word_sets(k)["known"]
+    out: list[str] = []
+    for t in tokens:
+        stem = t[:-1]
+        if (
+            len(t) >= 4
+            and t.endswith("s")
+            and not t.endswith("ss")
+            and t not in _NOT_PLURAL
+            and t not in known
+            and stem in known
+        ):
+            t = stem
+        out.append(t)
+    return " ".join(out)
+
+
+# Labels a single everyday word cannot carry alone: "GAME" is not The Game the rapper, "BOOT"
+# not an AI agent, unless something else about the coin says so too.
+GENERIC_LABELS = ("celebrity", "ai_agent", "political", "pop_culture")
+# Leftovers in front of a name that still leave the name itself ("iTrump", "MrBeast").
+_NAME_PREFIXES = {"i", "e", "x", "a", "mr", "my", "dr", "st", "lil"}
+
+
+def _generic(surface: str, label: str) -> bool:
+    """A one-word match on an everyday word (the 20k most frequent), for a label that word
+    alone cannot carry (see GENERIC_LABELS)."""
+    w = surface.strip()
+    return (
+        label.split("/")[0] in GENERIC_LABELS
+        and " " not in w
+        and len(w) >= 3
+        and w in segment.common_words(load_knowledge())
+    )
+
+
+def _tail_of_word(surface: str, written: set[str]) -> bool:
+    """The match is the end of a longer written word with only a stray letter or two in front
+    ("iggy" of "niggy", "rump" of "frump"): that word is something else, not the name."""
+    if " " in surface or surface in written:
+        return False
+    for w in written:
+        if w != surface and w.endswith(surface):
+            lead = w[: -len(surface)]
+            if len(lead) <= 2 and lead not in _NAME_PREFIXES:
+                return True
+    return False
+
+
+def _require_second_signal(evidence: list[Ev], k: Knowledge, symbol_is_name: bool) -> None:
+    """A generic one-word match (Ev.generic) keeps its weight only when another signal agrees:
+    the same top-level label from another word ("AI" beside "agents"), the same word in
+    another input (a name "Agent" described as "your portfolio agent"), or a non-text source
+    (logo, known coin, trend). Alone it drops below the reporting floor."""
+    factor = k.scoring.get("generic_single_word_factor", 0.25)
+    weak: dict[int, ReferentCandidate] = {}  # referents only weakened rows support
+    kept: set[int] = set()
+    for ev in evidence:
+        if not ev.generic:
+            if ev.referent is not None and ev.label != "referent":
+                kept.add(id(ev.referent))
+            continue
+        top = ev.label.split("/")[0]
+        agrees = any(
+            o is not ev
+            and o.label.split("/")[0] == top
+            and o.kind not in ("wordnet", "emoji")
+            and (
+                o.surface is None
+                or o.surface != ev.surface
+                or channel(o, symbol_is_name) != channel(ev, symbol_is_name)
+            )
+            for o in evidence
+        )
+        if not agrees:
+            ev.weight = round(ev.weight * factor, 3)
+            ev.detail += " (one everyday word, nothing else agrees: weak)"
+            if ev.referent is not None:
+                weak[id(ev.referent)] = ev.referent
+        elif ev.referent is not None:
+            kept.add(id(ev.referent))
+    # "GAME" refers to The Game (rapper) no more than it is a celebrity coin
+    for rid, ref in weak.items():
+        if rid not in kept:
+            ref.score = round(ref.score * factor, 3)
+    for ev in evidence:
+        if ev.label == "referent" and ev.referent is not None and id(ev.referent) in weak:
+            ev.weight = ev.referent.score
+
+
+# Three-letter animals that stand for a mascot inside a fused word ("Catler", "Pigcoin").
+_SHORT_MASCOTS = {"cat", "dog", "ape", "pig", "cow", "bee", "owl", "fox"}
+
+
+def compound_parts(n: Normalized, k: Knowledge, gaz: Gazetteer | None) -> list[tuple[str, str]]:
+    """Animal and slang words fused into a name word the segmenter kept whole: "lambull" ->
+    lamb, "nintendoge" -> doge, "catler" -> cat, "frogman" -> frog. (piece, word) pairs.
+
+    A word nothing knows may hide any such piece at its start or end. A dictionary word
+    ("cowboy", "category") only splits into a four-letter-plus piece and an everyday word
+    ("frog" + "man"), since most dictionary compounds are not about the animal."""
+    animals, slang = _word_sets(k)["animals"], _word_sets(k)["slang"]
+    everyday = segment.common_words(k)
+    out: list[tuple[str, str]] = []
+    for t in n.name_tokens:
+        if len(t) < 6 or not t.isalpha() or lexicon.find(t, k, gaz):
+            continue
+        common = gazetteer.is_common(t)
+        best: str | None = None
+        for i in range(3, len(t) - 1):
+            for piece, rest in ((t[:i], t[i:]), (t[i:], t[:i])):
+                if len(piece) < 4 and piece not in _SHORT_MASCOTS:
+                    continue
+                if piece in lexicon.WORDNET_STOP or (piece not in animals and piece not in slang):
+                    continue
+                if len(rest) < 2 or common and (len(piece) < 4 or rest not in everyday):
+                    continue
+                if best is None or len(piece) > len(best):
+                    best = piece
+        if best:
+            out.append((best, t))
+    return out
+
+
+def _compound_evidence(parts: list[tuple[str, str]], n: Normalized, k: Knowledge) -> list[Ev]:
+    """Lexicon evidence for compound pieces, a little weaker than a word written alone."""
+    if not parts:
+        return []
+    factor = k.scoring.get("compound_factor", 0.75)
+    evs = _lexicon_evidence(
+        dataclasses.replace(n, name_tokens=[], name_compact="", ticker="", desc_clean=""),
+        k,
+        [("name", " ".join(p for p, _ in parts), factor)],
+    )
+    whole = dict(parts)
+    for ev in evs:
+        if ev.surface in whole:
+            ev.detail += f" (inside '{whole[ev.surface]}')"
+    return evs
+
+
+_DOMAIN = re.compile(
+    r"^\s*[a-z0-9-]{2,}\.(?:fun|bid|io|xyz|app|ai|tech|gg|so|com|net|org|lol|wtf|pro|me|sh)\s*$",
+    re.I,
+)
+
+
+def _domain_evidence(n: Normalized) -> list[Ev]:
+    """A coin named like a web address ("netrun.fun", "quants.bid") is a product or site
+    coin: crypto-native by its own content."""
+    if not _DOMAIN.match(n.name_raw or ""):
+        return []
+    return [
+        Ev(
+            kind="lexicon",
+            label="crypto_native/utility_claim",
+            weight=0.5,
+            detail=f"the name '{n.name_raw.strip()}' is a web address: a site or product coin",
+            source="rule:domain_name",
+        )
+    ]
+
+
+def _news_needs_a_date(evidence: list[Ev], k: Knowledge, created_at: datetime | None) -> list[Ev]:
+    """news_event from the lexicon ("Halloween", "election", "Squid Game") only when the coin
+    is in the news (a trend or headline hit), or the lexicon dates the event and the coin
+    launched near that date. A seasonal or year-old story is a theme, not news."""
+    if any(ev.kind == "trend" for ev in evidence):
+        return evidence
+    when = _aware(created_at) if created_at else datetime.now(UTC)
+    days = k.scoring.get("news_event_window_days", 14)
+    dated = {f"entities:{e.label}": e.event_date for e in k.entities if e.event_date is not None}
+
+    def fresh(ev: Ev) -> bool:
+        d = dated.get(ev.source)
+        return d is not None and abs((when.date() - d).days) <= days
+
+    return [
+        ev
+        for ev in evidence
+        if not (
+            ev.label == "news_event"
+            and ev.source.startswith(("entities:", "slang:", "wikidata:"))
+            and not fresh(ev)
+        )
+    ]
 
 
 @dataclass
@@ -659,6 +890,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             extra_passes += _account_passes(xa)
     gaz = inp.ctx.gazetteer if inp.ctx.gazetteer is not None else gazetteer.packaged()
     evidence += _lexicon_evidence(n, k, extra_passes, gaz)
+    evidence += _compound_evidence(compound_parts(n, k, gaz), n, k)
+    evidence += _domain_evidence(n)
     if depth == "full" and inp.wiki_refs:
         evidence += wikilookup.evidence(inp.wiki_refs)
 
@@ -791,11 +1024,14 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     if not is_famous:
         _enrich_copies(copies, lin, n, inp, logo_near)
 
-    agg = aggregate(evidence, k)
+    evidence = _news_needs_a_date(evidence, k, inp.created_at)
+    symbol_is_name = _symbol_is_name(n)
+    _require_second_signal(evidence, k, symbol_is_name)
+    agg = aggregate(evidence, k, symbol_is_name=symbol_is_name)
     inherited = _inherit(agg, lin, inp.ctx.originals, k)
     if inherited:
         evidence += inherited
-        agg = aggregate(evidence, k)
+        agg = aggregate(evidence, k, symbol_is_name=symbol_is_name)
     if inp.encoder is not None:
         emb = embed.guesses(
             inp.encoder,
@@ -806,7 +1042,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         )
         if emb:
             evidence += emb
-            agg = aggregate(evidence, k)
+            agg = aggregate(evidence, k, symbol_is_name=_symbol_is_name(n))
     _demote_description_only_referent(agg, head)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     flags += _lineage_flags(lin, k)
@@ -1383,6 +1619,15 @@ def _x_match(
         k,
         account_age_s,
     )
+
+
+def _symbol_is_name(n: Normalized) -> bool:
+    """The ticker spells the name ($UNCCAT for Unc Cat, $PEPE for Pepe): one input, not two."""
+    t = n.ticker.lower()
+    c = n.name_compact
+    if not t or not c:
+        return False
+    return t == c or (min(len(t), len(c)) >= 3 and (c.startswith(t) or t.startswith(c)))
 
 
 def _aware(d: datetime) -> datetime:

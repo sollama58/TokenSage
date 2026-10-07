@@ -6,6 +6,12 @@ For each class we take all hyponym lemmas of the listed WordNet synsets. The res
 {class: [words]} map, a few hundred KB, used as a gazetteer for the animal/food/object rules.
 WordNet licence is permissive (BSD-like). Words that collide with common English or crypto
 slang are pruned by the DENY list.
+
+A word joins a class only when one of its most common noun senses is in that class: "world"
+is a hyponym of animal.n.01 through a rare sense, "center" of food.n.02 and "right" of
+body_part.n.01, and none of them means that in a coin name. The usual sense comes from
+WordNet's tagged-use counts ("chicken" is first the meat, then the bird, so animals accept a
+30% share).
 """
 
 from __future__ import annotations
@@ -76,8 +82,224 @@ DENY = {
     "tree",
     "ground",
     "stock",
+    # people are animals to WordNet
+    "human",
+    "humans",
+    "humanity",
+    "humankind",
+    "mankind",
+    "man",
+    "homo",
+    # animal senses no coin name means
+    "head",
+    "entire",
+    "royal",
+    "mount",
+    "charger",
+    "billy",
+    "fisher",
+    "soldier",
+    "das",
+    "jenny",
+    "mutant",
+    "predator",
+    "feeder",
+    "prey",
+    "bot",
+    "tick",
+    "chat",
+    "redhead",
+    "brent",
+    "solitaire",
+    "weaver",
+    "blackburn",
+    "merlin",
+    "argus",
+    "cornish",
+    "dominique",
+    "creature",
+    "beast",
+    "livestock",
+    "worker",
+    "copper",
+    "world",
+    "blue",
+    "bay",
+    "kit",
+    # food, body-part, emotion and vehicle senses no coin name means
+    "feed",
+    "sub",
+    "mix",
+    "vintage",
+    "produce",
+    "generic",
+    "cisco",
+    "jonathan",
+    "marc",
+    "murphy",
+    "chuck",
+    "msg",
+    "provisions",
+    "costa",
+    "res",
+    "lat",
+    "sticker",
+    "quick",
+    "behind",
+    "small",
+    "despite",
+    "technical",
+    "electric",
+    "sam",
+    "launch",
+    "gig",
+    "apc",
+    "clarence",
+    "comma",
+    "captive",
+    "admiral",
+    "sawyer",
+    "nanny",
+    "arab",
+    "arabian",
+    "hampshire",
+    "shire",
+    "sierra",
+    "brit",
+    "britt",
+    "argentine",
+    "hind",
+    "liza",
+    "molly",
+    "mollie",
+    "mademoiselle",
+    "margate",
+    "durham",
+    "devon",
+    "springer",
+    "galloway",
+    "guernsey",
+    "ayrshire",
+    "cardigan",
+    "pembroke",
+    "shetland",
+    "newfoundland",
+    "cairn",
+    "lhasa",
+    "tom",
+    "spam",
+    "organs",
+    "spirits",
+    "hay",
+    "sage",
+    "duff",
+    "gum",
+    "ticker",
+    "hooks",
+    "pathway",
+    "receptor",
+    "nucleus",
+    "vessel",
+    "valve",
+    "socket",
+    "thumbnail",
+    "tissue",
+    "lap",
+    "lid",
+    "ala",
+    "optic",
+    "yen",
+    "compatibility",
+    "preference",
+    "harassment",
+    "belonging",
+    "carrier",
+    "tank",
+    "balloon",
+    "hoy",
+    "galley",
+    "pullman",
+    "queen",
+    "kid",
+    "fauna",
 }
 MAX_WORD_LEN = 20
+# a word no corpus tagged: its first noun senses ("taco": a slur, then the food)
+UNCOUNTED_SENSES = 2
+# Mascot words whose usual WordNet sense is something else but which, in a coin name, are
+# the animal ("kitty" is first a pool of money, "chihuahua" a Mexican state).
+ALLOW: dict[str, set[str]] = {
+    "animal/cat": {"kitty", "kitten", "siamese", "wildcat", "angora", "persian"},
+    "animal/dog": {
+        "chihuahua",
+        "samoyed",
+        "maltese",
+        "shiba",
+        "akita",
+        "puppy",
+        "pup",
+        "husky",
+        "pooch",
+    },
+    "animal/squirrel": {"gopher"},
+    "animal/bird": {
+        "canary",
+        "kiwi",
+        "crane",
+        "cardinal",
+        "kite",
+        "swallow",
+        "pigeon",
+        "duck",
+        "crow",
+        "gull",
+        "quail",
+        "thrush",
+    },
+    "animal/fish": {
+        "tuna",
+        "cod",
+        "pike",
+        "perch",
+        "snapper",
+        "shark",
+        "whale",
+        "blowfish",
+        "seahorse",
+        "hammerhead",
+        "flounder",
+    },
+    "animal/other": {"dragon", "monster", "beaver", "coral"},
+}
+
+
+def in_class(word: str, cls: str, members: set[str]) -> bool:
+    """The word's usual sense is in the class (members: synset names). Usual = the sense
+    with the most tagged uses (WordNet's SemCor counts) over every part of speech; a word no
+    corpus tagged falls back to its first two noun senses. "small" and "fit" have noun senses
+    under body_part and emotion, but they are adjectives first."""
+    name = word.replace(" ", "_")
+    family = cls.split("/")[0]
+    if word in ALLOW.get(cls, ()):
+        return True
+    senses = wn.synsets(name)
+    counts = [
+        sum(lm.count() for lm in s.lemmas() if lm.name().lower() == name.lower()) for s in senses
+    ]
+    total = sum(counts)
+    if total:
+        share = sum(c for s, c in zip(senses, counts, strict=True) if s.name() in members)
+        # animals: a common second sense counts ("chicken": the meat, then the bird)
+        return share / total >= (0.3 if family == "animal" else 0.5)
+    return any(s.name() in members for s in wn.synsets(name, pos=wn.NOUN)[:UNCOUNTED_SENSES])
+
+
+def synsets_of(syn_names: list[str]) -> set[str]:
+    out: set[str] = set()
+    for name in syn_names:
+        s = wn.synset(name)
+        out |= {s.name(), *(h.name() for h in s.closure(lambda x: x.hyponyms()))}
+    return out
 
 
 def lemmas(syn_names: list[str]) -> set[str]:
@@ -101,7 +323,8 @@ def main() -> int:
     seen: set[str] = set()
     # specific classes first so "animal/other" does not swallow them
     for cls, syns in CLASSES.items():
-        words = lemmas(syns)
+        members = synsets_of(syns)
+        words = {w for w in lemmas(syns) if in_class(w, cls, members)}
         if cls == "animal/other":
             words -= seen
         else:

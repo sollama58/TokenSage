@@ -20,6 +20,9 @@ class Ev:
     where: Where = "name"
     url: str | None = None
     referent: ReferentCandidate | None = None
+    surface: str | None = None  # the matched words, for text matches
+    # a one-word match on an everyday word ("game", "speed"): it needs a second signal
+    generic: bool = False
 
 
 @dataclass
@@ -63,3 +66,4 @@ class Normalized:
     leet_decoded: str | None = None
     cjk_gloss: list[tuple[str, str]] = field(default_factory=list)  # (Han word, English)
     name_pinyin: list[str] = field(default_factory=list)  # set only when Han was translated
+    desc_emoji_keywords: list[str] = field(default_factory=list)  # the description's emoji
