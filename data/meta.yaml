@@ -31,3 +31,16 @@ stop_words: [coin, token, the, and, sol, solana, pump, fun, meme, official, inu,
              real, classic, edition, season, szn, mode, era, vibes, maxi, money, cash, bag, world,
              nation, party, time, life, for, with, from, you, your, this, that, not, but, all,
              new, just, its, are, was, has, have]
+
+# The day's most-traded pump.fun tokens (GeckoTerminal, refreshed by the daily knowledge cron).
+# A coin that shares a name, ticker or name word with one of them is riding today's meta.
+top_volume:
+  count: 25
+  dexes: [pump-fun, pumpswap]   # GeckoTerminal dex ids: the bonding curve and PumpSwap
+  pages: 2                      # 20 pools per page, per dex
+  keep_days: 45
+  name_weight: 0.6              # same name or ticker as a top token
+  word_weight: 0.45             # shares a name word with a top token
+  self_weight: 0.5              # the token is itself in the top list
+  referent_score_name: 0.5
+  referent_score_word: 0.4

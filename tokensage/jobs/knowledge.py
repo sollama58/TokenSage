@@ -3,6 +3,7 @@
 - Wikipedia pageviews: top-1000 per day with spike ratios -> trend_term (guide §5.8)
 - CoinGecko meme categories -> known_coin, with logo pHash (weekly)
 - Wikidata people, animals, memes, AI bots, pop culture -> entity (monthly, guide §4.4)
+- GeckoTerminal: the day's most-traded pump.fun tokens -> top_volume (daily, guide §5.5)
 - prune old trend rows
 """
 
@@ -19,9 +20,10 @@ from tokensage import gazetteer_db
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.engine import image as image_stage
+from tokensage.engine.knowledge import load_knowledge
 from tokensage.logging import configure_logging
 from tokensage.net.safe_fetch import safe_get
-from tokensage.sources import coingecko, wikidata, wikimedia
+from tokensage.sources import coingecko, geckoterminal, wikidata, wikimedia
 
 log = structlog.get_logger("jobs.knowledge")
 
@@ -148,6 +150,40 @@ async def refresh_gazetteer(
     return {**out, "groups_failed": len(failed)}
 
 
+async def refresh_top_volume(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, pause_s: float = 6.0
+) -> dict[str, int]:
+    """Today's snapshot of the most-traded pump.fun tokens (data/meta.yaml top_volume).
+    A failed fetch keeps the previous days; nothing is stored for today."""
+    cfg = load_knowledge().meta.get("top_volume") or {}
+    top = await geckoterminal.top_tokens(
+        http,
+        [str(d) for d in cfg.get("dexes") or ["pump-fun", "pumpswap"]],
+        int(cfg.get("pages", 2)),
+        int(cfg.get("count", 25)),
+        pause_s=pause_s,
+    )
+    if not top:
+        log.warning("top_volume.unavailable")
+        return {"stored": 0}
+    today = datetime.now(UTC).date()
+    async with conn.transaction():
+        await conn.execute("delete from top_volume where day=$1", today)
+        await conn.executemany(
+            """insert into top_volume (day, rank, mint, name, symbol, volume_usd, dex)
+               values ($1,$2,$3,$4,$5,$6,$7)""",
+            [
+                (today, i, t.mint, t.name, t.symbol, t.volume_usd, t.dex)
+                for i, t in enumerate(top, 1)
+            ],
+        )
+    pruned = await conn.execute(
+        "delete from top_volume where day < $1",
+        today - timedelta(days=int(cfg.get("keep_days", 45))),
+    )
+    return {"stored": len(top), "pruned": int(pruned.split()[-1])}
+
+
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -161,6 +197,8 @@ async def main() -> None:
                 log.info("knowledge.trends", **t)
                 c = await refresh_known_coins(conn, http, settings)
                 log.info("knowledge.known_coins", **c)
+                v = await refresh_top_volume(conn, http)
+                log.info("knowledge.top_volume", **v)
                 g = await refresh_gazetteer(conn, http)
                 log.info("knowledge.gazetteer", **g)
         finally:
