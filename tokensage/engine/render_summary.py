@@ -18,6 +18,7 @@ _CATEGORY_PHRASE = {
     "derivative": "a derivative of an existing coin",
     "humor_crude_offensive": "a crude-humour coin",
     "tradfi": "a stock-market / tradfi-themed coin",
+    "pop_culture": "a film / TV / game / pop-culture coin",
 }
 
 

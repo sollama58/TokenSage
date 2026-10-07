@@ -23,8 +23,8 @@ entities:
   - {label: Xi Jinping, kind: person, aliases: [xi jinping, xi], categories: [political], desc: "Chinese president", popularity: 0.5}
   - {label: Kim Jong Un, kind: person, aliases: [kim jong un], categories: [political], desc: "North Korean leader", popularity: 0.5}
   - {label: Nayib Bukele, kind: person, aliases: [bukele], categories: [political], desc: "El Salvador president (bitcoin)", popularity: 0.4}
-  - {label: Luigi Mangione, kind: person, aliases: [luigi mangione, luigi], categories: [news_event], desc: "suspect in the Dec 2024 UnitedHealthcare CEO killing", popularity: 0.6}
-  - {label: US election 2024, kind: event, aliases: [election 2024, 2024 election], categories: [political, news_event], desc: "US presidential election", popularity: 0.6}
+  - {label: Luigi Mangione, kind: person, aliases: [luigi mangione, luigi], categories: [news_event, celebrity/other], desc: "suspect in the Dec 2024 UnitedHealthcare CEO killing", popularity: 0.6, event_date: 2024-12-09}
+  - {label: US election 2024, kind: event, aliases: [election 2024, 2024 election], categories: [political, news_event], desc: "US presidential election", popularity: 0.6, event_date: 2024-11-05}
   - {label: White House, kind: place, aliases: [white house, whitehouse], categories: [political], desc: "US presidency", popularity: 0.5}
   - {label: Mar-a-Lago, kind: place, aliases: [mar-a-lago, maralago], categories: [political], desc: "Trump's estate", popularity: 0.3}
   # --- business / tech figures
@@ -58,7 +58,7 @@ entities:
   - {label: Kendrick Lamar, kind: person, aliases: [kendrick, kendrick lamar], categories: [celebrity/musician], desc: "rapper", popularity: 0.5}
   - {label: Iggy Azalea, kind: person, aliases: [iggy, iggy azalea], categories: [celebrity/musician], desc: "rapper; launched $MOTHER", popularity: 0.5}
   - {label: Snoop Dogg, kind: person, aliases: [snoop, snoop dogg], categories: [celebrity/musician], desc: "rapper", popularity: 0.4}
-  - {label: Diddy, kind: person, aliases: [diddy, p diddy, puff daddy], categories: [celebrity/musician, news_event], desc: "rapper (2024-25 trials)", popularity: 0.5}
+  - {label: Diddy, kind: person, aliases: [diddy, p diddy, puff daddy], categories: [celebrity/musician, news_event], desc: "rapper (2024-25 trials)", popularity: 0.5, event_date: 2025-07-02}
   - {label: Lionel Messi, kind: person, aliases: [messi], categories: [celebrity/athlete], desc: "footballer", popularity: 0.6}
   - {label: Cristiano Ronaldo, kind: person, aliases: [ronaldo, cr7], categories: [celebrity/athlete], desc: "footballer", popularity: 0.6}
   - {label: LeBron James, kind: person, aliases: [lebron], categories: [celebrity/athlete], desc: "basketball player", popularity: 0.5}
@@ -94,16 +94,16 @@ entities:
   - {label: Truth Terminal, kind: concept, aliases: [truth terminal, truth_terminal, terminal of truths], categories: [ai_agent], desc: "Andy Ayrey's autonomous AI bot behind $GOAT", popularity: 0.7}
   - {label: ChatGPT, kind: concept, aliases: [chatgpt, openai], categories: [ai_agent], desc: "OpenAI chatbot", popularity: 0.7}
   - {label: Claude, kind: concept, aliases: [claude ai, anthropic], categories: [ai_agent], desc: "Anthropic's AI model", popularity: 0.5}
-  - {label: DeepSeek, kind: concept, aliases: [deepseek], categories: [ai_agent, news_event], desc: "Chinese AI lab (Jan 2025 shock)", popularity: 0.6}
+  - {label: DeepSeek, kind: concept, aliases: [deepseek], categories: [ai_agent, news_event], desc: "Chinese AI lab (Jan 2025 shock)", popularity: 0.6, event_date: 2025-01-27}
   - {label: Gemini, kind: concept, aliases: [gemini ai], categories: [ai_agent], desc: "Google's AI model", popularity: 0.4}
   - {label: Terminator, kind: concept, aliases: [terminator, skynet], categories: [ai_agent, meme_template/other], desc: "AI-apocalypse film reference", popularity: 0.4}
-  - {label: Studio Ghibli, kind: concept, aliases: [ghibli, ghiblification], categories: [ai_agent, news_event, meme_template/other], desc: "AI image-style craze, Mar 2025", popularity: 0.5}
+  - {label: Studio Ghibli, kind: concept, aliases: [ghibli, ghiblification], categories: [ai_agent, news_event, meme_template/other], desc: "AI image-style craze, Mar 2025", popularity: 0.5, event_date: 2025-03-26}
   - {label: Minecraft, kind: concept, aliases: [minecraft], categories: [pop_culture], desc: "video game", popularity: 0.4}
   - {label: Fortnite, kind: concept, aliases: [fortnite], categories: [pop_culture], desc: "video game", popularity: 0.4}
   - {label: Pokémon, kind: concept, aliases: [pokemon, pikachu], categories: [pop_culture, meme_template/other], desc: "franchise", popularity: 0.5}
   - {label: SpongeBob, kind: concept, aliases: [spongebob, patrick star], categories: [pop_culture, meme_template/other], desc: "cartoon", popularity: 0.5}
   - {label: Shrek, kind: concept, aliases: [shrek], categories: [pop_culture, meme_template/other], desc: "film character meme", popularity: 0.4}
-  - {label: Squid Game, kind: concept, aliases: [squid game], categories: [pop_culture, news_event, meme_template/other], desc: "Netflix series (S2 Dec 2024)", popularity: 0.4}
+  - {label: Squid Game, kind: concept, aliases: [squid game], categories: [pop_culture, news_event, meme_template/other], desc: "Netflix series (S2 Dec 2024)", popularity: 0.4, event_date: 2024-12-26}
   - {label: Flappy Bird, kind: concept, aliases: [flappy bird, flappy], categories: [pop_culture], desc: "mobile game (2013)", popularity: 0.5}
   - {label: Scrat, kind: concept, aliases: [scrat], categories: [pop_culture, animal/squirrel], desc: "Ice Age's acorn-chasing squirrel", popularity: 0.4}
   - {label: Recep İvedik, kind: concept, aliases: [recep ivedik, receb ivedik], categories: [pop_culture, regional_language], desc: "Turkish comedy film character", popularity: 0.4}
@@ -127,11 +127,11 @@ entities:
   - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/slang], desc: "solana", popularity: 0.4}
   - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
   - {label: Coinbase, kind: concept, aliases: [coinbase], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}
-  - {label: Super Bowl, kind: event, aliases: [super bowl, superbowl], categories: [news_event], desc: "annual US football final", popularity: 0.4}
-  - {label: World Cup, kind: event, aliases: [world cup], categories: [news_event], desc: "football world cup", popularity: 0.4}
-  - {label: Olympics, kind: event, aliases: [olympics, olympic], categories: [news_event], desc: "Olympic games", popularity: 0.4}
+  - {label: Super Bowl, kind: event, aliases: [super bowl, superbowl], categories: [news_event, pop_culture], desc: "annual US football final", popularity: 0.4}
+  - {label: World Cup, kind: event, aliases: [world cup], categories: [news_event, pop_culture], desc: "football world cup", popularity: 0.4}
+  - {label: Olympics, kind: event, aliases: [olympics, olympic], categories: [news_event, pop_culture], desc: "Olympic games", popularity: 0.4}
   - {label: Halloween, kind: event, aliases: [halloween, spooky], categories: [news_event, meme_template/other], desc: "seasonal", popularity: 0.3}
   - {label: Christmas, kind: event, aliases: [christmas, xmas, santa], categories: [news_event, meme_template/other], desc: "seasonal", popularity: 0.3}
-  - {label: Thanksgiving, kind: event, aliases: [thanksgiving, turkey day], categories: [news_event], desc: "seasonal", popularity: 0.2}
+  - {label: Thanksgiving, kind: event, aliases: [thanksgiving, turkey day], categories: [news_event, meme_template/other], desc: "seasonal", popularity: 0.2}
   - {label: 4/20, kind: event, aliases: ["420", weed day], categories: [meme_template/other], desc: "cannabis culture number", popularity: 0.3}
   - {label: 69 (number), kind: concept, aliases: ["69", "6900"], categories: [humor_crude_offensive, meme_template/other], desc: "joke number", popularity: 0.3}
