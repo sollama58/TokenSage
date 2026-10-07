@@ -42,6 +42,12 @@ WORD = re.compile(r"[A-Za-z0-9]+")
 # Contribution of each agreeing signal to the noisy-OR fit.
 W_NAME, W_TICKER_CASH, W_IMAGE, W_REFERENT, W_CATEGORY = 0.85, 0.55, 0.9, 0.7, 0.35
 FIT_ABOUT, FIT_RELATED = 0.6, 0.2
+# A profile matched only by its own name, handle or avatar, on an account not a day older than
+# the token, is the coin's own profile: it matches perfectly and says nothing. Its fit is
+# squashed to at most PROFILE_SELF_CAP (verdict `related`) unless the bio matches too or the
+# account predates the token by more than PROFILE_PREDATES_S.
+PROFILE_SELF_CAP = 0.55
+PROFILE_PREDATES_S = 86_400
 
 
 @dataclass
@@ -87,6 +93,10 @@ class XMatch:
     fit: float = 0.0
     verdict: str = "unknown"  # about_this_coin | related | unrelated | unknown
     content_fetched: bool = False
+    # what the fit rests on: profile_name, profile_bio, profile_image, post_text, post_image,
+    # cashtag
+    basis: list[str] = field(default_factory=list)
+    capped: bool = False  # PROFILE_SELF_CAP applied
 
 
 # ----------------------------------------------------------------- the post's text
@@ -223,17 +233,37 @@ def match_image(
             best = (d, m.url)
     assert best is not None
     d, url = best
-    if d <= same:
-        score, how = 1.0, "the same image"
-    elif d <= edited:
-        score, how = 0.8, "an edited copy of the logo"
-    elif d <= edited + 6:
-        score, how = 0.35, "loosely similar to the logo"
-    else:
-        score, how = 0.0, "not similar to the logo"
     return ImageMatch(
-        score, d, len(ok), f"best of {len(ok)} post image(s) is {how} (distance {d})", url
+        image_score(d, same, edited),
+        d,
+        len(ok),
+        f"best of {len(ok)} post image(s) is {_image_how(d, same, edited)} (distance {d})",
+        url,
     )
+
+
+def image_score(d: int, same: int, edited: int) -> float:
+    """Continuous in the distance: 1.0 at 0, 0.9 at `same`, 0.7 at `edited`, 0.1 at
+    `edited + 6`, 0 beyond (the bands keep their meaning; the score no longer steps)."""
+    if d <= same:
+        s = 1.0 - 0.1 * d / max(1, same)
+    elif d <= edited:
+        s = 0.9 - 0.2 * (d - same) / max(1, edited - same)
+    elif d <= edited + 6:
+        s = 0.7 - 0.6 * (d - edited) / 6
+    else:
+        s = 0.0
+    return round(max(0.0, min(1.0, s)), 3)
+
+
+def _image_how(d: int, same: int, edited: int) -> str:
+    if d <= same:
+        return "the same image"
+    if d <= edited:
+        return "an edited copy of the logo"
+    if d <= edited + 6:
+        return "loosely similar to the logo"
+    return "not similar to the logo"
 
 
 def is_image_match(m: ImageMatch, k: Knowledge) -> bool:
@@ -277,16 +307,24 @@ def compare_meaning(
     def specific(lbl: str) -> bool:
         return not lbl.startswith(GENERIC_CATEGORIES)
 
-    t_cats = [lbl for lbl, c in (token.categories if token else []) if c >= CATEGORY_MIN]
-    p_cats = [lbl for lbl, c in x_cats if c >= CATEGORY_MIN]
+    t_cats = [(lbl, c) for lbl, c in (token.categories if token else []) if c >= CATEGORY_MIN]
+    p_cats = [(lbl, c) for lbl, c in x_cats if c >= CATEGORY_MIN]
     cat_agree = 0.0
     if agrees is not False:  # two different animals share "animal"; that is not agreement
-        for a in filter(specific, t_cats):
-            for b in filter(specific, p_cats):
+        for a, ca in t_cats:
+            if not specific(a):
+                continue
+            for b, cb in p_cats:
+                if not specific(b):
+                    continue
                 if a == b:
-                    cat_agree = max(cat_agree, 1.0 if "/" in a else 0.4)
+                    base = 1.0 if "/" in a else 0.4
                 elif a.split("/")[0] == b.split("/")[0]:
-                    cat_agree = max(cat_agree, 0.25)
+                    base = 0.25
+                else:
+                    continue
+                # scaled by the weaker side's confidence, full at 0.6
+                cat_agree = max(cat_agree, round(base * min(1.0, min(ca, cb) / 0.6), 3))
     return ref, x_cats, cat_agree
 
 
@@ -316,13 +354,66 @@ def combine(
     if referent.agrees is False:
         fit *= 0.5  # the post is confidently about something else
     fit = round(max(0.0, min(1.0, fit)), 3)
+    return fit, _verdict(fit, content_fetched)
+
+
+def _verdict(fit: float, content_fetched: bool) -> str:
     if not content_fetched:
-        return fit, "unknown"
+        return "unknown"
     if fit >= FIT_ABOUT:
-        return fit, "about_this_coin"
+        return "about_this_coin"
     if fit >= FIT_RELATED:
-        return fit, "related"
-    return fit, "unrelated"
+        return "related"
+    return "unrelated"
+
+
+def squash_self_profile(fit: float) -> float:
+    """Map [FIT_RELATED, 1] linearly onto [FIT_RELATED, PROFILE_SELF_CAP]: the capped fit
+    stays continuous and keeps its order instead of piling up on the cap."""
+    span = (PROFILE_SELF_CAP - FIT_RELATED) / (1.0 - FIT_RELATED)
+    return round(FIT_RELATED + (fit - FIT_RELATED) * span, 3)
+
+
+def basis(
+    n: Normalized,
+    tweet: TweetData | None,
+    profile: ProfileData | None,
+    name: FieldMatch,
+    ticker: FieldMatch,
+    image: ImageMatch,
+    referent: ReferentMatch,
+    cat_agree: float,
+    k: Knowledge,
+) -> list[str]:
+    """What the fit rests on. For a post: post_text, post_image, cashtag. For a profile link
+    the header (display name and handle), the bio and the avatar/banner are told apart:
+    profile_name, profile_bio, profile_image (and cashtag)."""
+    out: list[str] = []
+    meaning = bool(referent.agrees) or cat_agree > 0
+    is_post = tweet is not None and tweet.status == "ok"
+    if is_post:
+        if name.score > 0 or (ticker.score > 0 and ticker.how != "cashtag") or meaning:
+            out.append("post_text")
+    elif profile is not None and profile.status == "ok":
+        header = "\n".join(p for p in (profile.name, profile.handle) if p) or None
+        in_header = (
+            match_name(n, header).score > 0 or match_ticker(n, header, k, profile.handle).score > 0
+        )
+        bio = profile.description or None
+        in_bio = match_name(n, bio).score > 0 or match_ticker(n, bio, k).score > 0
+        if in_header:
+            out.append("profile_name")
+        # what the profile is about counts for the bio only when the bio carries text
+        # beyond the name; otherwise it is the name read again
+        if in_bio or (meaning and bio and not in_header):
+            out.append("profile_bio")
+        elif meaning and not in_header:
+            out.append("profile_name")
+    if ticker.how == "cashtag" and ticker.score > 0:
+        out.append("cashtag")
+    if is_image_match(image, k):
+        out.append("post_image" if is_post else "profile_image")
+    return out
 
 
 def assess(
@@ -334,7 +425,9 @@ def assess(
     token_meaning: Aggregated | None,
     post_meaning: Aggregated | None,
     k: Knowledge,
+    account_age_s: int | None = None,
 ) -> XMatch:
+    """`account_age_s`: seconds the linked account predates the token (profile links)."""
     text = post_text(tweet, profile)
     handle = profile.handle if profile is not None and profile.status == "ok" else None
     name = match_name(n, text)
@@ -343,6 +436,13 @@ def assess(
     ref, x_cats, cat_agree = compare_meaning(token_meaning, post_meaning)
     fetched = bool(text) or image.media_checked > 0
     fit, verdict = combine(name, ticker, image, ref, cat_agree, fetched)
+    b = basis(n, tweet, profile, name, ticker, image, ref, cat_agree, k)
+    capped = False
+    is_profile = (tweet is None or tweet.status != "ok") and handle is not None
+    established = account_age_s is not None and account_age_s > PROFILE_PREDATES_S
+    if is_profile and "profile_bio" not in b and not established and fit > FIT_RELATED:
+        fit, capped = squash_self_profile(fit), True
+        verdict = _verdict(fit, fetched)
     return XMatch(
         name=name,
         ticker=ticker,
@@ -352,4 +452,6 @@ def assess(
         fit=fit,
         verdict=verdict,
         content_fetched=fetched,
+        basis=b,
+        capped=capped,
     )

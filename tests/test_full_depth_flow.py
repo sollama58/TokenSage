@@ -113,6 +113,12 @@ async def test_full_depth_fills_x_trend_and_caches(
     assert a.x is not None and a.x.status == "ok" and a.x.fetch_source == "fxtwitter"
     assert a.x.author and a.x.author.handle == "elonmusk" and a.x.author.followers == 190000000
     assert a.x.text and "Peanut" in a.x.text
+    # the account behind the link and how much it is worth, apart from the match
+    assert a.x.account is not None and a.x.account.handle == "elonmusk"
+    assert not a.x.account.made_for_coin
+    assert a.x.credibility is not None and a.x.credibility >= 0.5
+    assert a.x.match is not None and "post_text" in a.x.match.basis
+    assert a.x.reuse_count == 0
     # the fake token's created_at is null (no history), so timing-based relation is launch/official;
     # with no created_at the engine cannot claim narrative; at least no spoof is raised
     codes = {f.code for f in a.flags}

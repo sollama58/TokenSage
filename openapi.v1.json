@@ -2594,6 +2594,17 @@
       "XInfo": {
         "additionalProperties": false,
         "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XLinkAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account behind the link (full depth, when the author or profile is known)"
+          },
           "accounts": {
             "default": [],
             "description": "Accounts involved: author (or linked profile), quoted and replied-to authors, @mentions (full depth)",
@@ -2612,6 +2623,20 @@
                 "type": "null"
               }
             ]
+          },
+          "credibility": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How much the account behind the link is worth, apart from whether it matches: age at launch, followers, posts, verification, renames, link reuse (uncalibrated until Phase 6)",
+            "title": "Credibility"
           },
           "fetch_source": {
             "anyOf": [
@@ -2707,6 +2732,31 @@
             "title": "Reuse Count",
             "type": "integer"
           },
+          "reuse_first_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Launch time of the first analysed coin to link it",
+            "title": "Reuse First At"
+          },
+          "reuse_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This coin's place by launch time among the analysed coins linking the same post/profile/community (1 = the first)",
+            "title": "Reuse Rank"
+          },
           "status": {
             "default": "none",
             "enum": [
@@ -2738,10 +2788,122 @@
         "title": "XInfo",
         "type": "object"
       },
+      "XLinkAccount": {
+        "additionalProperties": false,
+        "description": "The account behind the link: the linked profile, or the linked post's author.",
+        "properties": {
+          "age_at_launch_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds from the account's creation to the token's; negative if the account is younger than the token",
+            "title": "Age At Launch S"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handle"
+          },
+          "made_for_coin": {
+            "default": false,
+            "description": "Created less than a day before the token (or after it) with a handle or display name that is the coin's name or ticker",
+            "title": "Made For Coin",
+            "type": "boolean"
+          },
+          "name_changes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Changes"
+          },
+          "posts_about_coin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Posts about the coin; null until a source provides counts",
+            "title": "Posts About Coin"
+          },
+          "posts_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Posts on the account, when known",
+            "title": "Posts Total"
+          },
+          "verified_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Type"
+          }
+        },
+        "title": "XLinkAccount",
+        "type": "object"
+      },
       "XMatch": {
         "additionalProperties": false,
         "description": "How well the linked X post (or profile) matches the token (depth=full).",
         "properties": {
+          "basis": {
+            "default": [],
+            "description": "What the fit rests on. A profile matched only by its own name, handle or avatar (no bio match) on an account not older than the token by a day is capped below about_this_coin",
+            "items": {
+              "enum": [
+                "profile_name",
+                "profile_bio",
+                "profile_image",
+                "post_text",
+                "post_image",
+                "cashtag"
+              ],
+              "type": "string"
+            },
+            "title": "Basis",
+            "type": "array"
+          },
           "fit": {
             "description": "Overall match, 0-1 (uncalibrated until Phase 6)",
             "maximum": 1.0,

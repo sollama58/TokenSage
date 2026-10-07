@@ -17,6 +17,7 @@ from tokensage.engine import (
     ticker,
     trends,
     wikilookup,
+    xcred,
     xmatch,
     xsignals,
 )
@@ -52,6 +53,10 @@ class SameNameToken:
 @dataclass
 class DbContext:
     x_reuse_count: int = 0
+    # this coin's place among the coins linking the same post/profile, by launch time
+    # (1 = the first), and when the first of them launched
+    x_reuse_rank: int | None = None
+    x_reuse_first_at: datetime | None = None
     creator_token_count: int = 0
     same_name: list[SameNameToken] = field(default_factory=list)
     image_candidates: list[image_stage.Candidate] = field(default_factory=list)
@@ -120,6 +125,8 @@ class EngineOutput:
     trend_hits: list[trends.TrendHit] = field(default_factory=list)
     x_match: xmatch.XMatch | None = None
     pair: pairing.PairAssessment | None = None
+    x_account: xcred.AccountFacts | None = None
+    x_credibility: float | None = None
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -499,7 +506,12 @@ def _flags(
             FlagOut(
                 "x_link_reused",
                 "warn",
-                f"the same X link is attached to {inp.ctx.x_reuse_count} other tokens",
+                f"the same X link is attached to {inp.ctx.x_reuse_count} other tokens"
+                + (
+                    f"; this coin is #{inp.ctx.x_reuse_rank} to link it"
+                    if inp.ctx.x_reuse_rank
+                    else ""
+                ),
             )
         )
     if inp.x_kind == "search":
@@ -764,9 +776,25 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     if xa:
         for code, sev, detail in xa.flags:
             flags.append(FlagOut(code, sev, detail))
+    x_account = (
+        xcred.account_facts(xa, inp.profile, inp.created_at, n.name_compact, n.ticker or None)
+        if xa
+        else None
+    )
+    x_credibility = xcred.credibility(x_account, xa.relation if xa else None, inp.ctx.x_reuse_rank)
+    if x_account is not None and x_account.made_for_coin:
+        flags.append(
+            FlagOut(
+                "x_account_made_for_coin",
+                "info",
+                f"@{x_account.handle} is named after the coin and was created "
+                f"{_dur(abs(x_account.age_at_launch_s or 0))} "
+                f"{'before' if (x_account.age_at_launch_s or 0) >= 0 else 'after'} it",
+            )
+        )
     x_match: xmatch.XMatch | None = None
     if depth == "full" and inp.x_kind in ("tweet", "profile"):
-        x_match = _x_match(inp, n, img, k)
+        x_match = _x_match(inp, n, img, k, x_account.age_at_launch_s if x_account else None)
         if x_match.content_fetched and x_match.fit < xmatch.FIT_RELATED:
             flags.append(
                 FlagOut(
@@ -816,6 +844,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         depth=depth,
         ocr_lines=ocr_lines,
         x_match=x_match,
+        x_account=x_account,
+        x_credibility=x_credibility,
         ocr_error=ocr_err,
         x=xa,
         trend_hits=trend_hits,
@@ -1111,7 +1141,11 @@ def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessme
 
 
 def _x_match(
-    inp: EngineInput, n: Normalized, img: image_stage.ImageResult, k: Knowledge
+    inp: EngineInput,
+    n: Normalized,
+    img: image_stage.ImageResult,
+    k: Knowledge,
+    account_age_s: int | None = None,
 ) -> xmatch.XMatch:
     """Compare the linked post with the token, keeping the two apart: what the name, ticker
     and logo mean on their own vs what the post alone is about."""
@@ -1147,6 +1181,7 @@ def _x_match(
         token_meaning,
         post_meaning,
         k,
+        account_age_s,
     )
 
 

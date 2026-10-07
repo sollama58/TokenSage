@@ -36,6 +36,7 @@ from tokensage.api.schemas import (
     XAccount,
     XAuthor,
     XInfo,
+    XLinkAccount,
     XMatchField,
     XMatchImage,
     XMatchReferent,
@@ -172,6 +173,41 @@ def _x_info(twitter: str | None, token_created: datetime | None) -> XInfo | None
     )
 
 
+async def _x_reuse(
+    conn: asyncpg.Connection, x: XInfo, mint: str, created_at: datetime | None
+) -> tuple[int, int | None, datetime | None]:
+    """Other analysed tokens linking the same post/profile/community: how many, this coin's
+    place among them all by launch time (1 = the first), and when the first one launched.
+    Rank and first launch are None when this coin's own launch time is unknown."""
+    if x.ref.kind not in ("tweet", "profile", "community"):
+        return 0, None, None
+    if created_at is not None and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    if x.ref.tweet_id:
+        where, key = "x.tweet_id=$1", x.ref.tweet_id
+    elif x.ref.community_id:
+        where, key = "x.community_id=$1", x.ref.community_id
+    elif x.ref.handle:
+        where, key = "lower(x.handle)=lower($1)", x.ref.handle
+    else:
+        return 0, None, None
+    row = await conn.fetchrow(
+        f"""select count(*) as n,
+                  count(*) filter (where t.created_at < $3) as earlier,
+                  min(t.created_at) as first_at
+           from x_ref x left join token t on t.mint = x.mint
+           where {where} and x.mint<>$2""",
+        key,
+        mint,
+        created_at,
+    )
+    n = int(row["n"]) if row else 0
+    if created_at is None or row is None:
+        return n, None, None
+    first = row["first_at"]
+    return n, int(row["earlier"]) + 1, min(first, created_at) if first is not None else created_at
+
+
 # ----------------------------------------------------------------- database context
 
 
@@ -186,24 +222,10 @@ async def _db_context(
     meta_words: list[str] | None = None,
 ) -> DbContext:
     dbc = DbContext()
-    # X link reuse across other tokens
-    if x is not None and x.ref.kind in ("tweet", "profile", "community"):
-        if x.ref.tweet_id:
-            dbc.x_reuse_count = await conn.fetchval(
-                "select count(*) from x_ref where tweet_id=$1 and mint<>$2", x.ref.tweet_id, r.mint
-            )
-        elif x.ref.community_id:
-            dbc.x_reuse_count = await conn.fetchval(
-                "select count(*) from x_ref where community_id=$1 and mint<>$2",
-                x.ref.community_id,
-                r.mint,
-            )
-        elif x.ref.handle:
-            dbc.x_reuse_count = await conn.fetchval(
-                "select count(*) from x_ref where lower(handle)=lower($1) and mint<>$2",
-                x.ref.handle,
-                r.mint,
-            )
+    if x is not None:
+        dbc.x_reuse_count, dbc.x_reuse_rank, dbc.x_reuse_first_at = await _x_reuse(
+            conn, x, r.mint, r.created_at
+        )
     # creator history
     if r.creator:
         dbc.creator_token_count = await conn.fetchval(
@@ -440,6 +462,7 @@ def _match_out(m: xmatch.XMatch) -> XMatchOut:
         x_categories=[Category(label=lbl, confidence=c) for lbl, c in m.x_categories],
         fit=m.fit,
         verdict=m.verdict,  # type: ignore[arg-type]
+        basis=m.basis,  # type: ignore[arg-type]
     )
 
 
@@ -651,6 +674,20 @@ def build_document(
             ]
         if out.x_match is not None and x is not None:
             x.match = _match_out(out.x_match)
+        if x is not None and out.x_account is not None:
+            acc = out.x_account
+            x.account = XLinkAccount(
+                handle=acc.handle,
+                created_at=acc.created_at,
+                age_at_launch_s=acc.age_at_launch_s,
+                posts_total=acc.posts_total,
+                posts_about_coin=acc.posts_about_coin,
+                name_changes=acc.name_changes,
+                verified_type=acc.verified_type,
+                made_for_coin=acc.made_for_coin,
+            )
+        if x is not None:
+            x.credibility = out.x_credibility
         if out.trend_hits:
             doc_trend = TrendOut(
                 matched=True,
@@ -1065,6 +1102,8 @@ async def analyze(
         out = await asyncio.to_thread(run_basic, inp)
     if x is not None:
         x.reuse_count = dbc.x_reuse_count
+        x.reuse_rank = dbc.x_reuse_rank
+        x.reuse_first_at = dbc.x_reuse_first_at
     if cached_feats is not None and out.image.features is None:
         out.image = image_stage.ImageResult(
             features=cached_feats,
