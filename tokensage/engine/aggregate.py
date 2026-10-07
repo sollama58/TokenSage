@@ -15,6 +15,9 @@ _WHERE_FACTOR = {"description": "description_factor", "image": None, "x": None}
 NO_PARENT = {"crypto_native/paired_ecosystem"}
 # Evidence kinds that only say what a word usually means, not what this coin refers to.
 DICTIONARY_KINDS = {"wordnet", "emoji"}
+# Labels a dictionary noun gives any text that has one: only the name, ticker or image can
+# start them.
+NOUN_ONLY = {"food_object_abstract"}
 
 
 @dataclass
@@ -24,6 +27,8 @@ class Aggregated:
     referent_runner_up: ReferentCandidate | None
     evidence: list[Ev]
     caveats: list[str] = field(default_factory=list)
+    # per category label: the independent inputs that agree on it, strongest first
+    inputs: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _effective_weight(ev: Ev, k: Knowledge) -> float:
@@ -37,11 +42,33 @@ def _parent(label: str) -> str | None:
     return label.split("/")[0] if "/" in label else None
 
 
-def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
+def channel(ev: Ev, symbol_is_name: bool = False) -> str:
+    """The independent input a piece of evidence comes from: name, symbol, description,
+    image, x, trend or db. A ticker that spells the name is the name again, and a trend or
+    headline hit is the world's input whatever text it was found in."""
+    if ev.kind == "trend":
+        return "trend"
+    if ev.where == "symbol" and symbol_is_name:
+        return "name"
+    if ev.where == "chain":
+        return "db"
+    return ev.where
+
+
+def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) -> Aggregated:
+    """Category confidence from the number and kind of agreeing inputs.
+
+    Within one input, extra matches add only part of their weight (two dictionary words in a
+    description are not two witnesses); across independent inputs (name, ticker, image, X,
+    description, trend) the strengths combine by noisy-OR, plus a bonus per agreeing input.
+    So two independent agreements read higher than one, and the value moves with how
+    strong each input is rather than sitting on a few steps."""
     labels = category_labels()
     cap = k.scoring.get("cap", 0.97)
     bonus = k.scoring.get("diversity_bonus", 0.08)
     min_conf = k.scoring.get("min_category_confidence", 0.2)
+    within = k.scoring.get("within_input_factor", 0.5)
+    agree_floor = k.scoring.get("agreeing_input_min", 0.15)
 
     # dedupe identical (label, source, where) so the same rule firing twice doesn't inflate
     seen: set[tuple[str, str, str, str]] = set()
@@ -53,36 +80,74 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
         seen.add(key)
         uniq.append(ev)
 
-    # per-label noisy-OR plus source-diversity bonus
-    comp: dict[str, float] = {}
-    wheres: dict[str, set[str]] = {}
+    def targets(ev: Ev) -> list[str]:
+        out = [ev.label]
+        p = _parent(ev.label) if ev.label not in NO_PARENT else None
+        if p and p in labels:
+            out.append(p)
+        return out
+
+    # A noun in the description or a post ("a blanket burrito", "kiss and run") only backs
+    # up a food/object theme the name, ticker or image already has: every description has
+    # nouns. (An animal the description names, "the best dog on earth", still counts.)
+    backed: set[str] = set()
+    for ev in uniq:
+        if ev.label in labels and not (
+            ev.kind in DICTIONARY_KINDS and ev.where in ("description", "x")
+        ):
+            backed.update(t.split("/")[0] for t in targets(ev))
+
+    # per label, per input: the weights of the rows that support it
+    per: dict[str, dict[str, list[float]]] = {}
     named: set[str] = set()  # labels with evidence beyond dictionary words
+    image_backed: set[str] = set()
     for ev in uniq:
         if ev.label not in labels:
+            continue
+        if (
+            ev.kind in DICTIONARY_KINDS
+            and ev.where in ("description", "x")
+            and ev.label in NOUN_ONLY
+            and ev.label not in backed
+        ):
             continue
         w = _effective_weight(ev, k)
         if w <= 0:
             continue
-        targets = [ev.label]
-        p = _parent(ev.label) if ev.label not in NO_PARENT else None
-        if p and p in labels:
-            targets.append(p)
-        for t in targets:
-            comp[t] = comp.get(t, 1.0) * (1 - w)
-            wheres.setdefault(t, set()).add(ev.where)
+        ch = channel(ev, symbol_is_name)
+        for t in targets(ev):
+            per.setdefault(t, {}).setdefault(ch, []).append(w)
             if ev.kind not in DICTIONARY_KINDS:
                 named.add(t)
+            if ev.where == "image":
+                image_backed.add(t)
     scores: dict[str, float] = {}
+    inputs: dict[str, list[str]] = {}
     dict_cap = k.scoring.get("wordnet_only_cap", 0.6)
-    for label, c in comp.items():
-        conf = 1 - c
-        extra = max(0, len(wheres.get(label, set())) - 1)
-        conf = min(cap, conf + bonus * min(extra, 2))
+    food_cap = k.scoring.get("food_dictionary_cap", 0.45)
+    for label, chans in per.items():
+        strength: dict[str, float] = {}
+        for ch, ws in chans.items():
+            top = max(ws)
+            rest = 1.0
+            for w in ws:
+                rest *= 1 - w
+            strength[ch] = top + within * ((1 - rest) - top)
+        miss = 1.0
+        for v in strength.values():
+            miss *= 1 - v
+        conf = 1 - miss
+        agreeing = [ch for ch, v in strength.items() if v >= agree_floor]
+        conf = min(cap, conf + bonus * min(max(0, len(agreeing) - 1), 2))
         if label not in named:
             # "ani is a bird" and "🐿" are dictionary senses, not knowledge of this coin: a
             # label they alone support never outranks one a named entity or coin supports
             conf = min(conf, dict_cap)
+            if label == "food_object_abstract" and label not in image_backed:
+                # "it has a noun" is not a theme: below the 0.5 filter unless the logo agrees
+                conf = min(conf, food_cap)
         scores[label] = round(conf, 3)
+        inputs[label] = sorted(strength, key=lambda ch: -strength[ch])
 
     # conflict: several animal species -> keep the top one strong, soften the rest
     animals = sorted(
@@ -151,4 +216,5 @@ def aggregate(evidence: list[Ev], k: Knowledge) -> Aggregated:
         referent_runner_up=runner,
         evidence=uniq,
         caveats=caveats,
+        inputs={lbl: inputs[lbl] for lbl, _ in categories},
     )

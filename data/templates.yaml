@@ -49,7 +49,9 @@ wordnet_name_words: [ani, drake, kirk, chase, hunter, robin, jay, wren, raven, r
 scoring:
   description_factor: 0.6     # evidence found only in the description is worth 0.6x
   ocr_factor: 0.7
-  diversity_bonus: 0.08       # per extra independent source agreeing (max 2 extra)
+  diversity_bonus: 0.08       # per extra independent input agreeing (max 2 extra)
+  within_input_factor: 0.5    # extra matches inside one input add this share of their noisy-OR gain
+  agreeing_input_min: 0.15    # an input counts as agreeing (for the bonus) from this strength
   cap: 0.97
   referent_ambiguity_gap: 0.1
   min_category_confidence: 0.2
@@ -59,5 +61,9 @@ scoring:
   logo_phash_same: 8
   logo_phash_edited: 14
   wordnet_only_cap: 0.6       # a label backed only by dictionary words (WordNet, emoji) caps here
+  food_dictionary_cap: 0.45   # food_object_abstract from dictionary words alone, no logo agreeing
+  generic_single_word_factor: 0.25 # a one-word everyday match with no second signal (GAME, BOOT)
+  compound_factor: 0.75       # a mascot word fused into a longer word ("lambull", "nintendoge")
+  news_event_window_days: 14  # a dated lexicon event counts as news this close to the launch
   name_word_factor: 0.5       # a WordNet word that is also a given name counts at this factor
   framing_min_confidence: 0.5 # "a cat coin tied to X" needs the head word's class at least this strong

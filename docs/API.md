@@ -97,7 +97,7 @@ Every error has one shape:
 | `raw` | Name, symbol, description and social links as found in the metadata (**untrusted text, escape before rendering**) |
 | `normalized` | Cleaned tokens, ticker base, version markers (`version:2`), emoji keywords, obfuscation flags |
 | `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, and `supported_by` (the inputs pointing at it: name, symbol, description, image, x, trend, chain, and `copy_of` when it is inherited from the coin this one copies; several independent ones make it more trustworthy). May be `null` (confidence 0). `wave` counts the coins on the same referent, see below |
-| `categories[]` | Multi-label with confidences. Labels come from `GET /v1/meta`; expect new ones over time. `wave_1h` is how many coins TokenSage analysed in the last hour carry the same label (this one included) |
+| `categories[]` | Multi-label with confidences and `inputs`: the independent inputs that agree on the label, strongest first (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, `copy_of`). Labels come from `GET /v1/meta`; expect new ones over time. `wave_1h` is how many coins TokenSage analysed in the last hour carry the same label (this one included). How confidence is scored: see "Category confidence" below |
 | `ticker_explanation` | Plain-language explanation of the ticker |
 | `copy_of[]` | Coins this one copies or derives from, with the signals that say so, `created_at` and `recent`. **Copycat = copying a coin launched in the 30 days before this one** (same name/ticker, or a near-identical logo of an earlier token): `recent: true`, category `derivative/copycat`, flag `copycat`. Older namesakes are ignored. A well-known established coin (Bonk, Pepe, …) is a reference: `recent: false`, category `derivative/reference`, flag `references_known_coin` (info). The window is `COPYCAT_WINDOW_DAYS` (default 30). On the recent same-name copy, `rank` / `rank_of` / `rank_window_hours` give this coin's place by launch time among the coins with its name or ticker launched within 24 h either side of it ("3rd of 41"). Every recent item also carries `original_age_s` (seconds from the copied coin's launch to this one's), `match` (which of this coin's inputs match it: `name`, `ticker`, `image`), `image_distance` (pHash Hamming distance between the logos, when they were compared) and `original_market` (the copied coin's bonding curve at the time of this read: `complete`, `curve_progress`, `as_of`; `graduated_pool` is not filled yet). A coin copied by its logo alone has its own item, with signals `logo_recent` and `phash_distance:N`. Logos are compared with the coins launched in the **7 days** before (`logo_scan_days`), names and tickers with the full 30 |
 | `lineage` | One answer to "is this the original, an early copy or a late copy, and of what" (see below) |
@@ -150,6 +150,36 @@ Confidences are scores in 0–1. **They are uncalibrated until Phase 6** of the 
 fits them against hand-labelled tokens so that about 80% of "0.8" labels are right. Until then,
 use them to rank and threshold, not as probabilities. Flags and categories are **informational,
 not financial advice**.
+
+#### Category confidence
+
+A category's confidence comes from how many independent inputs agree on it and how strongly:
+
+- Each input (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`) gets a strength from
+  its own evidence: its strongest match, plus half of what further matches in the same input add.
+  Description evidence counts at 0.6×. A ticker that spells the name (`$UNCCAT` for Unc Cat) is
+  the name again, not a second input; a trend or headline hit is its own input.
+- Inputs combine by noisy-OR, and each agreeing input beyond the first (strength ≥ 0.15, up to
+  two) adds 0.08. So a label two inputs agree on reads higher than one input alone, and the value
+  moves with the strength of each input instead of sitting on a few steps. `categories[].inputs`
+  lists the agreeing inputs; `["name", "description"]` is two independent agreements.
+- A label only dictionary senses support (WordNet, emoji) caps at 0.6. `food_object_abstract`
+  from dictionary words alone caps at 0.45, below a 0.5 filter, unless the logo agrees (OCR); and
+  a noun in the description or a post never starts it on its own (every description has nouns).
+- A one-word match on an everyday word (one of the 20k most frequent English words) for
+  `celebrity`, `ai_agent`, `political` or `pop_culture` ("GAME", "BOOT", "Speed") needs a second
+  signal: another word for the same label, the same word in another input, or a logo, known-coin
+  or trend match. Alone it drops to 0.25× its weight, below the reporting floor. Famous names
+  (popularity ≥ 0.8: Trump, Elon) are exempt.
+- `news_event` from the lexicon (Halloween, Super Bowl, an election, a 2024 story) needs a trend
+  or headline hit for the coin, or a lexicon entry dated within 14 days of the launch. A seasonal
+  word or a year-old story is a theme, not news.
+- Dictionary words count only in their usual sense: the WordNet lists keep a word for a class
+  only when its most-used sense is in that class ("world" is not an animal, "pad" not a body
+  part, "launch" not a vehicle).
+
+`scripts/category_audit.py` measures per-category precision and recall against hand-labelled
+pump.fun launches (`tests/golden/category_audit.yaml`, `category_audit_holdout.yaml`).
 
 ### `x.match`: does the linked post match the token? (depth=full)
 

@@ -28,7 +28,7 @@ entities:
   - {label: White House, kind: place, aliases: [white house, whitehouse], categories: [political], desc: "US presidency", popularity: 0.5}
   - {label: Mar-a-Lago, kind: place, aliases: [mar-a-lago, maralago], categories: [political], desc: "Trump's estate", popularity: 0.3}
   # --- business / tech figures
-  - {label: Vitalik Buterin, kind: person, aliases: [vitalik], categories: [celebrity/other, crypto_native/slang], desc: "Ethereum co-founder", popularity: 0.6}
+  - {label: Vitalik Buterin, kind: person, aliases: [vitalik, buterin, butterin, vitadik, vitaldik, vitaldick, vitalcock, dihtalik], categories: [celebrity/other, crypto_native/slang], desc: "Ethereum co-founder", popularity: 0.6}
   - {label: Anatoly Yakovenko, kind: person, aliases: [toly, anatoly], categories: [celebrity/other, crypto_native/slang], desc: "Solana co-founder", popularity: 0.5}
   - {label: Raj Gokal, kind: person, aliases: [raj gokal, raj], categories: [celebrity/other], desc: "Solana co-founder", popularity: 0.3}
   - {label: Changpeng Zhao, kind: person, aliases: [cz, changpeng zhao], categories: [celebrity/other, crypto_native/slang], desc: "Binance founder", popularity: 0.6}
@@ -98,12 +98,16 @@ entities:
   - {label: Gemini, kind: concept, aliases: [gemini ai], categories: [ai_agent], desc: "Google's AI model", popularity: 0.4}
   - {label: Terminator, kind: concept, aliases: [terminator, skynet], categories: [ai_agent, meme_template/other], desc: "AI-apocalypse film reference", popularity: 0.4}
   - {label: Studio Ghibli, kind: concept, aliases: [ghibli, ghiblification], categories: [ai_agent, news_event, meme_template/other], desc: "AI image-style craze, Mar 2025", popularity: 0.5}
-  - {label: Minecraft, kind: concept, aliases: [minecraft], categories: [meme_template/other], desc: "video game", popularity: 0.4}
-  - {label: Fortnite, kind: concept, aliases: [fortnite], categories: [meme_template/other], desc: "video game", popularity: 0.4}
-  - {label: Pokémon, kind: concept, aliases: [pokemon, pikachu], categories: [meme_template/other], desc: "franchise", popularity: 0.5}
-  - {label: SpongeBob, kind: concept, aliases: [spongebob, patrick star], categories: [meme_template/other], desc: "cartoon", popularity: 0.5}
-  - {label: Shrek, kind: concept, aliases: [shrek], categories: [meme_template/other], desc: "film character meme", popularity: 0.4}
-  - {label: Squid Game, kind: concept, aliases: [squid game], categories: [news_event, meme_template/other], desc: "Netflix series (S2 Dec 2024)", popularity: 0.4}
+  - {label: Minecraft, kind: concept, aliases: [minecraft], categories: [pop_culture], desc: "video game", popularity: 0.4}
+  - {label: Fortnite, kind: concept, aliases: [fortnite], categories: [pop_culture], desc: "video game", popularity: 0.4}
+  - {label: Pokémon, kind: concept, aliases: [pokemon, pikachu], categories: [pop_culture, meme_template/other], desc: "franchise", popularity: 0.5}
+  - {label: SpongeBob, kind: concept, aliases: [spongebob, patrick star], categories: [pop_culture, meme_template/other], desc: "cartoon", popularity: 0.5}
+  - {label: Shrek, kind: concept, aliases: [shrek], categories: [pop_culture, meme_template/other], desc: "film character meme", popularity: 0.4}
+  - {label: Squid Game, kind: concept, aliases: [squid game], categories: [pop_culture, news_event, meme_template/other], desc: "Netflix series (S2 Dec 2024)", popularity: 0.4}
+  - {label: Flappy Bird, kind: concept, aliases: [flappy bird, flappy], categories: [pop_culture], desc: "mobile game (2013)", popularity: 0.5}
+  - {label: Scrat, kind: concept, aliases: [scrat], categories: [pop_culture, animal/squirrel], desc: "Ice Age's acorn-chasing squirrel", popularity: 0.4}
+  - {label: Recep İvedik, kind: concept, aliases: [recep ivedik, receb ivedik], categories: [pop_culture, regional_language], desc: "Turkish comedy film character", popularity: 0.4}
+  - {label: Albert Einstein, kind: person, aliases: [einstein], categories: [celebrity/other], desc: "physicist", popularity: 0.6}
   # --- places / regions (regional metas)
   - {label: China, kind: place, aliases: [china, chinese, cn, zhongguo], categories: [regional_language], desc: "country", popularity: 0.6}
   - {label: Japan, kind: place, aliases: [japan, japanese, nihon], categories: [regional_language], desc: "country", popularity: 0.4}
@@ -118,6 +122,7 @@ entities:
   - {label: Ohio, kind: place, aliases: [ohio], categories: [meme_template/brainrot], desc: "'only in Ohio' meme", popularity: 0.3}
   # --- events / products
   - {label: Bitcoin, kind: coin, aliases: [bitcoin, btc, satoshi], categories: [crypto_native/slang], desc: "bitcoin", popularity: 0.5}
+  - {label: Robinhood Chain, kind: concept, aliases: [robinhood chain], categories: [crypto_native/slang], desc: "Robinhood's blockchain", popularity: 0.4}
   - {label: Ethereum, kind: coin, aliases: [ethereum, eth], categories: [crypto_native/slang], desc: "ethereum", popularity: 0.4}
   - {label: Solana, kind: coin, aliases: [solana, sol], categories: [crypto_native/slang], desc: "solana", popularity: 0.4}
   - {label: Binance, kind: concept, aliases: [binance], categories: [crypto_native/slang, news_event], desc: "exchange (listing news trigger)", popularity: 0.5}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,8 @@ class Entity:
     popularity: float
     source: str = "seed"  # seed | wikidata
     ref_id: str | None = None  # the Wikidata Q-id of a gazetteer entity
+    # when the event happened: its news_event category holds only near this date
+    event_date: date | None = None
 
     @property
     def surfaces(self) -> tuple[str, ...]:
@@ -148,6 +151,12 @@ def _json(name: str) -> Any:
         return json.load(f)
 
 
+def _date(v: Any) -> date | None:
+    if v is None or isinstance(v, date):
+        return v
+    return date.fromisoformat(str(v))
+
+
 def _wordnet(ignore: set[str]) -> dict[str, list[str]]:
     raw = _json("wordnet_classes.json")
     return {cls: [w for w in words if w not in ignore] for cls, words in raw.items()}
@@ -222,6 +231,7 @@ def load_knowledge() -> Knowledge:
             categories=tuple(e.get("categories") or []),
             desc=str(e.get("desc", "")),
             popularity=float(e.get("popularity", 0.3)),
+            event_date=_date(e.get("event_date")),
         )
         for e in _yaml("entities_seed.yaml")["entities"]
     ]
@@ -258,5 +268,5 @@ def load_knowledge() -> Knowledge:
         meta=_yaml("meta.yaml"),
         name_words=frozenset(str(w).lower() for w in t.get("wordnet_name_words") or []),
         cjk={str(w): str(v or "").lower() for w, v in _yaml("cjk_words.yaml")["words"].items()},
-        versions={"lexicon": "2026-10-06.4", "known_coins": "seed-2026-10-06"},
+        versions={"lexicon": "2026-10-07.1", "known_coins": "seed-2026-10-06"},
     )
