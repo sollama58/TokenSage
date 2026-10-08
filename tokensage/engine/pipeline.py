@@ -26,6 +26,7 @@ from tokensage.engine import (
 )
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
+from tokensage.engine import vision as vision_stage
 from tokensage.engine.aggregate import (
     ACCOUNT_SIZE_KINDS,
     NO_PARENT,
@@ -121,6 +122,8 @@ class EngineInput:
     news_hits: list[trends.TrendHit] | None = None
     # optional sentence encoder (ENABLE_EMBED); None = no embedding guesses
     encoder: embed.Encoder | None = None
+    # logo labels from the local vision model (ENABLE_CLIP, full depth); None = not run
+    vision: vision_stage.VisionResult | None = None
 
 
 @dataclass
@@ -155,6 +158,7 @@ class EngineOutput:
     x_credibility: float | None = None
     # the referent as reported: kind, banded confidence and the inputs behind it
     referent_read: ReferentRead | None = None
+    vision: vision_stage.VisionResult | None = None
 
 
 # ----------------------------------------------------------------- evidence producers
@@ -1078,6 +1082,12 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     if inherited:
         evidence += inherited
         agg = aggregate(evidence, k, symbol_is_name=symbol_is_name)
+    if depth == "full" and inp.vision is not None:
+        # the logo guess counts when the words agree with it or found no topic at all
+        vis = vision_stage.gate(vision_stage.evidence(inp.vision), agg.categories)
+        if vis:
+            evidence += vis
+            agg = aggregate(evidence, k, symbol_is_name=symbol_is_name)
     if inp.encoder is not None:
         emb = embed.guesses(
             inp.encoder,
@@ -1190,6 +1200,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         pair=pair,
         lineage=lin,
         referent_read=referent_read,
+        vision=inp.vision if depth == "full" else None,
     )
 
 

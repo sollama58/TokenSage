@@ -9,3 +9,4 @@ __pycache__/
 dist/
 .pgdata/
 load_cas*.txt
+.cache/

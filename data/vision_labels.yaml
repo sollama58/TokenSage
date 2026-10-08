@@ -1,0 +1,136 @@
+# Optional logo labels from a local vision model (ENABLE_CLIP, guide §5.6, engine/vision.py).
+#
+# The logo is embedded by the SigLIP base/16 image tower (8-bit ONNX) and scored against the
+# visual classes below: a linear probe fitted on tests/golden/vision_logos.yaml, blended with
+# zero-shot similarity to each class's prompts (embedded offline; no text model ships).
+# The numbers live in vision_head.npz; both files come from scripts/build_vision_head.py.
+#
+# label: the taxonomy label a class adds as a "vision guess" row (weight 0.25-0.4, on the image
+# input). Classes without one are sinks: wordmarks, coins, people nobody can name from the
+# picture alone. They absorb the logos that are about nothing in particular, so the classes
+# that do emit stay precise. name: how the evidence detail describes the class.
+model: siglip-b16-q8/1 # bump the suffix whenever vision_head.npz changes: cached labels re-run
+
+scoring:
+  zero_shot_share: 0.5 # blend: 0 = probe only, 1 = prompts only (0.5 won on the tune split)
+  zero_shot_scale: 100.0 # softmax temperature for prompt cosines
+  probe_scale: 10.0 # the probe sees the unit image vector times this
+  weight_floor: 0.25 # evidence weight at the class cutoff
+  max_weight: 0.4 # weight at score 1.0 (hard ceiling 0.4 in code)
+  min_margin: 0.0 # the top class must beat the runner-up by this much
+
+# A logo guess counts when the words found the same top-level category, or no topic at all;
+# these describe a coin's context, not its subject, so they do not count as a topic.
+context_labels:
+  - derivative
+  - crypto_native/paired_ecosystem
+  - tradfi/tokenized_stock
+
+classes:
+  dog:
+    label: animal/dog
+    name: a dog
+    prompts: ["a dog", "a shiba inu dog", "a puppy", "a cartoon dog", "a doge meme dog", "a wolf"]
+  cat:
+    label: animal/cat
+    name: a cat
+    prompts: ["a cat", "a kitten", "a cartoon cat", "a cat meme"]
+  frog:
+    label: animal/frog
+    name: a frog
+    prompts: ["a frog", "a cartoon frog", "a toad"]
+  monkey:
+    label: animal/monkey
+    name: a monkey or ape
+    prompts: ["a monkey", "an ape", "a chimpanzee", "a cartoon monkey"]
+  hippo:
+    label: animal/hippo
+    name: a hippo
+    prompts: ["a hippo", "a baby pygmy hippopotamus"]
+  squirrel:
+    label: animal/squirrel
+    name: a squirrel
+    prompts: ["a squirrel", "a chipmunk"]
+  bird:
+    label: animal/bird
+    name: a bird
+    prompts: ["a bird", "an eagle", "a chicken", "a duck", "a penguin", "an eagle emblem with spread wings"]
+  bear_bull:
+    label: animal/bear_bull
+    name: a bull or bear
+    prompts: ["a bull", "a bear", "a bull with horns"]
+  fish:
+    label: animal/fish
+    name: a fish or sea creature
+    prompts: ["a fish", "a shark", "a whale", "an octopus", "a dolphin"]
+  animal_other:
+    label: animal/other
+    name: an animal
+    prompts: ["an animal", "a wild animal", "a horse", "an insect", "a raccoon", "a fox", "a sheep or a cow", "an otter"]
+  pepe_wojak:
+    label: meme_template/pepe_wojak_chad
+    name: Pepe, Wojak or a chad meme
+    prompts: ["pepe the frog meme", "a wojak meme drawing", "a gigachad meme", "a sad green frog meme face"]
+  meme_other: # no label: 0 of 2 right on held-out logos (trollfaces, meme collages)
+    name: an internet meme
+    prompts: ["a trollface meme", "a collage of internet memes", "a rage comic face"]
+  robot:
+    label: ai_agent
+    name: a robot
+    prompts: ["a robot", "a cute robot mascot", "an android or cyborg", "an AI robot"]
+  food:
+    label: food_object_abstract
+    name: food or a drink
+    prompts: ["food", "a drink", "a fruit", "a snack", "a cake"]
+  object:
+    name: an object
+    prompts: ["an object", "a product photo", "a car", "a piece of furniture", "a tool"]
+  politician:
+    label: political
+    name: Donald Trump or a politician
+    prompts: ["Donald Trump", "a portrait of Donald Trump", "a politician giving a speech"]
+  elon:
+    label: celebrity/elon
+    name: Elon Musk
+    prompts: ["Elon Musk", "a portrait of Elon Musk"]
+  crude:
+    label: humor_crude_offensive
+    name: something crude
+    prompts: ["poop", "a butt", "something crude and offensive"]
+  person:
+    name: a person
+    prompts: ["a photo of a person", "a portrait of a man", "a portrait of a woman", "a selfie"]
+  cartoon_char:
+    name: a cartoon character
+    prompts: ["a cartoon character", "an anime character", "a mascot illustration", "a pixel art character"]
+  coin_logo:
+    name: a coin or emblem
+    prompts: ["a gold coin", "a crypto coin logo", "a round emblem seal", "a bitcoin logo"]
+  text_logo:
+    name: a wordmark or icon
+    prompts: ["a text logo", "a wordmark", "a company logo", "an app icon", "letters on a plain background"]
+  screenshot:
+    name: a screenshot
+    prompts: ["a screenshot of a website", "a screenshot of a tweet", "a screenshot of text"]
+  flag:
+    name: a flag
+    prompts: ["a national flag", "the american flag", "a waving flag"]
+  none:
+    name: nothing in particular
+    prompts: ["an abstract shape", "a blank image", "a pattern", "a landscape", "a blurry photo"]
+
+# Per-class cutoffs on the blended score, written by scripts/build_vision_head.py: the lowest
+# score at which the class was right >= 90% of the time on out-of-fold logos (and at least 3
+# times). A class missing here never emits.
+thresholds:
+  animal_other: 0.465
+  bear_bull: 0.456
+  bird: 0.289
+  cat: 0.333
+  dog: 0.2
+  food: 0.465
+  frog: 0.541
+  monkey: 0.5
+  pepe_wojak: 0.39
+  politician: 0.458
+  robot: 0.569

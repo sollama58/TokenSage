@@ -10,8 +10,10 @@ envVarGroups:
         value: "TokenSage/0.1 (+https://github.com/sollama58/TokenSage)"
       - key: ACCEPT_NON_PUMP
         value: "true"
-      - key: ENABLE_CLIP
-        value: "false"
+      - key: ENABLE_CLIP # logo labels at full depth; the Docker image ships the model
+        value: "true"
+      - key: VISION_MODEL_PATH
+        value: /app/models/siglip
       - key: ENABLE_EMBED
         value: "false" # needs EMBED_MODEL_PATH (MiniLM ONNX + vocab.txt) when true
       - key: ENABLE_CORPUS
@@ -66,7 +68,7 @@ services:
   - type: worker
     name: tokensage-analyzer
     runtime: docker
-    plan: standard # 2 GB: 8 concurrent jobs + RapidOCR (~250 MB) outgrow Starter's 512 MB
+    plan: standard # 2 GB: 8 concurrent jobs + RapidOCR (~250 MB) + SigLIP (~220 MB) outgrow 512 MB
     region: oregon
     dockerfilePath: ./Dockerfile
     numInstances: 1

@@ -53,7 +53,11 @@ class Settings(BaseSettings):
 
     # --- behaviour flags ---
     accept_non_pump: bool = True
+    # Optional logo labels from a local vision model (engine/vision.py), full depth only:
+    # a SigLIP image tower in ONNX on disk (the Docker image ships one at /app/models/siglip).
     enable_clip: bool = False
+    vision_model_path: str = ""  # the .onnx file, or a directory holding vision_model*.onnx
+    vision_threads: int = 2  # onnxruntime threads per image (one image at a time per process)
     # Optional local sentence-embedding classifier (engine/embed.py): guesses categories for
     # names and tweets nothing else resolves. Needs a MiniLM-class ONNX model on disk.
     enable_embed: bool = False
