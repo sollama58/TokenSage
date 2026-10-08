@@ -23,6 +23,7 @@ scoring:
 # these describe a coin's context, not its subject, so they do not count as a topic.
 context_labels:
   - derivative
+  - regional_language # the script of the name says who the coin is for, not what it shows
   - crypto_native/paired_ecosystem
   - tradfi/tokenized_stock
 

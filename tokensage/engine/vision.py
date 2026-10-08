@@ -38,6 +38,7 @@ MAX_WEIGHT = 0.4  # hard ceiling, whatever the yaml says
 SIZE = 224
 MAX_PIXELS = 40_000_000
 TOP_K = 3  # classes kept in the result (and cached), best first
+MODEL_ERROR = "model: "  # prefix of an error the model raised (worth retrying, never cached)
 
 
 class Encoder(Protocol):
@@ -211,7 +212,14 @@ def preprocess(data: bytes) -> np.ndarray:
         img.seek(0)
         if max(img.size) > 4 * SIZE:
             img.thumbnail((4 * SIZE, 4 * SIZE))
-        rgba = img.convert("RGBA")
+        if img.mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
+            # convert() clips 16-bit/float greyscale to near-white: scale to 8 bit as the
+            # image stage does (image.to_rgb)
+            from tokensage.engine.image import to_rgb
+
+            rgba = to_rgb(img, max_side=4 * SIZE).convert("RGBA")
+        else:
+            rgba = img.convert("RGBA")
     bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
     bg.alpha_composite(rgba)
     rgb = bg.convert("RGB").resize((SIZE, SIZE), Image.Resampling.BICUBIC)
@@ -242,10 +250,13 @@ def label_image(encoder: Encoder, data: bytes) -> VisionResult:
     """Labels for one image. Never raises: a bad image or model error is in .error."""
     cfg = load_config()
     try:
-        vec = encoder.encode(preprocess(data))
-        return classify(vec, cfg=cfg)
+        pixels = preprocess(data)
     except Exception as e:  # noqa: BLE001 - hostile images must not kill the analysis
-        return VisionResult(cfg.model, error=f"{type(e).__name__}: {e}"[:200])
+        return VisionResult(cfg.model, error=f"image: {type(e).__name__}: {e}"[:200])
+    try:
+        return classify(encoder.encode(pixels), cfg=cfg)
+    except Exception as e:  # noqa: BLE001
+        return VisionResult(cfg.model, error=f"{MODEL_ERROR}{type(e).__name__}: {e}"[:200])
 
 
 # ----------------------------------------------------------------- process-wide model
@@ -276,7 +287,13 @@ def default_encoder(settings: Settings) -> Encoder | None:
     """The process-wide encoder, or None when the flag is off or the model is unusable.
     Loaded once, lazily; a failed load is remembered (and logged) instead of retried."""
     global _encoder, _load_error, _loaded_from
-    if not settings.enable_clip or not settings.vision_model_path:
+    if not settings.enable_clip:
+        return None
+    if not settings.vision_model_path:
+        if _loaded_from != "":
+            _loaded_from, _encoder = "", None
+            _load_error = "ENABLE_CLIP is on but VISION_MODEL_PATH is not set"
+            structlog.get_logger("vision").warning("vision_model_unavailable", error=_load_error)
         return None
     key = f"{settings.vision_model_path}|{settings.vision_threads}"
     if _loaded_from == key:
@@ -319,14 +336,22 @@ async def label_async(encoder: Encoder, data: bytes) -> VisionResult:
 
 
 def to_json(res: VisionResult) -> dict[str, Any]:
-    return {"model": res.model, "top": [[c, s] for c, s in res.top]}
+    out: dict[str, Any] = {"model": res.model, "top": [[c, s] for c, s in res.top]}
+    if res.error:
+        out["error"] = res.error
+    return out
 
 
 def from_json(raw: Any) -> VisionResult | None:
-    """A cached result (image.labels), or None when absent or unreadable."""
+    """A cached result (image.labels), or None when absent or unreadable. An image the model
+    could not read is cached too (no labels, .error set), so it is not retried every read."""
     try:
-        if not isinstance(raw, dict) or not raw.get("top"):
+        if not isinstance(raw, dict) or not (raw.get("top") or raw.get("error")):
             return None
-        return VisionResult(str(raw["model"]), [(str(c), float(s)) for c, s in raw["top"]])
+        return VisionResult(
+            str(raw["model"]),
+            [(str(c), float(s)) for c, s in raw.get("top") or []],
+            error=str(raw["error"])[:200] if raw.get("error") else None,
+        )
     except Exception:  # noqa: BLE001
         return None
