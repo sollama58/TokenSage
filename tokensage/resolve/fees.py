@@ -40,7 +40,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
-import httpx
 import structlog
 
 from tokensage.resolve.pump_ca import PUMP_PROGRAM, _on_curve, b58decode, find_program_address
@@ -203,7 +202,6 @@ class FeeRecipient:
     is_creator: bool = False
     platform: str | None = None
     user_id: str | None = None
-    github_login: str | None = None
     url: str | None = None
     charity_config_id: str | None = None
     lifetime_received: float | None = None  # SOL (or quote units) claimed/donated so far
@@ -252,8 +250,7 @@ class CreatorFee:
         for r in sorted(self.recipients, key=lambda r: -r.share_bps):
             pct = f"{r.share_bps / 100:g}%"
             if r.kind == "github":
-                handle = f"@{r.github_login}" if r.github_login else f"#{r.user_id or '?'}"
-                who = f"GitHub account {handle}"
+                who = f"GitHub account #{r.user_id or '?'}"
             elif r.kind == "charity":
                 who = "a charity via donate.gg"
             elif r.kind == "creator":
@@ -397,37 +394,6 @@ def _lamports_to_quote(lamports: int, quote_mint: str | None) -> float:
     return round(lamports / 1e9, 9)
 
 
-# ----------------------------------------------------------------- GitHub login (optional)
-
-
-async def github_login(
-    http: httpx.AsyncClient, user_id: str, token: str = ""
-) -> tuple[str | None, str | None]:
-    """(login, account type) for a numeric GitHub user id via api.github.com, or (None, None).
-    Unauthenticated calls are limited to 60/h per IP; GITHUB_TOKEN raises that to 5,000/h."""
-    if not (user_id.isascii() and user_id.isdigit()):
-        return None, None
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "tokensage"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    try:
-        r = await http.get(f"https://api.github.com/user/{user_id}", headers=headers, timeout=4.0)
-    except httpx.HTTPError as e:
-        log.info("fees.github_lookup_failed", user_id=user_id, error=type(e).__name__)
-        return None, None
-    if r.status_code != 200:
-        log.info("fees.github_lookup_status", user_id=user_id, status=r.status_code)
-        return None, None
-    try:
-        j = r.json()
-    except ValueError:
-        return None, None
-    login = j.get("login") if isinstance(j, dict) else None
-    return (str(login)[:64] if login else None), (
-        str(j.get("type"))[:32] if isinstance(j, dict) and j.get("type") else None
-    )
-
-
 # ----------------------------------------------------------------- resolve
 
 
@@ -438,7 +404,7 @@ async def _cached_recipients(
         return {}
     try:
         rows = await conn.fetch(
-            """select address, kind, platform, user_id, github_login, charity_config_id,
+            """select address, kind, platform, user_id, charity_config_id,
                       lifetime_lamports, quote_mint, resolved_at
                from fee_recipient where address = any($1::text[])""",
             addrs,
@@ -459,13 +425,12 @@ async def _store_recipient(conn: asyncpg.Connection | None, r: FeeRecipient, inf
         return
     try:
         await conn.execute(
-            """insert into fee_recipient (address, kind, platform, user_id, github_login,
+            """insert into fee_recipient (address, kind, platform, user_id,
                                           charity_config_id, lifetime_lamports, quote_mint,
                                           resolved_at)
-               values ($1,$2,$3,$4,$5,$6,$7,$8, now())
+               values ($1,$2,$3,$4,$5,$6,$7, now())
                on conflict (address) do update set kind=excluded.kind,
                  platform=excluded.platform, user_id=excluded.user_id,
-                 github_login=coalesce(excluded.github_login, fee_recipient.github_login),
                  charity_config_id=excluded.charity_config_id,
                  lifetime_lamports=excluded.lifetime_lamports, quote_mint=excluded.quote_mint,
                  resolved_at=now()""",
@@ -473,7 +438,6 @@ async def _store_recipient(conn: asyncpg.Connection | None, r: FeeRecipient, inf
             "wallet" if r.kind == "creator" else r.kind,
             r.platform,
             r.user_id,
-            r.github_login,
             r.charity_config_id,
             info.get("lifetime_lamports"),
             info.get("quote_mint"),
@@ -489,9 +453,6 @@ async def resolve_creator_fee(
     *,
     rpc: SolanaRpc | None,
     conn: asyncpg.Connection | None = None,
-    http: httpx.AsyncClient | None = None,
-    github_token: str = "",
-    lookup_github: bool = True,
     cache_max_age: timedelta = timedelta(days=7),
 ) -> CreatorFee:
     """Work out where this coin's creator fee goes. `curve` is the decoded BondingCurve and
@@ -597,12 +558,6 @@ async def resolve_creator_fee(
                 except RpcError as e:
                     log.warning("fees.recipients_read_failed", mint=mint, error=str(e))
                     cf.caveats.append("fee recipients could not be read from the chain")
-        for r in fresh:
-            # the login a GitHub PDA resolved to is stable: keep the cached one
-            c = cached.get(r.address)
-            if c and r.address in infos and infos[r.address]["kind"] == c["kind"]:
-                if c.get("github_login") and not infos[r.address].get("github_login"):
-                    infos[r.address]["github_login"] = c["github_login"]
         for r in todo:
             info = infos.get(r.address)
             if info is None:
@@ -611,7 +566,6 @@ async def resolve_creator_fee(
             r.platform = info.get("platform")
             r.user_id = info.get("user_id")
             r.charity_config_id = info.get("charity_config_id")
-            r.github_login = info.get("github_login")
             lam = info.get("lifetime_lamports")
             if lam is not None:
                 # a social PDA accrues SOL whatever the coin's pair; a donation PDA accrues
@@ -621,29 +575,12 @@ async def resolve_creator_fee(
                     if r.kind != "charity"
                     else _lamports_to_quote(int(lam), info.get("quote_mint") or quote_mint)
                 )
-            if r.kind == "github":
-                # looked up once, when the recipient is first seen; a failed lookup is retried
-                # when the cached row expires
-                if (
-                    r.github_login is None
-                    and r.address not in cached
-                    and lookup_github
-                    and http is not None
-                    and r.user_id
-                ):
-                    r.github_login, _ = await github_login(http, r.user_id, github_token)
-                r.url = (
-                    f"https://github.com/{r.github_login}"
-                    if r.github_login
-                    else (f"https://api.github.com/user/{r.user_id}" if r.user_id else None)
-                )
+            if r.kind == "github" and r.user_id and r.user_id.isdigit():
+                # the public record for the numeric id (the login is not looked up)
+                r.url = f"https://api.github.com/user/{r.user_id}"
             if info.get("uncreated") or r.kind == "unresolved":
                 continue  # nothing to cache: read it again next time
-            if (
-                r.address not in cached
-                or r.kind not in _STATIC_KINDS
-                or (r.github_login and not cached[r.address].get("github_login"))
-            ):
+            if r.address not in cached or r.kind not in _STATIC_KINDS:
                 await _store_recipient(conn, r, info)
     cf.recipients = recipients
     cf.destination, cf.shares, cf.split = _destination(recipients)
@@ -679,7 +616,7 @@ def creator_fee_to_dict(cf: CreatorFee | None) -> dict[str, Any] | None:
                 "is_creator": r.is_creator,
                 "platform": r.platform,
                 "user_id": r.user_id,
-                "github_login": r.github_login,
+                "github_login": None,  # kept in the v1 shape; not looked up since 0.22.0
                 "url": r.url,
                 "charity_config_id": r.charity_config_id,
                 "lifetime_received": r.lifetime_received,

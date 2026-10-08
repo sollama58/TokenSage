@@ -82,8 +82,6 @@ async def _replay(
                 _acct(case, case["sharing_config"]),
                 rpc=rpc,
                 conn=None,
-                http=http,
-                lookup_github=False,
             )
     return cf, chain
 
@@ -235,42 +233,36 @@ async def test_sharing_config_rpc_failure_is_a_caveat_not_an_error() -> None:
                 curve,
                 chain.accounts[fees.sharing_config_pda(T22_MINT)],
                 rpc=SolanaRpc(RPC, http),
-                http=http,
             )
     assert cf.destination == "unknown" and cf.mechanism == "sharing_config"
     assert cf.recipients[0].kind == "unresolved"
     assert any("could not be read" in c for c in cf.caveats)
 
 
-async def test_github_login_lookup_fills_login_and_url() -> None:
+async def test_github_recipient_is_reported_by_id_without_any_lookup() -> None:
     chain = FakeChain()
     chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
     pda = chain.add_social_fee_pda("1234567", 2, total_claimed=5 * 10**9)
     chain.add_sharing_config(T22_MINT, CREATOR, [(CREATOR, 3_000), (pda, 7_000)])
-    curve = decode_bonding_curve(
-        __import__("base64").b64decode(chain.accounts[bonding_curve_pda(T22_MINT)]["data"][0])
-    )
+    curve = _curve_of(chain, T22_MINT)
     async with httpx.AsyncClient() as http:
         with respx.mock(assert_all_called=False) as router:
             router.post(RPC).mock(side_effect=chain.handle)
-            gh = router.get("https://api.github.com/user/1234567").mock(
-                return_value=httpx.Response(200, json={"login": "octocat", "type": "User"})
-            )
             cf = await fees.resolve_creator_fee(
                 T22_MINT,
                 curve,
                 chain.accounts[fees.sharing_config_pda(T22_MINT)],
                 rpc=SolanaRpc(RPC, http),
-                http=http,
-                github_token="tok",
             )
-    assert gh.called and gh.calls[0].request.headers["Authorization"] == "Bearer tok"
+            # no call to GitHub, so no token is needed
+            assert not any("github.com" in str(c.request.url) for c in router.calls)
     assert cf.destination == "github" and cf.split is True
     assert cf.shares == {"creator": 0.3, "github": 0.7}
     r = [x for x in cf.recipients if x.kind == "github"][0]
-    assert r.github_login == "octocat" and r.url == "https://github.com/octocat"
+    assert r.user_id == "1234567" and r.url == "https://api.github.com/user/1234567"
+    assert fees.creator_fee_to_dict(cf)["recipients"][1]["github_login"] is None
     assert r.lifetime_received == 5.0
-    assert "70% to GitHub account @octocat" in cf.describe()
+    assert "70% to GitHub account #1234567" in cf.describe()
 
 
 async def test_holder_rewards_and_cashback_need_no_sharing_read() -> None:
@@ -468,8 +460,6 @@ async def _resolve_fee(
                 chain.accounts[fees.sharing_config_pda(T22_MINT)],
                 rpc=SolanaRpc(RPC, http),
                 conn=conn,
-                http=http,
-                lookup_github=False,
             )
 
 
@@ -563,7 +553,6 @@ async def test_recipient_read_asks_for_a_data_slice() -> None:
                 _curve_of(chain, T22_MINT),
                 chain.accounts[fees.sharing_config_pda(T22_MINT)],
                 rpc=SolanaRpc(RPC, http),
-                lookup_github=False,
             )
     assert len(seen) == 1 and seen[0]["dataSlice"] == {"offset": 0, "length": 256}
     # the decoder still reads everything it needs from the first 256 bytes
@@ -582,7 +571,6 @@ async def test_hostile_social_user_id_is_never_echoed() -> None:
     r = cf.recipients[0]
     assert cf.destination == "github" and r.user_id is None and r.url is None
     assert hostile not in cf.describe() and "\x1b" not in cf.describe()
-    assert await fees.github_login(httpx.AsyncClient(), "١٢٣") == (None, None)  # non-ASCII digits
 
 
 async def test_shares_over_10000_bps_degrade_to_unknown() -> None:

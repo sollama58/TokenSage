@@ -331,9 +331,6 @@ async def resolve(
             sharing_acc if sharing_acc and sharing_acc.get("owner") else None,
             rpc=rpc,
             conn=conn,
-            http=http,
-            github_token=settings.github_token,
-            lookup_github=settings.enable_github_lookup,
             cache_max_age=timedelta(days=settings.fee_recipient_cache_days),
         )
         if creator_fee.mechanism == "sharing_config":

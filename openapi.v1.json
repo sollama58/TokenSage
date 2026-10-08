@@ -1232,7 +1232,7 @@
                 "type": "null"
               }
             ],
-            "description": "For a GitHub recipient: the login looked up from the id (when the lookup is enabled and succeeded)",
+            "description": "Always null since rules 0.22.0: the GitHub login is not looked up; use user_id (kept for v1 compatibility)",
             "title": "Github Login"
           },
           "is_creator": {
