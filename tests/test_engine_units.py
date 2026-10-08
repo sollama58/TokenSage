@@ -324,3 +324,18 @@ def test_cjk_word_list_keys_are_han_and_values_lowercase() -> None:
     for w, eng in k.cjk.items():
         assert all(0x4E00 <= ord(c) <= 0x9FFF for c in w), w
         assert eng == eng.lower().strip(), w
+
+
+def test_main_category_skips_the_relation_unless_it_is_all_there_is() -> None:
+    from tokensage.engine.aggregate import main_category
+
+    cats = [
+        ("derivative", 0.75),
+        ("derivative/copycat", 0.75),
+        ("animal", 0.5),
+        ("animal/dog", 0.5),
+    ]
+    assert main_category(cats) == ("animal", 0.5)
+    assert main_category([("derivative", 0.4), ("derivative/sequel", 0.4)]) == ("derivative", 0.4)
+    assert main_category([("crypto_native/paired_ecosystem", 0.3)]) is None
+    assert main_category([]) is None

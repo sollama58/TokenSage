@@ -32,6 +32,7 @@ from tests.fixtures.chain import (
 from tokensage.analyzer import build_document
 from tokensage.api.schemas import Analysis
 from tokensage.config import Settings
+from tokensage.engine.pipeline import RULES_VERSION
 from tokensage.net import safe_fetch
 from tokensage.resolve import fees
 from tokensage.resolve.pump_ca import bonding_curve_pda, decode_bonding_curve
@@ -429,6 +430,6 @@ async def test_api_reports_creator_fee(client: httpx.AsyncClient, db: asyncpg.Co
     assert body["analysis"]["market"]["creator"] == "8PQxd6VmfGPMyg8WPnfkT9jUTmtE7UsnDmvBKXeAVP9z"
     assert body["analysis"]["market"]["creator_kind"] == "sharing_config"
     assert "creator_fee_charity" in [f["code"] for f in body["analysis"]["flags"]]
-    assert body["analysis"]["versions"]["rules"] == "0.19.0-full"
+    assert body["analysis"]["versions"]["rules"] == RULES_VERSION
     meta = (await client.get("/v1/meta")).json()
     assert "creator_fee_charity" in [f["code"] for f in meta["flags"]]

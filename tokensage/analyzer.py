@@ -707,6 +707,7 @@ def build_document(
 
     referent = None
     categories: list[Category] = []
+    main_category: Category | None = None
     copy_of: list[CopyOf] = []
     lineage: Lineage | None = None
     ticker_explanation = None
@@ -735,6 +736,8 @@ def build_document(
             )
             for lbl, s in agg.categories
         ]
+        main = agg.main
+        main_category = next((c for c in categories if main and c.label == main[0]), None)
         copy_of = [
             CopyOf(
                 ticker=c.get("ticker"),
@@ -876,6 +879,7 @@ def build_document(
         normalized=_normalized_view(out),
         referent=referent,
         categories=categories,
+        main_category=main_category,
         ticker_explanation=ticker_explanation,
         copy_of=copy_of,
         lineage=lineage,

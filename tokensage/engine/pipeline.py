@@ -26,7 +26,7 @@ from tokensage.engine import (
 )
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
-from tokensage.engine.aggregate import NO_PARENT, Aggregated, aggregate, channel
+from tokensage.engine.aggregate import NO_PARENT, Aggregated, aggregate, channel, is_relation
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.gazetteer import Gazetteer
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
@@ -34,7 +34,7 @@ from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
 
-RULES_VERSION = "0.19.0-full"
+RULES_VERSION = "0.20.0-full"
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",
@@ -1246,10 +1246,6 @@ def _lineage_flags(lin: lineage_stage.Lineage, k: Knowledge) -> list[FlagOut]:
     return out
 
 
-# Categories that describe the copy relation or the launch corpus, not the coin's theme.
-_RELATION_PREFIXES = ("derivative",)
-
-
 def _inherit(
     agg: Aggregated,
     lin: lineage_stage.Lineage,
@@ -1267,11 +1263,11 @@ def _inherit(
     factor = float(lineage_stage.config(k).get("inherit_factor", 0.8))
     who = f"${o.ticker}" if o.ticker else (o.name or o.mint[:6] + "…")
     evs: list[Ev] = []
-    own_theme = [lbl for lbl, _ in agg.categories if not lbl.startswith(_RELATION_PREFIXES)]
+    own_theme = [lbl for lbl, _ in agg.categories if not is_relation(lbl)]
     if not own_theme:
         labels = [lbl for lbl, _ in prior.categories]
         for lbl, conf in prior.categories:
-            if lbl.startswith(_RELATION_PREFIXES) or lbl == meta.LABEL or lbl in NO_PARENT:
+            if is_relation(lbl) or lbl == meta.LABEL or lbl in NO_PARENT:
                 continue  # the relation, old corpus-rule labels and the pair's ecosystem
             if any(other.startswith(lbl + "/") for other in labels):
                 continue  # the parent is lifted again by its child; adding both inflates it

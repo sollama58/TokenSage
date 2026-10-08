@@ -298,3 +298,22 @@ def test_an_inherited_referent_never_inflates_the_copys_own() -> None:
     )
     assert out.agg.referent is not None
     assert out.agg.referent.score == base.agg.referent.score
+
+
+def test_a_copy_is_marked_derivative_but_its_main_category_is_its_theme() -> None:
+    prior = PriorRead(categories=[("animal", 0.9), ("animal/frog", 0.9)])
+    late = DbContext(same_name=_names([0.1 * i for i in range(1, 15)]), originals={"m13": prior})
+    # its own theme (a frog) is weaker than the copy relation (0.75), and still the main one
+    own = _run("Blorbo Frog", "BLORBO", late)
+    cats = dict(own.agg.categories)
+    assert cats["derivative"] > cats["animal"]
+    assert own.agg.main is not None and own.agg.main[0] == "animal"
+    assert "reads as an animal-mascot coin" in own.summary
+    assert own.summary.index("animal/frog") < own.summary.index("derivative/copycat")
+    # no theme of its own: the original's, inherited
+    inherited = _run("Blorbo", "BLORBO", late)
+    assert inherited.agg.main is not None and inherited.agg.main[0] == "animal"
+    # no theme anywhere: the relation is all there is
+    bare = _run("Blorbo", "BLORBO", DbContext(same_name=_names([3])))
+    assert bare.agg.main is not None and bare.agg.main[0] == "derivative"
+    assert "a derivative of an existing coin" in bare.summary
