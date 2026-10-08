@@ -103,6 +103,17 @@ def test_credibility_orders_accounts_sensibly() -> None:
     assert first == c[2] and seventh is not None and seventh < first  # type: ignore[operator]
 
 
+def test_account_signals_cost_little() -> None:
+    # rules 0.23.0: the post and the account's name lead; renames and reuse are context
+    old = _acc(age_at_launch_s=2 * 365 * 86400, followers=5_000, posts_total=1_000)
+    base = xcred.credibility(old, None, None)
+    assert base is not None
+    renamed = xcred.credibility(_acc(**{**old.__dict__, "name_changes": 3}), None, None)
+    late = xcred.credibility(old, None, 50)
+    assert renamed is not None and late is not None
+    assert renamed >= 0.8 * base and late >= 0.7 * base
+
+
 def test_self_profile_squash_is_continuous_and_below_about() -> None:
     lo, mid, hi = (xmatch.squash_self_profile(f) for f in (0.3, 0.8, 1.0))
     assert xmatch.FIT_RELATED <= lo < mid < hi <= xmatch.PROFILE_SELF_CAP < xmatch.FIT_ABOUT

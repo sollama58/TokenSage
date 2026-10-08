@@ -6,7 +6,8 @@ token, named after it, with three posts, matches the coin perfectly and says not
 
 `account` holds the facts (age at launch, post count, name changes, verification, whether it
 was made for the coin); `credibility` folds them, with followers and link reuse, into one 0-1
-score. Weights are hand-set, not yet fitted (Phase 6 calibration).
+score. Weights are hand-set, not yet fitted (Phase 6 calibration). The score is information
+for the reader: nothing in the read (categories, referent, summary, fit) depends on it.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]")
 
 # credibility weights over the known components (renormalised when some are unknown)
 W_AGE, W_FOLLOWERS, W_POSTS, W_VERIFIED = 0.35, 0.35, 0.15, 0.15
+MADE_FOR_COIN_FACTOR, RENAMED_FACTOR, REUSE_FLOOR = 0.85, 0.85, 0.75
 _VERIFIED = {"government": 1.0, "business": 1.0, "legacy": 0.8, "blue": 0.3}
 
 
@@ -142,13 +144,16 @@ def credibility(
     parts.append((W_VERIFIED, _VERIFIED.get(acc.verified_type or "", 0.0)))
     w = sum(p[0] for p in parts)
     score = sum(p[0] * p[1] for p in parts) / w if w else 0.0
+    # Since rules 0.23.0 the account is context, not a verdict: a made-for-coin or renamed
+    # account costs a little, not half. What the post says and the account's name carry the
+    # read. A spoofed link still costs most: the link itself lies about who posted.
     if acc.made_for_coin:
-        score *= 0.5
+        score *= MADE_FOR_COIN_FACTOR
     if acc.name_changes:
-        score *= 0.5
+        score *= RENAMED_FACTOR
     if relation == "spoofed":
         score *= 0.3
     if reuse_rank is not None and reuse_rank > 1:
         # the 7th coin to link a viral post borrows it; the first may be its own
-        score *= max(0.4, 1.0 / (1.0 + 0.15 * (reuse_rank - 1)))
+        score *= max(REUSE_FLOOR, 1.0 / (1.0 + 0.05 * (reuse_rank - 1)))
     return round(max(0.0, min(1.0, score)), 3)

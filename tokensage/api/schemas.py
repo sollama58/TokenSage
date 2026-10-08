@@ -621,7 +621,9 @@ class XInfo(_Model):
         le=1,
         description="How much the account behind the link is worth, apart from whether it "
         "matches: age at launch, followers, posts, verification, renames, link reuse "
-        "(uncalibrated until Phase 6)",
+        "(uncalibrated until Phase 6). Context about the account: since rules 0.23.0 renames, "
+        "a made-for-coin account and late reuse cost little, and nothing else in the read "
+        "depends on this score",
     )
 
 
