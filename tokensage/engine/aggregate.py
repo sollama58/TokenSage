@@ -13,6 +13,9 @@ _WHERE_FACTOR = {"description": "description_factor", "image": None, "x": None}
 # Labels about the coin's context, not its subject: they score on their own but do not
 # lift their parent (a coin paired against BONK is not thereby a crypto in-joke coin).
 NO_PARENT = {"crypto_native/paired_ecosystem"}
+# Labels that say how the coin relates to another coin (a copy, a "Baby X"), not what it is
+# about: kept in categories[] as the relation, never the coin's main category.
+RELATION_PREFIXES = ("derivative",)
 # Evidence kinds that only say what a word usually means, not what this coin refers to.
 DICTIONARY_KINDS = {"wordnet", "emoji"}
 # Labels a dictionary noun gives any text that has one: only the name, ticker or image can
@@ -29,6 +32,22 @@ class Aggregated:
     caveats: list[str] = field(default_factory=list)
     # per category label: the independent inputs that agree on it, strongest first
     inputs: dict[str, list[str]] = field(default_factory=dict)
+
+    @property
+    def main(self) -> tuple[str, float] | None:
+        return main_category(self.categories)
+
+
+def is_relation(label: str) -> bool:
+    return label.split("/")[0] in RELATION_PREFIXES
+
+
+def main_category(categories: list[tuple[str, float]]) -> tuple[str, float] | None:
+    """The coin's main category: its strongest top-level theme. A relation label
+    (derivative) is the main category only when the coin has no theme at all."""
+    tops = [(lbl, s) for lbl, s in categories if "/" not in lbl]
+    theme = next(((lbl, s) for lbl, s in tops if not is_relation(lbl)), None)
+    return theme or (tops[0] if tops else None)
 
 
 def _effective_weight(ev: Ev, k: Knowledge) -> float:

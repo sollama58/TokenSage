@@ -744,6 +744,14 @@ class Analysis(_Model):
     normalized: Normalized = Normalized()
     referent: Referent | None = None
     categories: list[Category] = []
+    main_category: Category | None = Field(
+        default=None,
+        description="The coin's main category: its strongest top-level theme from "
+        "categories[] (animal, celebrity, ...). derivative is the relation to another coin, "
+        "not a theme: it stays in categories[] and copy_of/lineage, and is the main category "
+        "only when the coin has no theme at all. null when categories[] is empty (since rules "
+        "0.20.0)",
+    )
     ticker_explanation: str | None = None
     copy_of: list[CopyOf] = []
     lineage: Lineage | None = None

@@ -223,6 +223,17 @@
               }
             ]
           },
+          "main_category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Category"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The coin's main category: its strongest top-level theme from categories[] (animal, celebrity, ...). derivative is the relation to another coin, not a theme: it stays in categories[] and copy_of/lineage, and is the main category only when the coin has no theme at all. null when categories[] is empty (since rules 0.20.0)"
+          },
           "market": {
             "$ref": "#/components/schemas/Market",
             "default": {}

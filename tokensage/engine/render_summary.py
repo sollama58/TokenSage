@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tokensage.engine.aggregate import Aggregated
+from tokensage.engine.aggregate import Aggregated, is_relation, main_category
 from tokensage.engine.context import Ev
 
 _CATEGORY_PHRASE = {
@@ -42,13 +42,6 @@ def _phrase(label: str, categories: list[tuple[str, float]]) -> str:
             if lbl in _CRYPTO_PHRASE:
                 return _CRYPTO_PHRASE[lbl]
     return _CATEGORY_PHRASE.get(label, label)
-
-
-def _top_parent(categories: list[tuple[str, float]]) -> tuple[str, float] | None:
-    for lbl, s in categories:
-        if "/" not in lbl:
-            return lbl, s
-    return None
 
 
 def _verb(score: float) -> str:
@@ -91,7 +84,7 @@ def summarize(
         joiner = " was " if narrative.startswith("launched") else ": "
         parts.append(f"{head}{joiner}{narrative}.")
         narrative = None
-        tp = _top_parent(agg.categories)
+        tp = main_category(agg.categories)
         guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
             parts.append(
@@ -101,7 +94,7 @@ def summarize(
         elif guess:
             parts.append(f"No clear reference in the name{guess}.")
     else:
-        tp = _top_parent(agg.categories)
+        tp = main_category(agg.categories)
         guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
             parts.append(
@@ -111,7 +104,10 @@ def summarize(
             parts.append(f"{head}: no clear reference found; see evidence and caveats{guess}.")
     if narrative:
         parts.append(narrative[0].upper() + narrative[1:] + ".")
-    subs = [(lbl, s) for lbl, s in agg.categories if "/" in lbl][:4]
+    # the theme before the relation: "animal/frog 0.49, derivative/copycat 0.75"
+    subs = sorted(
+        ((lbl, s) for lbl, s in agg.categories if "/" in lbl), key=lambda x: is_relation(x[0])
+    )[:4]
     if subs:
         parts.append("Categories: " + ", ".join(f"{lbl} {s:.2f}" for lbl, s in subs) + ".")
     if context:

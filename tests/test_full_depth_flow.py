@@ -129,6 +129,8 @@ async def test_full_depth_fills_x_trend_and_caches(
     # meaning
     assert a.referent and "Peanut" in a.referent.label
     assert "derivative/sequel" in {c.label for c in a.categories}
+    # the sequel marker is the relation; the main category is the squirrel
+    assert a.main_category is not None and a.main_category.label == "animal"
     # caches populated
     assert await db.fetchval("select status from x_tweet where tweet_id=$1", TID) == "ok"
     assert await db.fetchval("select count(*) from x_profile") == 1
