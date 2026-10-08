@@ -132,9 +132,9 @@ async def test_full_depth_fills_x_trend_and_caches(
     # caches populated
     assert await db.fetchval("select status from x_tweet where tweet_id=$1", TID) == "ok"
     assert await db.fetchval("select count(*) from x_profile") == 1
-    # one news check for the trend hit, one for the name ("Peanut the Squirrel": one headline
-    # only, so not "in the news" by itself)
-    assert await db.fetchval("select count(*) from lookup_cache") == 2
+    # one news check for the trend hit; the name is not searched ("Peanut the Squirrel" is
+    # everyday words, in some headline whatever is trending)
+    assert await db.fetchval("select count(*) from lookup_cache") == 1
     assert [t.source for t in a.trend.terms] == ["wikipedia"]
     assert a.trend.terms[0].headline == "Peanut the squirrel story"
     # 40x its usual views: a strong spike, seen today, on the coin's own name
@@ -148,8 +148,8 @@ async def test_full_depth_fills_x_trend_and_caches(
         "wikipedia": "ok",
         "google_trends": "failed",
         "x_trends": "failed",
-        "news": "ok",
-        "bluesky": "skipped",  # "Peanut the Squirrel" is everyday words
+        "news": "skipped",  # "Peanut the Squirrel" is everyday words
+        "bluesky": "skipped",
     }
     assert len(fx_calls) == 1
 

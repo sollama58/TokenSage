@@ -1499,6 +1499,12 @@ async def _name_news(
             "skipped",
             detail="name not specific enough to search (needs two words, or one uncommon word)",
         )
+    if not one_word and trends.ordinary(phrase, load_knowledge()):
+        return [], trends.SourceStatus(
+            "news",
+            "skipped",
+            detail=f"'{phrase}' is everyday words: some headline has it whatever is trending",
+        )
     try:
         found = await fulldepth.news_lookup(conn, ctx.http, phrase, exact=True)
     except Exception as e:  # noqa: BLE001 - an optional enrichment

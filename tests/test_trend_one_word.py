@@ -3,6 +3,14 @@ label, the ticker as the whole label, a one-word news search, and the everyday-w
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import asyncpg
+import httpx
+import respx
+
+from tests.conftest import needs_db
+from tests.test_trend_sources import db  # noqa: F401 - the fixture
 from tokensage.engine import trends
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.engine.pipeline import EngineInput, run_full
@@ -113,3 +121,35 @@ def test_ordinary_phrases() -> None:
         assert trends.ordinary(p, k), p
     for p in ("Moo Deng", "Leoncio Gomez", "Susan Dell", "Claude Opus"):
         assert not trends.ordinary(p, k), p
+
+
+@needs_db
+async def test_name_news_search_choices(db: asyncpg.Connection) -> None:  # noqa: F811
+    """Which names the analyzer searches Google News for: a specific phrase, a rare single
+    word (three outlets), not an everyday phrase or a common single word."""
+    from tokensage import analyzer
+
+    def rss(titles: list[tuple[str, str]]) -> str:
+        items = "".join(f"<item><title>{t}</title><source>{s}</source></item>" for t, s in titles)
+        return f"<rss><channel>{items}</channel></rss>"
+
+    leoncio = rss([("Leoncio scores twice", "A"), ("Leoncio again", "B"), ("Leoncio!", "C")])
+    with respx.mock(assert_all_called=False) as router:
+        route = router.get(url__startswith="https://news.google.com/").mock(
+            return_value=httpx.Response(200, text=leoncio)
+        )
+        async with httpx.AsyncClient() as http:
+            ctx = SimpleNamespace(http=http)
+
+            async def news(name: str) -> tuple[list[trends.TrendHit], trends.SourceStatus]:
+                inp = EngineInput("m", name, "X", None, None, None)
+                return await analyzer._name_news(db, ctx, inp)  # type: ignore[arg-type]
+
+            hits, st = await news("Leoncio")
+            assert [h.term.term for h in hits] == ["Leoncio"] and st.status == "ok"
+            assert st.detail and "needs 3 outlets" in st.detail
+            calls = route.call_count
+            for name in ("So Good", "Juniper"):
+                hits, st = await news(name)
+                assert hits == [] and st.status == "skipped", name
+            assert route.call_count == calls  # neither was searched
