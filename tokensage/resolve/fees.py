@@ -33,6 +33,7 @@ fee_accounts.json holds their account bytes).
 from __future__ import annotations
 
 import base64
+import re
 import struct
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -42,7 +43,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage.resolve.pump_ca import PUMP_PROGRAM, b58decode, find_program_address
+from tokensage.resolve.pump_ca import PUMP_PROGRAM, _on_curve, b58decode, find_program_address
 from tokensage.resolve.pump_event import b58encode
 from tokensage.resolve.rpc import RpcError, SolanaRpc
 
@@ -125,11 +126,16 @@ def decode_sharing_config(data: bytes) -> dict[str, Any]:
     n, o = _u(data, o, "<I")
     if n > 32:
         raise ValueError("too many shareholders")
-    shareholders = []
+    shareholders: list[dict[str, Any]] = []
+    total = 0
     for _ in range(n):
         addr, o = _pk(data, o)
         bps, o = _u(data, o, "<H")
+        total += bps
         shareholders.append({"address": addr, "share_bps": bps})
+    # the program enforces a 10,000 bps total; anything else is not a config we can read
+    if total > 10_000:
+        raise ValueError("shareholder shares exceed 10,000 bps")
     return {
         "version": version,
         "status": "active" if status == 1 else "paused",
@@ -256,6 +262,12 @@ class CreatorFee:
                 who = f"wallet {r.address[:4]}…{r.address[-4:]}"
             elif r.kind in ("x", "pump"):
                 who = f"{r.kind} account {r.user_id or '?'}"
+            elif r.kind == "social":
+                who = f"a linked social account ({r.platform or 'unknown platform'})"
+            elif r.kind == "unresolved":
+                who = f"an account that could not be classified ({r.address[:4]}…{r.address[-4:]})"
+            elif r.kind == "program":
+                who = f"an account of another program ({r.address[:4]}…{r.address[-4:]})"
             else:
                 who = f"{r.kind} {r.address[:4]}…{r.address[-4:]}"
             parts.append(f"{pct} to {who}")
@@ -273,20 +285,48 @@ class CreatorFee:
 # ----------------------------------------------------------------- classification
 
 
+# A user id as GitHub and X issue them. SocialFeePda.user_id is written by whoever creates
+# the PDA (the instruction is permissionless), so anything else is never echoed.
+_USER_ID = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _clean_user_id(user_id: Any) -> str | None:
+    return user_id if isinstance(user_id, str) and _USER_ID.fullmatch(user_id) else None
+
+
+def _account_bytes(acc: dict) -> bytes:
+    """The account's data as bytes; b"" for any shape other than [base64, "base64"]."""
+    raw = acc.get("data")
+    if not (isinstance(raw, list) and raw and isinstance(raw[0], str)):
+        return b""
+    try:
+        return base64.b64decode(raw[0])
+    except ValueError:
+        return b""
+
+
+def _is_off_curve(address: str) -> bool:
+    try:
+        key = b58decode(address)
+    except ValueError:
+        return False
+    return len(key) == 32 and not _on_curve(key)
+
+
 def classify_recipient_account(address: str, acc: dict | None) -> dict[str, Any]:
     """What a shareholder address is, from its account (None when it does not exist)."""
     if acc is None:
+        if _is_off_curve(address):
+            # a program address no one has created yet (e.g. a GitHub user's fee PDA before
+            # its first claim): no private key can sign for it, so it is not a wallet
+            return {"kind": "unresolved", "uncreated": True}
         return {"kind": "wallet"}  # a system wallet that has never been funded
+    if not isinstance(acc, dict):
+        return {"kind": "unresolved"}
     owner = acc.get("owner")
     if owner == SYSTEM_PROGRAM:
         return {"kind": "wallet"}
-    data = b""
-    raw = acc.get("data")
-    if isinstance(raw, list) and raw:
-        try:
-            data = base64.b64decode(raw[0])
-        except ValueError:
-            data = b""
+    data = _account_bytes(acc)
     if owner == PUMP_FEES_PROGRAM:
         try:
             if data[:8] == SOCIAL_FEE_PDA_DISC:
@@ -294,7 +334,7 @@ def classify_recipient_account(address: str, acc: dict | None) -> dict[str, Any]
                 return {
                     "kind": PLATFORMS.get(s["platform"], "social"),
                     "platform": PLATFORMS.get(s["platform"], f"platform:{s['platform']}"),
-                    "user_id": s["user_id"],
+                    "user_id": _clean_user_id(s["user_id"]),
                     "lifetime_lamports": s["total_claimed"],
                 }
             if data[:8] == DONATION_FEE_PDA_DISC:
@@ -320,11 +360,20 @@ def _destination(recipients: list[FeeRecipient]) -> tuple[Destination, dict[str,
         return "unknown", shares, False
     if not split:
         return _KIND_DESTINATION.get(live[0].kind, "other"), shares, False
+    if any(r.kind == "unresolved" for r in live):
+        # a share we could not classify (a failed read) can be the dominant one: no verdict
+        return "unknown", shares, True
     top_kind, top_share = max(shares.items(), key=lambda kv: kv[1])
     if top_share >= 0.5 and top_kind in ("charity", "github", "x", "pump", "social"):
         return _KIND_DESTINATION[top_kind], shares, True
     return "split", shares, True
 
+
+# Recipient kinds whose classification cannot change: their cached row is reused as is.
+_STATIC_KINDS = {"wallet", "program"}
+# Bytes of a recipient account the classifier reads (SocialFeePda and DonationFeePda are
+# under 256 bytes); an admin can list any account, so never download all of it.
+_RECIPIENT_BYTES = 256
 
 # a sole recipient's kind -> destination; x / pump.fun-linked accounts are "social"
 _KIND_DESTINATION = {
@@ -356,7 +405,7 @@ async def github_login(
 ) -> tuple[str | None, str | None]:
     """(login, account type) for a numeric GitHub user id via api.github.com, or (None, None).
     Unauthenticated calls are limited to 60/h per IP; GITHUB_TOKEN raises that to 5,000/h."""
-    if not user_id.isdigit():
+    if not (user_id.isascii() and user_id.isdigit()):
         return None, None
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "tokensage"}
     if token:
@@ -467,9 +516,8 @@ async def resolve_creator_fee(
     sharing: dict[str, Any] | None = None
     if sharing_acc is not None and sharing_acc.get("owner") == PUMP_FEES_PROGRAM:
         try:
-            raw = sharing_acc.get("data")
-            sharing = decode_sharing_config(base64.b64decode(raw[0]) if raw else b"")
-        except (ValueError, struct.error, TypeError) as e:
+            sharing = decode_sharing_config(_account_bytes(sharing_acc))
+        except (ValueError, struct.error, TypeError, KeyError) as e:
             log.info("fees.sharing_decode_failed", mint=mint, error=str(e))
             sharing = None
 
@@ -515,24 +563,46 @@ async def resolve_creator_fee(
     ]
     # the admin signed the config into existence, so it is a wallet: no read needed
     todo = [r for r in recipients if r.kind == "unresolved"]
+    infos: dict[str, dict[str, Any]] = {}
     if todo:
         cached = await _cached_recipients(conn, [r.address for r in todo], cache_max_age)
-        fresh = [r for r in todo if r.address not in cached]
-        infos: dict[str, dict[str, Any]] = dict(cached)
+        # A wallet or another program's account stays what it is, so its cached kind is
+        # reused. A fee PDA's running total (claimed / donated so far) changes, so it is
+        # re-read every time; its cached row only saves the GitHub login lookup.
+        fresh = [
+            r
+            for r in todo
+            if r.address not in cached or cached[r.address]["kind"] not in _STATIC_KINDS
+        ]
+        infos.update({a: c for a, c in cached.items() if c["kind"] in _STATIC_KINDS})
         if fresh:
             if rpc is None:
                 cf.caveats.append("fee recipients not resolved (no RPC)")
             else:
                 try:
                     accs = await rpc.get_multiple_accounts(
-                        [r.address for r in fresh], encoding="base64"
+                        [r.address for r in fresh],
+                        encoding="base64",
+                        data_slice=(0, _RECIPIENT_BYTES),
                     )
                     cf.rpc_calls += 1
                     for r, acc in zip(fresh, accs, strict=True):
-                        infos[r.address] = classify_recipient_account(r.address, acc)
+                        try:
+                            infos[r.address] = classify_recipient_account(r.address, acc)
+                        except (ValueError, struct.error, TypeError, KeyError) as e:
+                            log.info(
+                                "fees.recipient_decode_failed", address=r.address, error=str(e)
+                            )
+                            infos[r.address] = {"kind": "unresolved"}
                 except RpcError as e:
                     log.warning("fees.recipients_read_failed", mint=mint, error=str(e))
                     cf.caveats.append("fee recipients could not be read from the chain")
+        for r in fresh:
+            # the login a GitHub PDA resolved to is stable: keep the cached one
+            c = cached.get(r.address)
+            if c and r.address in infos and infos[r.address]["kind"] == c["kind"]:
+                if c.get("github_login") and not infos[r.address].get("github_login"):
+                    infos[r.address]["github_login"] = c["github_login"]
         for r in todo:
             info = infos.get(r.address)
             if info is None:
@@ -567,14 +637,20 @@ async def resolve_creator_fee(
                     if r.github_login
                     else (f"https://api.github.com/user/{r.user_id}" if r.user_id else None)
                 )
-            if r.address not in cached or (
-                r.github_login and not cached[r.address].get("github_login")
+            if info.get("uncreated") or r.kind == "unresolved":
+                continue  # nothing to cache: read it again next time
+            if (
+                r.address not in cached
+                or r.kind not in _STATIC_KINDS
+                or (r.github_login and not cached[r.address].get("github_login"))
             ):
                 await _store_recipient(conn, r, info)
     cf.recipients = recipients
     cf.destination, cf.shares, cf.split = _destination(recipients)
     if any(r.kind == "unresolved" for r in recipients):
         cf.caveats.append("some fee recipients could not be classified")
+    if any(infos.get(r.address, {}).get("uncreated") for r in todo):
+        cf.caveats.append("a fee recipient is a program address that does not exist yet")
     if cf.sharing_status != "active":
         cf.caveats.append("the fee-sharing config is paused")
     return cf

@@ -79,3 +79,12 @@ async def http_error_handler(request: Request, exc: HTTPException) -> JSONRespon
         content={"error": {"code": code, "message": str(exc.detail), "request_id": rid}},
         headers=exc.headers,
     )
+
+
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Anything unexpected still answers in the one error shape (a bare 500 otherwise)."""
+    rid = getattr(request.state, "request_id", "")
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "internal", "message": "internal error", "request_id": rid}},
+    )

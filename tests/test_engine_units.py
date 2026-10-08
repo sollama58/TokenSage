@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageOps
 from tokensage.engine import image as im
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.engine.normalize import normalize, ticker_base
-from tokensage.engine.pipeline import DbContext, EngineInput, run_basic
+from tokensage.engine.pipeline import DbContext, EngineInput, run_basic, run_full
 from tokensage.engine.ticker import explain
 
 
@@ -339,3 +339,65 @@ def test_main_category_skips_the_relation_unless_it_is_all_there_is() -> None:
     assert main_category([("derivative", 0.4), ("derivative/sequel", 0.4)]) == ("derivative", 0.4)
     assert main_category([("crypto_native/paired_ecosystem", 0.3)]) is None
     assert main_category([]) is None
+
+
+# ----------------------------------------------------------------- bugs audit (2026-10-08)
+
+
+def test_main_category_skips_context_and_breaks_ties_like_the_referent() -> None:
+    from tokensage.engine.aggregate import main_category
+
+    # a non-Latin name's script is its setting, not its theme
+    assert main_category([("regional_language", 0.6), ("animal", 0.55)]) == ("animal", 0.55)
+    assert main_category([("regional_language", 0.6)]) == ("regional_language", 0.6)
+    # on a tie the subject wins over the setting, as _theme() decides the generic referent
+    assert main_category([("crypto_native", 0.7), ("meme_template", 0.7)])[0] == "meme_template"
+    assert main_category([("ai_agent", 0.5), ("political", 0.5)])[0] == "political"
+    out = run_basic(EngineInput("m", "猫", "MAO", None, None, None))
+    assert out.agg.main is not None and out.agg.main[0] == "animal"
+    assert "regional / language-community" not in out.summary.split(".")[0]
+
+
+def test_summary_quotes_the_banded_referent_confidence() -> None:
+    out = run_basic(EngineInput("m", "Pepe", "PEPE", None, None, None))
+    assert out.referent_read is not None
+    assert f"(confidence {out.referent_read.confidence:.2f})" in out.summary
+
+
+def test_ticker_only_known_coin_match_is_the_symbols_input() -> None:
+    out = run_basic(EngineInput("m", "Moon Cat", "BONK", None, None, None))
+    rows = [e for e in out.agg.evidence if e.source == "known_coins:BONK"]
+    assert rows and {e.where for e in rows} == {"symbol"}
+    if out.referent_read is not None and out.referent_read.label == "Bonk":
+        assert out.referent_read.supported_by == ["symbol"]
+
+
+def test_a_trend_naming_the_referent_is_an_input() -> None:
+    from tokensage.engine import trends
+    from tokensage.engine.knowledge import load_knowledge
+
+    k = load_knowledge()
+
+    def read(name: str, sym: str, term: trends.TrendTerm):  # type: ignore[no-untyped-def]
+        idx = trends.TrendIndex([term], k)
+        return run_full(
+            EngineInput("m", name, sym, None, None, None, trend_index=idx)
+        ).referent_read
+
+    # an X topic that is the referent's name: two independent inputs, the 0.7+ band
+    rr = read("Moo Deng", "HIPPO", trends.TrendTerm("Moo Deng", 0.0, 4, source="x_trends", rank=2))
+    assert rr is not None and "trend" in rr.supported_by and rr.confidence >= 0.7
+    # the Wikipedia article that is the referent
+    rr = read("Peanut the Squirrel", "PNUT", trends.TrendTerm("Peanut (squirrel)", 12.0, 90000))
+    assert rr is not None and "trend" in rr.supported_by
+    # another article on the same word does not count
+    rr = read("Peanut the Squirrel", "PNUT", trends.TrendTerm("Peanut", 12.0, 90000))
+    assert rr is not None and "trend" not in rr.supported_by
+
+
+def test_wikiclass_crypto_needs_the_word() -> None:
+    from tokensage.engine.wikiclass import classify
+
+    assert classify("American cryptographer")[0] != "coin"
+    assert classify("Cryptozoologist")[0] != "coin"
+    assert classify("Decentralized cryptocurrency") == ("coin", ["crypto_native/chain_or_coin"])

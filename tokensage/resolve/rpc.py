@@ -99,10 +99,17 @@ class SolanaRpc:
         )
         return (res or {}).get("value")
 
-    async def get_multiple_accounts(self, pubkeys: list[str], encoding: str = "base64") -> list:
-        res = await self.call(
-            "getMultipleAccounts", [pubkeys, {"encoding": encoding, "commitment": self.commitment}]
-        )
+    async def get_multiple_accounts(
+        self,
+        pubkeys: list[str],
+        encoding: str = "base64",
+        data_slice: tuple[int, int] | None = None,
+    ) -> list:
+        opts: dict[str, Any] = {"encoding": encoding, "commitment": self.commitment}
+        if data_slice is not None:
+            # (offset, length): only that window of each account's data is returned
+            opts["dataSlice"] = {"offset": data_slice[0], "length": data_slice[1]}
+        res = await self.call("getMultipleAccounts", [pubkeys, opts])
         value = (res or {}).get("value") or [None] * len(pubkeys)
         if len(value) != len(pubkeys):
             raise RpcError(f"getMultipleAccounts returned {len(value)} of {len(pubkeys)} accounts")

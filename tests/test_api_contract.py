@@ -177,3 +177,34 @@ async def test_console_served_without_auth(client: httpx.AsyncClient) -> None:
     assert r.status_code == 200 and "TokenSage Console" in r.text
     assert r.headers["content-type"].startswith("text/html")
     assert (await client.get("/console", headers={"Authorization": ""})).status_code == 200
+
+
+# ----------------------------------------------------------------- bugs audit (2026-10-08)
+
+
+def test_stored_documents_from_a_newer_worker_are_still_served() -> None:
+    # The API and the worker deploy separately; v1 only adds fields, so a document with a
+    # field this process does not know yet is served without it instead of failing (500).
+    from datetime import UTC, datetime
+
+    from tokensage.api.schemas import Versions, stored_analysis
+
+    def base() -> dict:
+        return Analysis(
+            mint=SPL_MINT,
+            depth="basic",
+            analyzed_at=datetime.now(UTC),
+            versions=Versions(rules="r", lexicon="l"),
+            summary="s",
+        ).model_dump(mode="json")
+
+    doc = base()
+    doc["future_field"] = 1
+    doc["market"]["future_market_field"] = {"x": 1}
+    a = stored_analysis(doc)
+    assert a.mint == SPL_MINT and "future_field" not in a.model_dump()
+    # anything else that does not fit is still an error
+    bad = base()
+    bad["categories"] = [{"label": "animal", "confidence": 7}]
+    with pytest.raises(ValidationError):
+        stored_analysis(bad)

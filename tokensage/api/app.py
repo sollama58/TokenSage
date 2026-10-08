@@ -124,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(errors.ApiError, errors.api_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(HTTPException, errors.http_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, errors.unhandled_error_handler)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:

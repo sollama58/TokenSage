@@ -153,3 +153,100 @@ async def test_name_news_search_choices(db: asyncpg.Connection) -> None:  # noqa
                 hits, st = await news(name)
                 assert hits == [] and st.status == "skipped", name
             assert route.call_count == calls  # neither was searched
+
+
+# ----------------------------------------------------------------- bugs audit (2026-10-08)
+
+
+def _bsky_posts(n: int, ago_h: float = 1.0) -> list[dict]:
+    from datetime import UTC, datetime, timedelta
+
+    at = (datetime.now(UTC) - timedelta(hours=ago_h)).isoformat().replace("+00:00", "Z")
+    return [
+        {
+            "text": "leoncio gomez today",
+            "created_at": at,
+            "likes": 0,
+            "reposts": 0,
+            "author": f"u{i}.bsky.social",
+            "uri": None,
+        }
+        for i in range(n)
+    ]
+
+
+def test_news_and_bluesky_hits_on_the_same_name_both_count() -> None:
+    news = trends.news_hit(
+        "Leoncio Gomez",
+        [{"title": f"Leoncio Gomez story {i}", "source": f"Outlet {i}"} for i in range(3)],
+    )
+    bsky = trends.bluesky_hit("Leoncio Gomez", _bsky_posts(12))
+    assert news is not None and bsky is not None
+    idx = trends.TrendIndex([], load_knowledge())
+    out = run_full(
+        EngineInput(
+            "m", "Leoncio Gomez", "LG", None, None, None, trend_index=idx, news_hits=[news, bsky]
+        )
+    )
+    assert sorted(h.term.source for h in out.trend_hits) == ["bluesky", "news"]
+    assert any(e.source.startswith("bsky:") for e in out.evidence)
+
+
+def test_trending_label_matches_through_punctuation_and_hashtags() -> None:
+    idx = trends.TrendIndex([_x("Moo Deng"), _x("Dr. Dre")], load_knowledge())
+    for text in (
+        "Moo Deng's keeper posted",
+        "Moo Deng, the hippo",
+        "#MooDeng is back",
+        "Moo Deng!",
+    ):
+        assert [h.term.term for h in idx.match(text, "x")] == ["Moo Deng"], text
+    assert [h.term.term for h in idx.match("Dr. Dre dropped", "x")] == ["Dr. Dre"]
+    assert idx.match("moodeng is a word", "x") == []
+
+
+def test_gated_whole_label_does_not_block_the_word_of_a_label_lookup() -> None:
+    # "West" trends as an everyday one-word X topic (gated) while "Kanye West" trends too
+    hits = _run(
+        "West", "WEST", [_x("West", rank=40), _x("Kanye West", rank=1)], desc="kanye album drops"
+    )
+    assert [(h.term.term, h.partial) for h in hits] == [("Kanye West", True)]
+
+
+def test_odd_bluesky_posts_never_raise() -> None:
+    from tokensage.sources import bluesky
+
+    future = {
+        "text": "leoncio gomez",
+        "created_at": "9999-12-31T23:59:59-05:00",
+        "author": "a",
+        "likes": 0,
+        "reposts": 0,
+    }
+    assert bluesky.created(future) is None
+    # tomorrow is not "in the last 24 hours"
+    assert trends.bluesky_hit("Leoncio Gomez", _bsky_posts(5, ago_h=-5)) is None
+    parsed = bluesky.parse(
+        {
+            "posts": [
+                {
+                    "record": {"text": "x", "createdAt": ["x"]},
+                    "author": {"handle": {"h": 1}},
+                    "uri": 7,
+                }
+            ]
+            * 3
+        }
+    )
+    assert parsed[0].author is None and parsed[0].uri is None and parsed[0].created_at is None
+
+
+def test_xtrends_parse_is_linear_on_timestamps_without_lists() -> None:
+    import time
+
+    from tokensage.sources import xtrends
+
+    page = ('<h3 data-timestamp=1700000000 class="x">' + "x" * 200) * 4000  # ~0.9 MB
+    t0 = time.perf_counter()
+    assert xtrends.parse(page) == []
+    assert time.perf_counter() - t0 < 2.0  # was ~11 s before the card regex was bounded

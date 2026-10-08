@@ -36,6 +36,11 @@ def _int(v: Any) -> int:
     return v if isinstance(v, int) and v >= 0 else 0
 
 
+def _str(v: Any) -> str | None:
+    """A JSON string field, or None for anything else (a post is client-written JSON)."""
+    return v[:300] if isinstance(v, str) and v else None
+
+
 def parse(j: Any) -> list[Post]:
     out: list[Post] = []
     for p in (j.get("posts") if isinstance(j, dict) else None) or []:
@@ -46,11 +51,11 @@ def parse(j: Any) -> list[Post]:
         out.append(
             Post(
                 text=str(rec.get("text") or "")[:500],
-                created_at=rec.get("createdAt") or p.get("indexedAt"),
+                created_at=_str(rec.get("createdAt")) or _str(p.get("indexedAt")),
                 likes=_int(p.get("likeCount")),
                 reposts=_int(p.get("repostCount")),
-                author=author.get("handle"),
-                uri=p.get("uri"),
+                author=_str(author.get("handle")),
+                uri=_str(p.get("uri")),
             )
         )
     return out
@@ -103,6 +108,7 @@ def created(p: dict) -> datetime | None:
         return None
     try:
         d = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
+        # createdAt is set by the posting client: year 9999 with an offset overflows here
+        return (d if d.tzinfo else d.replace(tzinfo=UTC)).astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    return (d if d.tzinfo else d.replace(tzinfo=UTC)).astimezone(UTC)

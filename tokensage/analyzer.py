@@ -1548,12 +1548,16 @@ async def _name_news(
         return [], trends.SourceStatus("news", "failed", detail=f"{type(e).__name__}")
     if found is None:
         return [], trends.SourceStatus("news", "failed", detail="Google News unavailable")
-    rel = gnews.relevant(found.headlines, phrase, inp.symbol)
-    hit = trends.news_hit(
-        phrase,
-        rel,
-        min_outlets=trends.MIN_ONE_WORD_OUTLETS if one_word else trends.MIN_NEWS_HEADLINES,
-    )
+    try:
+        rel = gnews.relevant(found.headlines, phrase, inp.symbol)
+        hit = trends.news_hit(
+            phrase,
+            rel,
+            min_outlets=trends.MIN_ONE_WORD_OUTLETS if one_word else trends.MIN_NEWS_HEADLINES,
+        )
+    except Exception as e:  # noqa: BLE001 - headlines are third-party data; never fail the coin
+        log.info("news.parse_failed", error=f"{type(e).__name__}: {e}"[:120])
+        return [], trends.SourceStatus("news", "failed", detail=f"{type(e).__name__}")
     st = trends.SourceStatus(
         "news",
         "stale" if found.stale else "ok",
@@ -1593,8 +1597,12 @@ async def _name_bluesky(
         return [], trends.SourceStatus("bluesky", "failed", detail=f"{type(e).__name__}")
     if found is None:
         return [], trends.SourceStatus("bluesky", "failed", detail="Bluesky unavailable")
-    rel = bluesky.relevant(found.posts, phrase, inp.symbol)
-    hit = trends.bluesky_hit(phrase, rel)
+    try:
+        rel = bluesky.relevant(found.posts, phrase, inp.symbol)
+        hit = trends.bluesky_hit(phrase, rel)
+    except Exception as e:  # noqa: BLE001 - posts are third-party JSON; never fail the coin
+        log.info("bluesky.parse_failed", error=f"{type(e).__name__}: {e}"[:120])
+        return [], trends.SourceStatus("bluesky", "failed", detail=f"{type(e).__name__}")
     st = trends.SourceStatus(
         "bluesky",
         "stale" if found.stale else "ok",

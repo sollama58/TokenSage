@@ -124,7 +124,10 @@ class TrendIndex:
     def match(self, text: str, where: str) -> list[TrendHit]:
         if not self._n or not text:
             return []
-        padded = " " + " ".join(_fold(text).lower().split()) + " "
+        # the text as the surfaces are written: "Moo Deng's", "Moo Deng," and "#MooDeng" all
+        # read "moo deng"
+        text = _HASHTAG.sub(lambda m: _CAMEL.sub(" ", m.group(1)), text)
+        padded = " " + _clean(text) + " "
         out: dict[str, TrendHit] = {}
         for _end, (s, t) in self._auto.iter(padded):
             if t.term not in out or len(s) > len(out[t.term].surface):
@@ -148,6 +151,10 @@ class TrendIndex:
 
     def is_generic(self, term: str) -> bool:
         return term.lower() in self._generic
+
+
+_HASHTAG = re.compile(r"#(\w+)")
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _fold(s: str) -> str:
@@ -542,8 +549,13 @@ def bluesky_hit(phrase: str, posts: list[dict], now: datetime | None = None) -> 
     from tokensage.sources.bluesky import created
 
     now = now or datetime.now(UTC)
-    recent = [(p, d) for p in posts if (d := created(p)) is not None and now - d < BLUESKY_WINDOW]
-    authors = {p.get("author") for p, _ in recent}
+    # a client-set createdAt can be in the future: that is not "in the last 24 hours"
+    recent = [
+        (p, d)
+        for p in posts
+        if (d := created(p)) is not None and timedelta(0) <= now - d < BLUESKY_WINDOW
+    ]
+    authors = {str(p.get("author")) for p, _ in recent if p.get("author")}
     if len(recent) < MIN_BLUESKY_POSTS or len(authors) < MIN_BLUESKY_POSTS:
         return None
     top = max(recent, key=lambda pd: int(pd[0].get("likes") or 0) + int(pd[0].get("reposts") or 0))
