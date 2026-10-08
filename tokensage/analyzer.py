@@ -24,6 +24,7 @@ from tokensage.api.schemas import (
     Evidence,
     Flag,
     ImageInfo,
+    ImageLabel,
     Lineage,
     Market,
     NearDuplicate,
@@ -65,7 +66,17 @@ from tokensage.api.schemas import (
     XMatch as XMatchOut,
 )
 from tokensage.config import Settings
-from tokensage.engine import embed, meta, ocr, pairing, trends, wikilookup, xmatch, xsignals
+from tokensage.engine import (
+    embed,
+    meta,
+    ocr,
+    pairing,
+    trends,
+    vision,
+    wikilookup,
+    xmatch,
+    xsignals,
+)
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
 from tokensage.engine.context import ReferentCandidate
@@ -612,6 +623,37 @@ async def _meta_counts(
     )
 
 
+async def _vision_labels(
+    conn: asyncpg.Connection, ctx: Context, m: md.Metadata | None, image_bytes: bytes | None
+) -> vision.VisionResult | None:
+    """The logo's labels (ENABLE_CLIP, full depth): cached per image and model, else run.
+    A logo whose hashes and OCR came from cache has no bytes here; it is fetched once more
+    so the labels can be computed and cached. None when the model or the logo is missing."""
+    if m is None or not m.image_url:
+        return None
+    # first call loads the ONNX model from disk: keep that off the event loop
+    enc = await asyncio.to_thread(vision.default_encoder, ctx.settings)
+    if enc is None:
+        return None
+    key = m.image_content_key
+    cached = await fulldepth.vision_cached(conn, key, vision.load_config().model)
+    if cached is not None:
+        return cached
+    data = image_bytes
+    if data is None:
+        tmp = md.Metadata(status="ok", image_url=m.image_url)
+        await md.attach_image(ctx.http, tmp, ctx.settings)
+        data, key = tmp.image_bytes, tmp.image_content_key or key
+    if not data:
+        return None
+    res = await vision.label_async(enc, data)
+    if res.error is None and key:
+        await fulldepth.persist_vision(conn, key, res)
+    elif res.error:
+        log.info("vision.failed", key=key, error=res.error)
+    return res
+
+
 async def _persist_image(conn: asyncpg.Connection, key: str, out: EngineOutput) -> None:
     f = out.image.features
     if not f:
@@ -868,6 +910,10 @@ def build_document(
         summary = out.summary
         if out.ocr_lines:
             image.ocr = [ln.text for ln in out.ocr_lines]
+        if out.vision is not None and out.vision.top:
+            image.labels = [
+                ImageLabel(label=c, score=s, model=out.vision.model) for c, s in out.vision.top
+            ]
         if out.x is not None and x is not None:
             xa = out.x
             x.status = xa.status  # type: ignore[assignment]
@@ -1398,6 +1444,8 @@ async def analyze(
             # happens on the event loop, not on a blocked executor thread
             inp.ocr_lines, ocr_error = await ocr.read_async(image_bytes)
             inp.ocr_error = ocr_error  # keeps the 'OCR unavailable' caveat
+        if ctx.settings.enable_clip:
+            inp.vision = await _vision_labels(conn, ctx, m, image_bytes)
         inp.trend_index = await fulldepth.trend_index(conn, ctx.http)
         inp.x_media = await fulldepth.media_hashes(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)

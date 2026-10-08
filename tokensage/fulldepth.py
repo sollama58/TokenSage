@@ -15,7 +15,7 @@ import structlog
 
 from tokensage.api.schemas import XInfo
 from tokensage.config import Settings
-from tokensage.engine import ocr, trends
+from tokensage.engine import ocr, trends, vision
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.sources import bluesky, gnews, gtrends, wikipedia, xtrends
 from tokensage.sources.x import ProfileData, TweetData, fetch_profile, fetch_tweet
@@ -223,6 +223,25 @@ async def persist_ocr(conn: asyncpg.Connection, content_key: str, lines: list[oc
         content_key,
         [ln.text for ln in lines],
         [ln.confidence for ln in lines],
+    )
+
+
+async def vision_cached(
+    conn: asyncpg.Connection, content_key: str | None, model: str
+) -> vision.VisionResult | None:
+    """The logo's labels from an earlier analysis by this same model and head, if any."""
+    if not content_key:
+        return None
+    raw = await conn.fetchval("select labels from image where content_key=$1", content_key)
+    res = vision.from_json(raw)
+    return res if res is not None and res.model == model else None
+
+
+async def persist_vision(
+    conn: asyncpg.Connection, content_key: str, res: vision.VisionResult
+) -> None:
+    await conn.execute(
+        "update image set labels=$2 where content_key=$1", content_key, vision.to_json(res)
     )
 
 

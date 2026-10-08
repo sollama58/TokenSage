@@ -439,12 +439,16 @@ If nothing fits, report "ticker unrelated to name" (itself mildly informative).
   - Check PNG `tEXt` `parameters`/`prompt` chunks, EXIF `Software`, and C2PA. A Stable Diffusion prompt chunk is a free textual description of the image.
   - Absence of these markers means nothing.
 - **No NSFW / image moderation.** This is an owner decision: TokenSage analyses meaning, and the consumer app decides what to show. Do not add an NSFW classifier.
-- **Optional visual labels (flag `ENABLE_CLIP`, needs a 2 GB worker):**
-  - CLIP ViT-B/32 **vision tower only** in ONNX (~0.34 GB file, ~0.5 GB RSS), with **text-label embeddings precomputed offline** for ~300 prompts ("a dog wearing a hat", "Pepe the frog meme", "a squirrel", "a baby hippo", "pixel art", "a photograph of food"…).
-  - Report labels only above an absolute cosine threshold (~0.25–0.28; tune it), marked "visual guess".
-  - Embeddings also give semantic near-duplicate detection.
-  - MobileCLIP-S0 is smaller and better, but its Apple licence needs review.
-  - **This is local inference, not an external AI API**, and the engine must work fully without it.
+- **Visual labels (flag `ENABLE_CLIP`, built in rules 0.24.0, on in render.yaml; full depth only):**
+  - **Model:** SigLIP base/16-224 **image tower only**, 8-bit ONNX (`Xenova/siglip-base-patch16-224`, Apache-2.0, ~100 MB file, ~220 MB RSS, ~250–400 ms per logo on one or two CPU threads). The Docker image downloads it at build time, pinned by revision and SHA-256, to `/app/models/siglip` (`VISION_MODEL_PATH`). It beat CLIP B/32 and B/16 on our logos (zero-shot top-1 0.64 vs 0.58).
+  - **Head:** `data/vision_head.npz` scores the image vector against 25 visual classes (`data/vision_labels.yaml`): half a linear probe fitted on 743 hand-labelled pump.fun logos (`tests/golden/vision_logos.yaml`), half zero-shot similarity to each class's prompts, embedded offline. No text model ships. `scripts/build_vision_head.py` rebuilds both files and `--report` grades a tune-only head on the held-out logos.
+  - **Classes:** animals (dog, cat, frog, monkey, hippo, squirrel, bird, bull/bear, fish, other), Pepe/Wojak, robot (→ `ai_agent`), food, Trump/politician (→ `political`), Elon, crude; plus sinks with no label (wordmark/icon, coin/emblem, person, cartoon character, object, screenshot, flag, nothing) that absorb logos about nothing in particular.
+  - **Cutoffs:** per class, the lowest score that was right ≥ 90% of the time out-of-fold (and ≥ 3 times); classes that never got there (Elon, hippo, squirrel, fish, crude so far) do not emit. On 274 held-out logos the emitted guesses were right 96% of the time and covered 68% of the logos showing an emitting class.
+  - **Evidence:** `kind: "vision"`, `where: "image"`, `source: "vision:<class>"`, detail "vision guess: the logo looks like a dog (score 0.98)", weight 0.25–0.4 (hard cap 0.4). Never a referent. It counts when the name, ticker or description found the same top-level category (a second, independent witness) or found no topic at all; a dog on a coin that is about Trump is the mascot and is dropped. On the 400 hand-labelled audit coins this lifts main-category (0.5) recall 0.48 → 0.51 and 0.38 → 0.42 (holdout) at equal or better precision, and leaves 19 fewer coins with no category.
+  - **Caching:** the top three classes are stored in `image.labels` with the head's `model` id (`siglip-b16-q8/1`); a logo is labelled once per head. A logo whose hashes and OCR came from cache is fetched once more when it has no labels yet. Reported as `image.labels[] {label, score, model}`.
+  - **Safe to leave half-configured:** with the flag off nothing is loaded; with the model missing one `vision_model_unavailable` warning is logged and the analysis runs as before.
+  - **This is local inference, not an external AI API**, and the engine works fully without it.
+  - MobileCLIP-S0 is smaller, but its Apple licence needs review. Semantic near-duplicates from the embeddings are not built.
 
 ### 5.6a Optional embedding classifier (flag `ENABLE_EMBED`, off by default)
 - **What:** a local MiniLM-class sentence encoder in ONNX (e.g. `all-MiniLM-L6-v2`, ~90 MB file, ~150 MB RSS) embeds the token's **name** (segmented), **description** and **linked tweet text**. Each text gets the taxonomy label whose prompt in `data/embed_labels.yaml` is nearest by cosine, when that clears `threshold` and beats the next label by `min_margin`.
