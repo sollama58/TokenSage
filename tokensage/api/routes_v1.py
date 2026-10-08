@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from tokensage import __version__, queue
-from tokensage.analyzer import LEXICON_VERSION, RULES_VERSION
 from tokensage.api import errors, service
 from tokensage.api.auth import ApiKey, require_api_key
 from tokensage.api.schemas import (
@@ -30,6 +29,7 @@ from tokensage.api.schemas import (
 )
 from tokensage.resolve.pump_ca import parse_ca
 from tokensage.taxonomy import load_taxonomy
+from tokensage.versions import LEXICON_VERSION, RULES_VERSION
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
@@ -153,7 +153,11 @@ async def _token(
     if res.status == "pending":
         response.status_code = 202
         response.headers["Retry-After"] = "3"
-    response.headers.update(await service.quota_headers(request.app.state.pool, key))
+    # a response served from the cache created no job, so charged nothing: the counters the
+    # auth step just read are current
+    cache_hit = res.analysis is not None and res.freshness.from_cache
+    known = getattr(request.state, "usage", None) if cache_hit else None
+    response.headers.update(await service.quota_headers(request.app.state.pool, key, known))
     _apply_include(res, include)
     return res
 

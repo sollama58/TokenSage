@@ -19,6 +19,7 @@ from tokensage.engine import ocr, trends
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.sources import bluesky, gnews, gtrends, wikipedia, xtrends
 from tokensage.sources.x import ProfileData, TweetData, fetch_profile, fetch_tweet
+from tokensage.versions import PAID_X_USAGE_KEY as PAID_X_USAGE_KEY
 
 log = structlog.get_logger("fulldepth")
 
@@ -34,9 +35,6 @@ MAX_NEWS_LOOKUPS = 2
 
 
 # ----------------------------------------------------------------- X content with caching
-
-
-PAID_X_USAGE_KEY = "_paid_x"  # api_usage row counting paid X calls per UTC day
 
 
 async def _paid_x_allowed(conn: asyncpg.Connection, settings: Settings) -> bool:

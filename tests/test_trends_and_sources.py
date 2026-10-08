@@ -160,6 +160,43 @@ def test_ocr_reads_ticker_and_feeds_engine() -> None:
     assert ocr.read(b"junk")[1] is not None
 
 
+async def test_ocr_read_async_waits_on_the_loop_not_on_a_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jobs queued for the single OCR slot must not occupy executor threads meanwhile."""
+    import asyncio
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    running = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def slow_read(data: bytes) -> tuple[list[ocr.OcrLine], str | None]:
+        nonlocal running, peak
+        with guard:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.05)
+        with guard:
+            running -= 1
+        return [ocr.OcrLine(data.decode(), 1.0)], None
+
+    monkeypatch.setattr(ocr, "_read", slow_read)
+    ocr.set_concurrency(1)
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=2))
+    reads = [asyncio.create_task(ocr.read_async(f"t{i}".encode())) for i in range(6)]
+    await asyncio.sleep(0.01)
+    t0 = time.perf_counter()
+    await asyncio.to_thread(lambda: None)  # other CPU work still gets a thread
+    assert time.perf_counter() - t0 < 0.04
+    results = await asyncio.gather(*reads)
+    assert [r[0][0].text for r in results] == [f"t{i}" for i in range(6)]
+    assert peak == 1
+
+
 def test_gnews_name_query() -> None:
     assert gnews.name_query("Le Chonk") == "Le Chonk"
     assert gnews.name_query("Peanut the Squirrel 2.0") == "Peanut the Squirrel"
@@ -216,3 +253,11 @@ def test_name_in_the_news_raises_news_event() -> None:
     assert [h.term.source for h in out.trend_hits] == ["news"]
     assert "news_event" in dict(out.agg.categories)
     assert any(e.kind == "trend" and e.label == "news_event" for e in out.evidence)
+
+
+def test_ocr_error_from_the_analyzer_keeps_its_caveat() -> None:
+    """The analyzer runs OCR before the engine; a failed read still reaches the document."""
+    pre = EngineInput("m", "Fluffy", "FLUF", None, b"logo", None, ocr_lines=[], ocr_error="boom")
+    out = run_full(pre)
+    assert out.ocr_error == "boom"
+    assert "OCR unavailable: boom" in out.caveats

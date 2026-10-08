@@ -227,6 +227,54 @@ async def test_db_context_finds_logo_near_duplicates_and_prior_reads(
 
 
 @needs_db
+async def test_logo_lookup_follows_hashes_written_after_the_metadata(
+    db: asyncpg.Connection,
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    """token.logo_phash (the lookup's index) follows the image and metadata writes in the
+    order the analyzer makes them: metadata first, the image's hashes later."""
+    from tokensage import analyzer
+
+    async def found() -> set[str]:
+        ctx = SimpleNamespace(settings=settings, http=None)
+        r = SimpleNamespace(mint="mine", created_at=NOW, creator=None)
+        dbc = await analyzer._db_context(
+            db,
+            ctx,
+            r,
+            None,
+            None,
+            "ZED",
+            "zed",
+            [],
+            logo=_feats(),  # type: ignore[arg-type]
+        )
+        return {c.mint for c in dbc.image_candidates if c.mint}
+
+    async def stored(mint: str) -> int | None:
+        return await db.fetchval("select logo_phash from token where mint=$1", mint)
+
+    await _token(db, "mine", NOW)
+    await _token(db, "copy", NOW - timedelta(hours=2))
+    await db.execute(
+        "insert into token_metadata (mint, status, image_content_key) values ('copy', 'ok', 'k1')"
+    )
+    await db.execute("insert into image (content_key) values ('k1')")
+    assert await stored("copy") is None
+    assert await found() == set()
+
+    await db.execute("update image set phash=$1 where content_key='k1'", LOGO)  # hashed
+    assert await stored("copy") == LOGO
+    assert await found() == {"copy"}
+
+    # the logo changed to an unrelated one that is already hashed
+    await db.execute("insert into image (content_key, phash) values ('k2', $1)", ~LOGO)
+    await db.execute("update token_metadata set image_content_key='k2' where mint='copy'")
+    assert await stored("copy") == ~LOGO
+    assert await found() == set()
+
+
+@needs_db
 async def test_referent_and_category_waves_count_recent_reads(
     db: asyncpg.Connection,
 ) -> None:
@@ -349,3 +397,52 @@ def test_a_generic_inherited_referent_does_not_override_the_copys_own_kind() -> 
     # with no theme of its own the copy is still a frog coin
     bare = _run("Blorbo", "BLORBO", late)
     assert bare.referent_read is not None and bare.referent_read.label == "frog"
+
+
+@needs_db
+async def test_copied_coins_curves_are_read_in_one_batched_call(
+    db: asyncpg.Connection,
+) -> None:
+    """Up to three copied coins: a fresh stored curve is reused, the stale and unknown ones
+    come from one getMultipleAccounts (1 credit), and known coins are stored back."""
+    from tests.fixtures.chain import MISSING, RPC, SPL_MINT, T22_MINT, USDC, FakeChain
+    from tokensage import analyzer
+    from tokensage.resolve import resolver
+    from tokensage.resolve.rpc import SolanaRpc
+
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "a", "A", "", progress=0.25)
+    chain.add_spl_pump(SPL_MINT, "b", "B", "", complete=True)
+    now = datetime.now(UTC)
+    for m in (T22_MINT, SPL_MINT, USDC):
+        await db.execute("insert into token (mint) values ($1)", m)
+    await db.execute(
+        """insert into token_market (mint, complete, curve_progress, updated_at) values
+           ($1, false, 0.1, $3), ($2, false, 0.9, $4)""",
+        T22_MINT,
+        USDC,
+        now - timedelta(hours=1),  # stale: read again
+        now - timedelta(seconds=10),  # fresh: no read
+    )
+    out = SimpleNamespace(
+        copy_of=[{"mint": m, "recent": True} for m in (T22_MINT, USDC, SPL_MINT, MISSING)],
+        lineage=None,
+        agg=SimpleNamespace(referent=None, categories=[]),
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(chain.handle)) as http:
+        ctx = SimpleNamespace(rpc=SolanaRpc(RPC, http))
+        r = SimpleNamespace(mint="mine", created_at=now)
+        await resolver.initial_real_token_reserves(ctx.rpc)  # per process; not counted below
+        chain.calls.clear()
+        ex = await analyzer._read_extras(db, ctx, r, out)  # type: ignore[arg-type]
+    assert chain.calls == ["getMultipleAccounts"]  # T22 and SPL together; MISSING is 4th
+    assert set(ex.markets) == {T22_MINT, USDC, SPL_MINT}
+    t22 = ex.markets[T22_MINT]
+    assert t22.complete is False and t22.curve_progress == pytest.approx(0.25)
+    assert ex.markets[USDC].curve_progress == pytest.approx(0.9)
+    assert ex.markets[SPL_MINT].complete is True and ex.markets[SPL_MINT].curve_progress == 1.0
+    stored = {
+        row["mint"]: row["curve_progress"]
+        for row in await db.fetch("select mint, curve_progress from token_market")
+    }
+    assert stored[T22_MINT] == pytest.approx(0.25) and stored[SPL_MINT] == 1.0

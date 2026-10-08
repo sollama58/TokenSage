@@ -34,3 +34,14 @@ async def test_create_pool_no_wait_fails_fast() -> None:
     with pytest.raises(OSError):
         await db.create_pool(dsn, wait_s=0)
     assert time.monotonic() - t0 < 1.0
+
+
+async def test_pool_plans_every_statement_with_its_values(migrated_db: str) -> None:
+    # a generic plan cannot see the time bounds of the same-name/meta lookups and scans the
+    # whole created_at index; the pool asks for a custom plan on every execution
+    pool = await db.create_pool(migrated_db, min_size=1, max_size=1)
+    try:
+        async with pool.acquire() as conn:
+            assert await conn.fetchval("show plan_cache_mode") == "force_custom_plan"
+    finally:
+        await pool.close()

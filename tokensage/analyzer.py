@@ -65,7 +65,7 @@ from tokensage.api.schemas import (
     XMatch as XMatchOut,
 )
 from tokensage.config import Settings
-from tokensage.engine import embed, meta, pairing, trends, wikilookup, xmatch, xsignals
+from tokensage.engine import embed, meta, ocr, pairing, trends, wikilookup, xmatch, xsignals
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
 from tokensage.engine.context import ReferentCandidate
@@ -86,7 +86,7 @@ from tokensage.net import metrics
 from tokensage.resolve import metadata as md
 from tokensage.resolve import pair as pair_lookup
 from tokensage.resolve.fees import creator_fee_to_dict
-from tokensage.resolve.resolver import Resolved, ResolveError, curve_now, resolve
+from tokensage.resolve.resolver import Resolved, ResolveError, curves_now, resolve
 from tokensage.resolve.rpc import SolanaRpc
 from tokensage.sources import bluesky, gnews, lookups
 
@@ -148,9 +148,15 @@ class Context:
             ),
             follow_redirects=False,
             # the transport meters every upstream call for the admin panel; the pool limits
-            # live on it, since httpx ignores `limits` when a transport is passed
+            # live on it, since httpx ignores `limits` when a transport is passed. Sized for
+            # 8 slots that each hedge up to 4 IPFS gateways (or fetch 4 X images) plus a trend
+            # poll: with 20, hung gateways queued the hedges behind the pool and doubled fetch
+            # latency. Idle connections live 30 s, not httpx's 5 s: at ~700 analyses/h the gap
+            # between calls to one host averages ~5 s, so a third of calls paid a new handshake
             transport=metrics.MeteredTransport(
-                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
+                limits=httpx.Limits(
+                    max_connections=64, max_keepalive_connections=32, keepalive_expiry=30.0
+                )
             ),
         )
         metrics.meter.configure(
@@ -239,6 +245,21 @@ async def _x_reuse(
 # ----------------------------------------------------------------- database context
 
 
+async def _external_namesakes(
+    http: httpx.AsyncClient, ticker: str | None, name_compact: str
+) -> list[SameNameToken]:
+    """Best-effort same-name coins from pump.fun and DexScreener search; never raises."""
+    try:
+        ext = await asyncio.gather(
+            lookups.pumpfun_search(http, ticker or name_compact),
+            lookups.dexscreener_search(http, ticker or name_compact),
+        )
+        return lookups.filter_same_name([*ext[0], *ext[1]], ticker, name_compact)
+    except Exception as e:  # noqa: BLE001 - lookups are optional
+        log.info("lookups.failed", error=str(e)[:120])
+        return []
+
+
 async def _db_context(
     conn: asyncpg.Connection,
     ctx: Context,
@@ -249,6 +270,33 @@ async def _db_context(
     name_compact: str,
     meta_words: list[str] | None = None,
     logo: image_stage.ImageFeatures | None = None,
+) -> DbContext:
+    # The external searches only need the name and ticker: they run while the database
+    # queries below do, instead of adding their round trip after them.
+    ext_task = (
+        asyncio.create_task(_external_namesakes(ctx.http, ticker, name_compact))
+        if ticker or name_compact
+        else None
+    )
+    try:
+        return await _db_context_queries(
+            conn, ctx, r, x, ticker, name_compact, meta_words, logo, ext_task
+        )
+    finally:
+        if ext_task is not None and not ext_task.done():
+            ext_task.cancel()
+
+
+async def _db_context_queries(
+    conn: asyncpg.Connection,
+    ctx: Context,
+    r: Resolved,
+    x: XInfo | None,
+    ticker: str | None,
+    name_compact: str,
+    meta_words: list[str] | None,
+    logo: image_stage.ImageFeatures | None,
+    ext_task: asyncio.Task[list[SameNameToken]] | None,
 ) -> DbContext:
     dbc = DbContext()
     if x is not None:
@@ -309,17 +357,6 @@ async def _db_context(
                 for x_ in rows
             }.values()
         )
-        term = ticker or name_compact
-        try:
-            ext = await asyncio.gather(
-                lookups.pumpfun_search(ctx.http, term),
-                lookups.dexscreener_search(ctx.http, term),
-            )
-            found = lookups.filter_same_name([*ext[0], *ext[1]], ticker, name_compact)
-            known = {t.mint for t in dbc.same_name} | {r.mint}
-            dbc.same_name += [t for t in found if t.mint not in known]
-        except Exception as e:  # noqa: BLE001 - lookups are optional
-            log.info("lookups.failed", error=str(e)[:120])
     if meta_words:
         dbc.meta_counts = await _meta_counts(conn, r, meta_words, **meta_cfg)
     # the most-traded tokens of the snapshot nearest this launch (a day either side)
@@ -342,34 +379,11 @@ async def _db_context(
         for row in rows
     ]
     dbc.gazetteer = await gazetteer_db.current(conn)
-    # known coins from the database (seed lives in data/, cron adds more)
-    rows = await conn.fetch(
-        """select id, symbol, name, aliases, lore, categories, mint, logo_phash, source
-           from known_coin"""
-    )
-    for row in rows:
-        dbc.extra_coins.append(
-            KnownCoin(
-                symbol=row["symbol"],
-                name=row["name"],
-                aliases=tuple(row["aliases"] or []),
-                chain="solana",
-                lore=row["lore"] or "",
-                categories=tuple(row["categories"] or []),
-                referent_label=row["name"],
-                referent_kind="coin",
-                referent_desc=row["lore"] or "",
-                source=row["source"] or "db",
-                mint=row["mint"],
-                logo_phash=row["logo_phash"],
-            )
-        )
-    # image hash candidates: known-coin logos + recent token images
-    for c in dbc.extra_coins:
-        if c.logo_phash is not None:
-            dbc.image_candidates.append(
-                image_stage.Candidate(f"known:{c.symbol}", c.logo_phash, known_coin=c.symbol)
-            )
+    # known coins from the database (seed lives in data/, cron adds more), and their logos
+    # as image hash candidates (recent token images are added below)
+    coins, logos = await _known_coins(conn)
+    dbc.extra_coins = list(coins)
+    dbc.image_candidates.extend(logos)
     # Logos of tokens launched before this one (within the logo scan window) that are
     # near-duplicates of its own, plain or mirrored. Postgres does the Hamming filter, so
     # only matches come back, however many coins launched. The same image file (same
@@ -380,14 +394,9 @@ async def _db_context(
             ctx.settings.copycat_window_days,
             int(lineage_stage.config(k).get("logo_scan_days", 7)),
         )
-        logo_sql = """from image i
-           join token_metadata tm on tm.image_content_key = i.content_key
-           join token t on t.mint = tm.mint
-           where i.phash is not null and tm.mint <> $1
+        window = """t.mint <> $1
              and t.created_at >= coalesce($2, now()) - make_interval(days => $3)
-             and t.created_at <= coalesce($2, now())
-             and least(bit_count((i.phash # $4::bigint)::bit(64)),
-                       bit_count((i.phash # $5::bigint)::bit(64))) <= $6"""
+             and t.created_at <= coalesce($2, now())"""
         args = (
             r.mint,
             r.created_at,
@@ -396,11 +405,33 @@ async def _db_context(
             logo.phash_mirror,
             int(k.scoring.get("logo_phash_edited", 14)),
         )
-        rows = await conn.fetch(
-            f"""select i.content_key, i.phash, tm.mint, t.created_at, t.name, t.symbol
-                {logo_sql} order by t.created_at desc limit {LOGO_ROWS}""",
-            *args,
-        )
+        # token.logo_phash (kept by triggers) narrows the window to the near matches from
+        # one index (token_logo_idx) without visiting token_metadata and image per coin;
+        # the join below re-checks each against the image's own hash
+        near = [
+            row["mint"]
+            for row in await conn.fetch(
+                f"""select t.mint from token t
+                     where t.logo_phash is not null and {window}
+                       and least(bit_count((t.logo_phash # $4::bigint)::bit(64)),
+                                 bit_count((t.logo_phash # $5::bigint)::bit(64))) <= $6""",
+                *args,
+            )
+        ]
+        logo_sql = f"""from token t
+           join token_metadata tm on tm.mint = t.mint
+           join image i on i.content_key = tm.image_content_key
+           where t.mint = any($7::text[]) and i.phash is not null and {window}
+             and least(bit_count((i.phash # $4::bigint)::bit(64)),
+                       bit_count((i.phash # $5::bigint)::bit(64))) <= $6"""
+        rows = []
+        if near:
+            rows = await conn.fetch(
+                f"""select i.content_key, i.phash, tm.mint, t.created_at, t.name, t.symbol
+                    {logo_sql} order by t.created_at desc limit {LOGO_ROWS}""",
+                *args,
+                near,
+            )
         if len(rows) == LOGO_ROWS:
             # a logo reused thousands of times: keep the recent ones (the counts) and add
             # the earliest (the original, logo_first_seen_at)
@@ -410,6 +441,7 @@ async def _db_context(
                     f"""select i.content_key, i.phash, tm.mint, t.created_at, t.name, t.symbol
                         {logo_sql} order by t.created_at limit 10""",
                     *args,
+                    near,
                 ),
             ]
         for row in rows:
@@ -423,6 +455,11 @@ async def _db_context(
                     symbol=row["symbol"],
                 )
             )
+    if ext_task is not None:
+        # nothing above reads same_name: the external namesakes join it here, after ours
+        found = await ext_task
+        known = {t.mint for t in dbc.same_name} | {r.mint}
+        dbc.same_name += [t for t in found if t.mint not in known]
     dbc.originals = await _prior_reads(
         conn,
         lineage_stage.candidate_mints(
@@ -443,6 +480,53 @@ async def _db_context(
 
 
 LOGO_ROWS = 5000
+
+
+# The known_coin table, materialised once per change: the knowledge cron rewrites it about
+# weekly, while every read used to fetch and rebuild all of it (~1,250 rows). A signature
+# query (row count, newest update, xmin sum: any insert, update or delete changes it) runs
+# on every read, so a change is seen by the next read, exactly as before.
+_known_cache: tuple[tuple[Any, ...], list[KnownCoin], list[image_stage.Candidate]] | None = None
+
+
+async def _known_coins(
+    conn: asyncpg.Connection,
+) -> tuple[list[KnownCoin], list[image_stage.Candidate]]:
+    global _known_cache
+    row = await conn.fetchrow(
+        """select count(*) n, max(updated_at) u, sum(xmin::text::bigint) x from known_coin"""
+    )
+    sig = (row["n"], row["u"], row["x"])
+    if _known_cache and _known_cache[0] == sig:
+        return _known_cache[1], _known_cache[2]
+    rows = await conn.fetch(
+        """select id, symbol, name, aliases, lore, categories, mint, logo_phash, source
+           from known_coin"""
+    )
+    coins = [
+        KnownCoin(
+            symbol=row["symbol"],
+            name=row["name"],
+            aliases=tuple(row["aliases"] or []),
+            chain="solana",
+            lore=row["lore"] or "",
+            categories=tuple(row["categories"] or []),
+            referent_label=row["name"],
+            referent_kind="coin",
+            referent_desc=row["lore"] or "",
+            source=row["source"] or "db",
+            mint=row["mint"],
+            logo_phash=row["logo_phash"],
+        )
+        for row in rows
+    ]
+    logos = [
+        image_stage.Candidate(f"known:{c.symbol}", c.logo_phash, known_coin=c.symbol)
+        for c in coins
+        if c.logo_phash is not None
+    ]
+    _known_cache = (sig, coins, logos)
+    return coins, logos
 
 
 def _compact(s: str) -> str:
@@ -494,9 +578,15 @@ async def _meta_counts(
     bounds = """t.created_at > coalesce($1, now()) - make_interval(days => $3)
                 and t.created_at <= coalesce($1, now()) + make_interval(hours => $2)"""
     recent = """t.created_at >= coalesce($1, now()) - make_interval(hours => $2)"""
+    # the totals count every token of the window but this one: count the window without a
+    # mint filter (an index-only scan of token_created_at_idx, no heap pages) and take this
+    # token's own row off with a primary-key lookup
     tot = await conn.fetchrow(
-        f"""select count(*) filter (where {recent}) as recent, count(*) as total
-            from token t where {bounds} and t.mint <> $4""",
+        f"""select a.recent - s.recent as recent, a.total - s.total as total
+            from (select count(*) filter (where {recent}) as recent, count(*) as total
+                  from token t where {bounds}) a,
+                 (select count(*) filter (where {recent}) as recent, count(*) as total
+                  from token t where {bounds} and t.mint = $4) s""",
         r.created_at,
         window_hours,
         history_days,
@@ -1197,12 +1287,23 @@ async def analyze(
         # The caller already has the metadata: skip the IPFS round trip, still fetch the
         # image (guarded) so the logo can be hashed and compared.
         m = md.from_hints(hints)
-        await md.attach_image(ctx.http, m, ctx.settings)
-        image_bytes = m.image_bytes
-        if m.image_content_key:
-            # register the hinted logo so its hashes are cached and it can be matched
-            await md.persist_image_row(conn, m)
-            cached_feats = await _cached_image_features(conn, m.image_content_key)
+        # An IPFS logo already hashed (and, at full depth, already OCR'd) needs no download:
+        # its content key comes from the CID, and the bytes would only be hashed again.
+        ipfs_key = md.ipfs_content_key(m.image_url)
+        if ipfs_key:
+            cached_feats = await _cached_image_features(conn, ipfs_key)
+            if cached_feats is not None and depth == "full":
+                if await fulldepth.ocr_cached(conn, ipfs_key) is None:
+                    cached_feats = None  # OCR has not run on it yet: it needs the bytes
+        if cached_feats is not None:
+            m.image_content_key = ipfs_key
+        else:
+            await md.attach_image(ctx.http, m, ctx.settings)
+            image_bytes = m.image_bytes
+            if m.image_content_key:
+                # register the hinted logo so its hashes are cached and it can be matched
+                await md.persist_image_row(conn, m)
+                cached_feats = await _cached_image_features(conn, m.image_content_key)
         assert hint_use is not None
         for f, chain_v in (("name", r.name), ("symbol", r.symbol)):
             hv = getattr(m, f)
@@ -1290,7 +1391,13 @@ async def analyze(
         inp.x_url_handle = x.ref.url_handle if x else None
         inp.tweet, inp.profile = tweet, profile
         inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
-        inp.run_ocr = inp.ocr_lines is None and image_bytes is not None
+        ran_ocr = inp.ocr_lines is None and bool(image_bytes)
+        ocr_error: str | None = None
+        if ran_ocr and image_bytes:
+            # OCR here rather than inside run_full: waiting for the single OCR slot then
+            # happens on the event loop, not on a blocked executor thread
+            inp.ocr_lines, ocr_error = await ocr.read_async(image_bytes)
+            inp.ocr_error = ocr_error  # keeps the 'OCR unavailable' caveat
         inp.trend_index = await fulldepth.trend_index(conn, ctx.http)
         inp.x_media = await fulldepth.media_hashes(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
@@ -1300,10 +1407,10 @@ async def analyze(
         news_hits, news_status = await _name_news(conn, ctx, inp)
         bsky_hits, bsky_status = await _name_bluesky(conn, ctx, inp)
         inp.news_hits = news_hits + bsky_hits
-        # CPU-bound (normalisation, image hashing, OCR): keep it off the event loop so the
+        # CPU-bound (normalisation, image hashing): keep it off the event loop so the
         # worker's other concurrent jobs keep making network progress meanwhile.
         out = await asyncio.to_thread(run_full, inp)
-        if inp.run_ocr and m and m.image_content_key and not out.ocr_error:
+        if ran_ocr and m and m.image_content_key and not ocr_error:
             await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
         await _attach_news(conn, ctx, out)
         out.trend_sources = [*inp.trend_index.sources, news_status, bsky_status]
@@ -1367,21 +1474,18 @@ async def _read_extras(
     if out.lineage is not None and out.lineage.original is not None:
         mints.append(out.lineage.original.mint)
 
-    async def curve(mint: str) -> None:
-        try:
-            state = await asyncio.wait_for(curve_now(conn, ctx.rpc, mint), CURVE_TIMEOUT_S)
-        except Exception as e:  # noqa: BLE001 - an optional enrichment
-            log.info("lineage.curve_failed", mint=mint, error=str(e)[:120])
-            return
-        if state is not None:
-            complete, progress, as_of = state
-            ex.markets[mint] = OriginalMarket(
-                complete=complete, curve_progress=progress, graduated_pool=None, as_of=as_of
-            )
-
-    # one connection: the reads share it, so they run one after another under one bound
-    for mint in list(dict.fromkeys(mints))[:3]:
-        await curve(mint)
+    # the copied coins' curves: stored when fresh, else one batched read (1 credit for all)
+    try:
+        states = await curves_now(
+            conn, ctx.rpc, list(dict.fromkeys(mints))[:3], rpc_timeout_s=CURVE_TIMEOUT_S
+        )
+    except Exception as e:  # noqa: BLE001 - an optional enrichment
+        log.info("lineage.curve_failed", mints=mints, error=str(e)[:120])
+        states = {}
+    for mint, (complete, progress, as_of) in states.items():
+        ex.markets[mint] = OriginalMarket(
+            complete=complete, curve_progress=progress, graduated_pool=None, as_of=as_of
+        )
     launched = r.created_at
 
     def within(hours: int) -> int:

@@ -15,8 +15,9 @@ from tokensage.api.schemas import (
     UpstreamError,
     stored_analysis,
 )
+from tokensage.api.usage import Usage
 from tokensage.config import Settings
-from tokensage.engine.pipeline import RULES_VERSION
+from tokensage.versions import RULES_VERSION
 
 DEPTH_RANK = {"basic": 0, "full": 1}
 # A request that misses the cache while an identical job is committing reuses that job.
@@ -45,17 +46,38 @@ def default_max_age(settings: Settings, token_created_at: datetime | None) -> in
     return settings.max_age_old_s
 
 
+# Newest analysis at the requested depth or deeper, among the 5 newest versions ($2 is null
+# for basic: any depth will do; 'full' otherwise). The depth filter runs in SQL so only the
+# one document returned is detoasted, sent and decoded.
+_LATEST_SQL = """select doc, version from (
+      select doc, version, depth from analysis where mint=$1 order by version desc limit 5
+    ) t where $2::text is null or depth = $2 order by version desc limit 1"""
+
+
+def _min_depth(depth: str) -> str | None:
+    return "full" if DEPTH_RANK[depth] >= DEPTH_RANK["full"] else None
+
+
 async def latest_analysis(
     conn: asyncpg.Connection, mint: str, depth: str
 ) -> tuple[dict[str, Any], int] | None:
     """Newest analysis at the requested depth or deeper."""
-    rows = await conn.fetch(
-        "select doc, version, depth from analysis where mint=$1 order by version desc limit 5", mint
+    r = await conn.fetchrow(_LATEST_SQL, mint, _min_depth(depth))
+    return (r["doc"], r["version"]) if r else None
+
+
+async def _created_and_latest(
+    conn: asyncpg.Connection, mint: str, depth: str
+) -> tuple[datetime | None, tuple[dict[str, Any], int] | None]:
+    """token.created_at and latest_analysis() in one round trip."""
+    r = await conn.fetchrow(
+        f"""select (select created_at from token where mint=$1) as created_at, a.doc, a.version
+            from (select 1) one left join lateral ({_LATEST_SQL}) a on true""",
+        mint,
+        _min_depth(depth),
     )
-    for r in rows:
-        if DEPTH_RANK.get(r["depth"], 0) >= DEPTH_RANK[depth]:
-            return r["doc"], r["version"]
-    return None
+    assert r is not None
+    return r["created_at"], ((r["doc"], r["version"]) if r["version"] is not None else None)
 
 
 async def _recent_failure(
@@ -74,10 +96,6 @@ async def _recent_failure(
     if (datetime.now(UTC) - row["finished_at"]).total_seconds() > FAILED_COOLDOWN_S:
         return None
     return row["id"], row["error_code"], row["last_error"]
-
-
-async def token_created_at(conn: asyncpg.Connection, mint: str) -> datetime | None:
-    return await conn.fetchval("select created_at from token where mint=$1", mint)
 
 
 def _freshness(doc: dict[str, Any], max_age_s: int, from_cache: bool) -> Freshness:
@@ -106,13 +124,18 @@ async def _enforce_quotas(conn: asyncpg.Connection, key: ApiKey, depth: str, ref
     await usage.bump(conn, key.name, full=1 if depth == "full" else 0, refresh=1 if refresh else 0)
 
 
-async def quota_headers(pool: asyncpg.Pool, key: ApiKey) -> dict[str, str]:
+async def quota_headers(
+    pool: asyncpg.Pool, key: ApiKey, known: Usage | None = None
+) -> dict[str, str]:
     """Today's remaining daily quotas for this key (UTC day), so callers can back off
-    before a 429."""
+    before a 429. `known` is a usage.Usage already read in this request when nothing has
+    been charged since (it saves a round trip); otherwise the row is read again."""
     from tokensage.api import usage
 
-    async with pool.acquire() as conn:
-        u = await usage.today(conn, key.name)
+    u = known
+    if u is None:
+        async with pool.acquire() as conn:
+            u = await usage.today(conn, key.name)
     return {
         "X-Quota-Full-Remaining": str(max(0, key.full_per_day - u.full_calls)),
         "X-Quota-Refresh-Remaining": str(max(0, key.refresh_per_day - u.refreshes)),
@@ -137,9 +160,8 @@ async def get_or_enqueue(
     hints: dict[str, Any] | None = None,
 ) -> TokenResponse:
     async with pool.acquire() as conn:
-        created = await token_created_at(conn, mint)
+        created, cached = await _created_and_latest(conn, mint, depth)
         max_age = max_age_s if max_age_s is not None else default_max_age(settings, created)
-        cached = await latest_analysis(conn, mint, depth)
         outdated = False
         if cached and not refresh:
             doc, _ = cached

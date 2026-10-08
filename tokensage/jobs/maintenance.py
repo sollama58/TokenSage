@@ -1,4 +1,5 @@
-"""Cron entrypoint (hourly): requeue expired leases, prune old jobs and stale analyses."""
+"""Cron entrypoint (hourly): requeue expired leases, prune old jobs, stale analyses and
+expired lookup_cache rows."""
 
 from __future__ import annotations
 
@@ -161,6 +162,57 @@ async def _prune_usage(conn: asyncpg.Connection) -> int:
     )
 
 
+# lookup_cache rows for one name or phrase (Google News, Bluesky, Wikipedia) are upserted on
+# every full read and only checked against their TTL on read, so nothing else removes them.
+# The longest TTL is WIKI_TTL (7 days); past LOOKUP_KEEP a row is only a fallback for an
+# upstream outage that long. The trend rows (gtrends:seen, xtrends:seen) are single
+# long-lived keys and are left alone.
+LOOKUP_KEEP = "8 days"
+LOOKUP_PREFIXES = ["bsky:%", "gnews:%", "wiki:%"]
+
+
+async def _prune_lookup_cache(conn: asyncpg.Connection) -> int:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PRUNE_BUDGET_S
+    deleted = 0
+    while True:
+        n = _count(
+            await conn.execute(
+                f"""delete from lookup_cache where ctid in (
+                      select ctid from lookup_cache
+                      where fetched_at < now() - interval '{LOOKUP_KEEP}'
+                        and key like any($1::text[])
+                      limit $2)""",
+                LOOKUP_PREFIXES,
+                PRUNE_BATCH,
+                timeout=STEP_TIMEOUT_S,
+            )
+        )
+        deleted += n
+        if n < PRUNE_BATCH or loop.time() >= deadline:
+            return deleted
+
+
+# token.logo_phash is kept by triggers (migration 0017); this re-derives it for the coins
+# inside the logo scan window (data/meta.yaml logo_scan_days, 7) in case two concurrent
+# writes for one logo still left a copy behind. Index-backed on token_created_at_idx.
+LOGO_REPAIR_WINDOW = "8 days"
+
+
+async def _repair_logo_hashes(conn: asyncpg.Connection) -> int:
+    return _count(
+        await conn.execute(
+            f"""update token t set logo_phash = i.phash
+                  from token_metadata tm
+                  join image i on i.content_key = tm.image_content_key
+                 where tm.mint = t.mint
+                   and t.created_at > now() - interval '{LOGO_REPAIR_WINDOW}'
+                   and t.logo_phash is distinct from i.phash""",
+            timeout=STEP_TIMEOUT_S,
+        )
+    )
+
+
 async def _recall(conn: asyncpg.Connection) -> None:
     # the recall number (guide §5.9): how often the last day's analyses resolved a
     # referent, per depth; the series to watch as the gazetteer and rules change
@@ -174,6 +226,8 @@ STEPS: list[tuple[str, Callable[[asyncpg.Connection], Awaitable[Any]], bool]] = 
     ("pruned_jobs", _prune_jobs, True),
     ("pruned_analyses", _prune_analyses, True),
     ("pruned_usage_rows", _prune_usage, True),
+    ("pruned_lookup_cache", _prune_lookup_cache, True),
+    ("repaired_logo_hashes", _repair_logo_hashes, False),
     ("recall", _recall, False),
 ]
 

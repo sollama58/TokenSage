@@ -20,7 +20,7 @@ class CopyMatch:
 
 
 def _compact(s: str) -> str:
-    return "".join(ch for ch in s.lower() if ch.isalnum())
+    return "".join(filter(str.isalnum, s.lower()))
 
 
 # Surfaces that are naming *templates*, not the coin's subject: "Trump wif Hat" borrows the
@@ -62,8 +62,7 @@ def match_known(
             bump(c, "ticker_base", 0.7)
         # best name signal across ALL surfaces: exact > contains > fuzzy
         best: tuple[int, str, float, str] | None = None  # (rank, signal, score, surface)
-        for s in c.surfaces:
-            sc = _compact(s)
+        for s, sc in c.compact_surfaces:
             if len(sc) < 3 or not compact:
                 continue
             cand: tuple[int, str, float, str] | None = None
@@ -102,7 +101,7 @@ def match_known(
 def is_self(match: CopyMatch, n: Normalized) -> bool:
     """The token *is* the famous coin (same ticker and same name), not a copy of it.
     Markers that are part of the coin's own name ("inu" in Shiba Inu) don't count."""
-    surfaces = {_compact(s) for s in match.coin.surfaces}
+    surfaces = {sc for _, sc in match.coin.compact_surfaces}
     own = " ".join(match.coin.surfaces).casefold()
     foreign_markers = [m for m in n.markers if m.text.casefold().strip() not in own]
     return (

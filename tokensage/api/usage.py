@@ -18,19 +18,23 @@ class Usage:
 
 async def bump(
     conn: asyncpg.Connection, key_name: str, *, requests: int = 0, full: int = 0, refresh: int = 0
-) -> None:
-    await conn.execute(
+) -> Usage:
+    """Add to today's counters; returns the row as it stands after the update."""
+    row = await conn.fetchrow(
         """insert into api_usage (key_name, day, requests, full_calls, refreshes)
            values ($1, (now() at time zone 'utc')::date, $2, $3, $4)
            on conflict (key_name, day) do update set
              requests = api_usage.requests + excluded.requests,
              full_calls = api_usage.full_calls + excluded.full_calls,
-             refreshes = api_usage.refreshes + excluded.refreshes""",
+             refreshes = api_usage.refreshes + excluded.refreshes
+           returning requests, full_calls, refreshes""",
         key_name,
         requests,
         full,
         refresh,
     )
+    assert row is not None
+    return Usage(row["requests"], row["full_calls"], row["refreshes"])
 
 
 async def today(conn: asyncpg.Connection, key_name: str) -> Usage:
