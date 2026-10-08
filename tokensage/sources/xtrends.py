@@ -20,9 +20,14 @@ log = structlog.get_logger("xtrends")
 URL = "https://trends24.in/{region}"
 # "" is the worldwide list
 REGIONS = ("", "united-states/", "united-kingdom/", "canada/", "australia/")
+# The run between a card's timestamp and its list may not cross another timestamp: a page
+# with many timestamps and no list would otherwise rescan to the end once per timestamp.
 _CARD = re.compile(
-    r'data-timestamp=([\d.]+)[^>]*>.*?<ol class=["\']?trend-card__list["\']?>(.*?)</ol>', re.S
+    r"data-timestamp=([\d.]+)[^>]*>(?:(?!data-timestamp=)[\s\S])*?"
+    r'<ol class=["\']?trend-card__list["\']?>((?:(?!</ol>|data-timestamp=)[\s\S])*)</ol>'
 )
+# trends24's pages are ~300 KB; anything far larger is not the page we parse
+MAX_PAGE_CHARS = 3_000_000
 _LINK = re.compile(r"class=[\"']?trend-link[\"']?>([^<]+)</a>")
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 # X trends these every day: weekday and greeting topics name no subject, and would match any
@@ -107,7 +112,7 @@ async def trending(http: httpx.AsyncClient, region: str) -> list[TrendList] | No
         breaker.failure(src)
         log.info("xtrends.error", region=region, error=f"{type(e).__name__}: {e}"[:120])
         return None
-    lists = parse(r.text) if r.status_code == 200 else []
+    lists = parse(r.text[:MAX_PAGE_CHARS]) if r.status_code == 200 else []
     if not lists:
         breaker.failure(src)
         log.info("xtrends.bad_response", region=region, status=r.status_code)

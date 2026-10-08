@@ -979,10 +979,13 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         # a one-word name may be one word of what trends ("Leoncio" of "Leoncio Gomez"), and
         # a ticker that is not the name may be the whole of it; gate() below weeds out the
         # everyday words
+        support = " ".join(text for _, text in texts) + " " + ocr_text
+        # a whole-label name hit that gate() will drop ("West" trending as itself) must not
+        # stop the word-of-a-label lookup ("West" of "Kanye West")
         if (
             len(n.name_tokens) == 1
             and len(n.name_tokens[0]) >= trends.MIN_WORD_LEN
-            and not any(h.where == "name" for h in trend_hits)
+            and not any(h.where == "name" for h in trends.gate(list(trend_hits), support, k))
         ):
             word_hit = inp.trend_index.match_word(n.name_tokens[0], "name")
             if word_hit is not None and word_hit.term.term not in seen_terms:
@@ -999,8 +1002,14 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             if tick_hit is not None and tick_hit.term.term not in seen_terms:
                 seen_terms.add(tick_hit.term.term)
                 trend_hits.append(tick_hit)
+        # the name searches (Google News, Bluesky) both search the name: each source keeps
+        # its own hit, but not one for a label the index already matched
+        index_terms = {t.lower() for t in seen_terms}
+        named: set[tuple[str, str]] = set()
         for h in inp.news_hits or ():
-            if h.term.term.lower() not in {t.lower() for t in seen_terms}:
+            key = (h.term.source, h.term.term.lower())
+            if key[1] not in index_terms and key not in named:
+                named.add(key)
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
         # the coin's text may not spell the trend ("Elon", $PNUT): its referent can
@@ -1008,7 +1017,6 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             if h.term.term not in seen_terms:
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
-        support = " ".join(text for _, text in texts) + " " + ocr_text
         trend_hits = trends.gate(trend_hits, support, k)
         for h in trend_hits:
             h.score = trends.score(h, inp.trend_index)
