@@ -12,6 +12,10 @@ from tokensage.sources.x import ProfileData, TweetData
 BIG_ACCOUNT = 50_000
 FRESH_DAYS = 14
 MAX_MENTIONS = 5
+# A large or verified account behind the narrative post is a hint of a celebrity coin, never
+# the reason for one: what the post says and who the account is by name (the account-name
+# passes in the pipeline) carry the category. Below the 0.2 a category needs to show alone.
+ACCOUNT_SIZE_WEIGHT = 0.15
 MENTION = re.compile(r"(?<![\w@])@([A-Za-z0-9_]{1,15})\b")
 
 
@@ -159,7 +163,7 @@ def assess(
                         Ev(
                             "x_author",
                             "celebrity",
-                            0.4,
+                            ACCOUNT_SIZE_WEIGHT,
                             f"narrative tweet by a large account @{tweet.author_handle} "
                             f"({a.followers or '?'} followers, {a.verified_type or 'unverified'})",
                             "x",
@@ -246,7 +250,7 @@ def assess(
         a.flags.append(
             (
                 "recycled_x_account",
-                "high",
+                "info",
                 f"@{a.author_handle} has changed its username {a.username_changes} time(s)",
             )
         )
@@ -327,7 +331,7 @@ def _assess_related(
             Ev(
                 author_kind,
                 "celebrity",
-                0.35,
+                ACCOUNT_SIZE_WEIGHT,
                 f"{noun} by a large account @{qa.author_handle} "
                 f"({q.followers or '?'} followers, {q.verified_type or 'unverified'})",
                 "x",

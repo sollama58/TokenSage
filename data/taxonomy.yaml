@@ -122,8 +122,8 @@ flags:
     severity: warn
     description: Ticker or name uses look-alike Unicode characters.
   - code: recycled_x_account
-    severity: high
-    description: The linked X account has changed its username before.
+    severity: info
+    description: The linked X account has changed its username before (context about the account, not a verdict on the coin; info since rules 0.23.0).
   - code: borrowed_narrative
     severity: info
     description: The linked tweet is by an unrelated notable account; the coin borrows its narrative.

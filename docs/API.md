@@ -252,7 +252,18 @@ linked profile or the linked post's author was fetched.
 | `account.posts_about_coin` | Always `null` for now: no free source counts an account's posts about a coin |
 | `account.name_changes`, `verified_type` | Username changes (X "about this account") and verification type (`blue`, `business`, `government`, `legacy`) |
 | `account.made_for_coin` | Created less than a day before the token (or after it) **and** its handle or display name is the coin's name or ticker (affixes such as `official`, `coin`, `sol`, `onsol`, `cto` aside). Raises `x_account_made_for_coin` (info) |
-| `credibility` | 0–1, how much the account is worth regardless of the match. A weighted mean of age at launch (log scale, full at a year; 0.35), followers (log scale, full at 100k; 0.35), posts (log scale, full at 3,000; 0.15) and verification (business/government 1.0, legacy 0.8, blue 0.3; 0.15), over whichever of these are known. Then halved for an account made for the coin, halved again for renamed accounts, ×0.3 for a spoofed tweet handle, and divided by `1 + 0.15 × (reuse_rank − 1)` (floor ×0.4) when other coins linked the same post or profile first. `null` when no account is known. **Uncalibrated until Phase 6** |
+| `credibility` | 0–1, how much the account is worth regardless of the match. A weighted mean of age at launch (log scale, full at a year; 0.35), followers (log scale, full at 100k; 0.35), posts (log scale, full at 3,000; 0.15) and verification (business/government 1.0, legacy 0.8, blue 0.3; 0.15), over whichever of these are known. Then ×0.85 for an account made for the coin, ×0.85 for renamed accounts, ×0.3 for a spoofed tweet handle, and divided by `1 + 0.05 × (reuse_rank − 1)` (floor ×0.75) when other coins linked the same post or profile first. Before rules 0.23.0 the first two halved the score and reuse used `0.15` with a floor of ×0.4. `null` when no account is known. **Uncalibrated until Phase 6** |
+
+**Context, not a verdict (rules 0.23.0).** What the post says and the names of the accounts
+involved carry the read. The account's age, size, renames and reuse are shown here and in the
+info flags `recycled_x_account`, `fresh_x_account` and `x_account_made_for_coin`, and they
+barely move anything else. Two uses remain: a profile link matched only by its own name is
+still capped in `match.fit` unless the account predates the coin by a day (a name the deployer
+just typed says nothing), and a large or verified account's post is still read as someone
+else's narrative rather than the launch post. A large or verified narrative author adds a `celebrity` hint of 0.15, too little to make the
+category on its own (0.4 and 0.35 before); a celebrity coin needs the account's name or the
+post's text to name the person. `recycled_x_account` is `info` (it was `high`). Weigh
+`credibility` lightly.
 
 Rough guide: a profile made minutes before the coin with a handful of followers scores under
 0.1; a year-old account with a few hundred followers about 0.5–0.65; an established verified

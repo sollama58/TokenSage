@@ -238,7 +238,9 @@ def test_deleted_and_recycled() -> None:
         joined=datetime(2020, 1, 1, tzinfo=UTC),
     )
     a = xsignals.assess("profile", None, None, p, TOKEN_T, None, "m", [])
-    assert a.relation == "official_account" and "recycled_x_account" in {f[0] for f in a.flags}
+    assert a.relation == "official_account"
+    # a renamed account is context about the account, not a verdict on the coin (rules 0.23.0)
+    assert ("recycled_x_account", "info") in {(f[0], f[1]) for f in a.flags}
     a = xsignals.assess("search", None, None, None, TOKEN_T, None, "m", [])
     assert a.relation == "search_only"
 
@@ -339,6 +341,9 @@ def test_quoting_an_earlier_big_account_post_borrows_its_narrative() -> None:
     kinds = {e.kind for e in a.evidence}
     assert {"x_quote_timing", "x_quote_author"} <= kinds
     assert "borrowed_narrative" in {f[0] for f in a.flags}
+    # the author's size is a hint, too weak to make a celebrity coin alone (rules 0.23.0)
+    size = [e for e in a.evidence if e.kind == "x_quote_author"]
+    assert size and all(e.weight < 0.2 for e in size)
 
 
 def test_quote_of_own_post_or_later_post_adds_no_narrative() -> None:
