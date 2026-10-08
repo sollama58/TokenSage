@@ -136,6 +136,30 @@ flags:
   - code: non_sol_pair
     severity: info
     description: The coin trades against another token rather than SOL or a stablecoin (see market.pair).
+  - code: creator_fee_holders
+    severity: info
+    description: A holder-rewards coin; the creator fee is set aside for holders and paid out by pump.fun, the creator claims nothing (see market.creator_fee).
+  - code: creator_fee_charity
+    severity: info
+    description: At least half of the creator fee goes to a charity through donate.gg (a charity coin; see market.creator_fee).
+  - code: creator_fee_github
+    severity: info
+    description: At least half of the creator fee goes to a GitHub-linked account, claimable only by that GitHub user through pump.fun (see market.creator_fee).
+  - code: creator_fee_wallet
+    severity: info
+    description: The creator fee goes to a single wallet other than the one that controls the coin's fee split (see market.creator_fee).
+  - code: creator_fee_split
+    severity: info
+    description: The creator fee is split between several recipients with no single dominant kind (see market.creator_fee).
+  - code: creator_fee_social
+    severity: info
+    description: At least half of the creator fee goes to an X- or pump.fun-linked account (a social-fee PDA of a platform other than GitHub; see market.creator_fee).
+  - code: creator_fee_other
+    severity: info
+    description: The creator fee goes to an account owned by some other program, which TokenSage cannot classify (see market.creator_fee).
+  - code: creator_fee_cashback
+    severity: info
+    description: A deprecated cashback coin; the creator fee goes back to traders.
   - code: x_image_match
     severity: info
     description: An image in the linked X post (or the linked profile's avatar/banner) is a near-duplicate of the token logo.

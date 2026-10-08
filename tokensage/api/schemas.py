@@ -97,11 +97,129 @@ class Pair(_Model):
     categories: list[Category] = []
 
 
+class FeeRecipient(_Model):
+    """One shareholder of a fee-sharing config (rules 0.19.0)."""
+
+    address: str = Field(
+        description="The shareholder address as stored on-chain: a wallet, or a Pump Fees "
+        "PDA for a GitHub/social or charity recipient"
+    )
+    share: float = Field(ge=0, le=1, description="Its share of the creator fee (share_bps / 10000)")
+    share_bps: int = Field(ge=0, le=10_000)
+    kind: Literal[
+        "creator", "wallet", "github", "x", "pump", "social", "charity", "program", "unresolved"
+    ] = Field(
+        description="creator: the wallet that controls the split (the launch wallet, or a "
+        "community-takeover admin); wallet: any other plain wallet; github / x / pump: a "
+        "social-fee PDA claimable by that linked account (platform 2 = GitHub); charity: a "
+        "donate.gg donation PDA; program: an account of some other program; unresolved: not "
+        "classified (RPC failure)"
+    )
+    is_creator: bool = False
+    platform: str | None = Field(
+        default=None, description="For a social recipient: github, x or pump"
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="For a social recipient: the platform's user id (GitHub: the numeric "
+        "account id)",
+    )
+    github_login: str | None = Field(
+        default=None,
+        description="For a GitHub recipient: the login looked up from the id (when the "
+        "lookup is enabled and succeeded)",
+    )
+    url: str | None = None
+    charity_config_id: str | None = Field(
+        default=None,
+        description="For a charity recipient: the donate.gg config id the fee is escrowed for",
+    )
+    lifetime_received: float | None = Field(
+        default=None,
+        description="For a social recipient: what that account has claimed so far across all "
+        "its coins, in SOL; for a charity recipient: what this coin has donated so far, in "
+        "its quote token",
+    )
+
+
+class CreatorFee(_Model):
+    """Where the coin's creator fee goes (rules 0.19.0; all depths)."""
+
+    destination: Literal[
+        "creator",
+        "wallet",
+        "split",
+        "holder_rewards",
+        "charity",
+        "github",
+        "social",
+        "other",
+        "cashback",
+        "unknown",
+    ] = Field(
+        description="creator: the creator wallet; wallet: one other wallet; split: several "
+        "recipients with no single dominant kind; holder_rewards: set aside for holders, paid "
+        "out by pump.fun; charity: a donate.gg charity holds at least half; github: a "
+        "GitHub-linked account holds at least half; social: an X- or pump.fun-linked account "
+        "holds at least half; other: a single recipient that is an account of some other "
+        "program; cashback: back to traders (deprecated coin type); unknown: could not be "
+        "determined. New values may be added"
+    )
+    mechanism: Literal["direct", "sharing_config", "holder_rewards", "cashback"] = Field(
+        description="direct: the fee accrues to the wallet in the bonding curve's creator "
+        "field; sharing_config: the curve points at a Pump Fees SharingConfig whose "
+        "shareholders are paid; holder_rewards / cashback: the coin types"
+    )
+    creator_fee_bps: int | None = Field(
+        default=None,
+        description="A custom creator fee rate set at creation (custom pairs only); 0 or null "
+        "means pump.fun's standard schedule",
+    )
+    admin: str | None = Field(
+        default=None, description="Fee sharing: the wallet that controls the split (market.creator)"
+    )
+    sharing_config: str | None = Field(
+        default=None, description="Fee sharing: the SharingConfig PDA"
+    )
+    sharing_version: int | None = None
+    mutable: bool | None = Field(
+        default=None,
+        description="Fee sharing: true when the admin can still change the split (admin not "
+        "revoked); false once it is final",
+    )
+    split: bool = Field(default=False, description="More than one recipient")
+    shares: dict[str, float] = Field(
+        default={},
+        description="Share of the fee per recipient kind, e.g. {charity: 0.99, creator: 0.01}",
+    )
+    recipients: list[FeeRecipient] = []
+    summary: str = Field(
+        description="One plain sentence, e.g. 'creator fees go to charity: 100% to a charity "
+        "via donate.gg'"
+    )
+
+
 class Market(_Model):
     complete: bool | None = None
     curve_progress: float | None = Field(default=None, ge=0, le=1)
     graduated_pool: str | None = None
-    creator: str | None = None
+    creator: str | None = Field(
+        default=None,
+        description="The creator wallet. Since rules 0.19.0 never a PDA: on a fee-shared coin "
+        "it is the sharing config's admin; on a holder-rewards coin it is the launch wallet "
+        "when a source gave it, else null. The raw on-chain value is creator_onchain",
+    )
+    creator_onchain: str | None = Field(
+        default=None,
+        description="The bonding curve's creator field as stored: a wallet, a fee-sharing "
+        "config PDA or the holder-rewards PDA (see creator_kind)",
+    )
+    creator_kind: Literal["wallet", "sharing_config", "holder_rewards_pda", "unknown"] | None = None
+    creator_fee: CreatorFee | None = Field(
+        default=None,
+        description="Where the creator fee goes (since rules 0.19.0); null for a non-pump.fun "
+        "mint or a coin analysed from hints before it is visible on-chain",
+    )
     is_mayhem_mode: bool | None = None
     quote_mint: str | None = None
     pair: Pair | None = Field(
