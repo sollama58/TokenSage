@@ -273,3 +273,72 @@ async def test_full_depth_labels_the_logo_once(
     a2 = TokenResponse.model_validate(r2.json()).analysis
     assert a2 is not None and a2.image.labels and a2.image.labels[0].label == "dog"
     assert enc.calls == 1
+
+
+# ----------------------------------------------------------------- audit fixes (rules 0.26.0)
+
+
+def test_a_name_whose_only_topic_is_its_script_still_takes_the_logo_guess() -> None:
+    (ev,) = vision.evidence(_result("cat", 0.95))
+    assert vision.gate([ev], [("regional_language", 0.6)]) == [ev]
+    out = run_full(_inp(_result("cat", 0.95), name="ネコ", symbol="NEKO"))
+    assert any(e.kind == "vision" for e in out.evidence)
+
+
+def test_16_bit_greyscale_is_not_read_as_a_white_square() -> None:
+    arr = (np.arange(64 * 64).reshape(64, 64) * 12 + 1000).astype(np.uint16)  # all above 255
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    px = vision.preprocess(buf.getvalue())
+    assert px.min() < -0.9 and px.max() > 0.9  # the full range, not clipped to white
+
+
+def test_an_unreadable_image_is_cached_but_a_model_failure_is_not() -> None:
+    bad = vision.label_image(StubEncoder("dog"), b"not an image")
+    assert bad.error and not bad.error.startswith(vision.MODEL_ERROR)
+    back = vision.from_json(json.loads(json.dumps(vision.to_json(bad))))
+    assert back is not None and back.top == [] and back.error
+
+    class Broken:
+        def encode(self, pixels: np.ndarray) -> np.ndarray:
+            raise RuntimeError("onnxruntime fell over")
+
+    failed = vision.label_image(Broken(), _png())
+    assert (failed.error or "").startswith(vision.MODEL_ERROR)
+
+
+def test_flag_on_without_a_model_path_logs_once(settings: Settings) -> None:
+    settings.enable_clip = True
+    settings.vision_model_path = ""
+    assert vision.default_encoder(settings) is None
+    assert "VISION_MODEL_PATH" in (vision.load_error() or "")
+
+
+@needs_db
+async def test_a_logo_that_never_downloaded_is_not_fetched_again_for_labels(
+    clip_settings: Settings,
+    client: httpx.AsyncClient,
+    db: asyncpg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enc = StubEncoder("dog")
+    monkeypatch.setattr(vision, "default_encoder", lambda s: enc if s.enable_clip else None)
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "Barkley", "BARK", f"https://ipfs.io/ipfs/{CID_META}")
+    gets: list[str] = []
+
+    def img(request: httpx.Request) -> httpx.Response:
+        gets.append(str(request.url))
+        return httpx.Response(503)
+
+    for refresh in ("", "&refresh=true"):
+        gets.clear()
+        with respx.mock(assert_all_called=False) as router:
+            router.get(url__regex=rf".*/ipfs/{CID_IMG}.*").mock(side_effect=img)
+            install_web(router, chain)
+            r = await client.get(f"/v1/tokens/{T22_MINT}?depth=full&wait=20{refresh}")
+        assert r.status_code == 200, r.text
+        a = TokenResponse.model_validate(r.json()).analysis
+        assert a is not None and a.image.labels == []
+    assert enc.calls == 0
+    assert gets == []  # the second read: metadata is cached and vision does not refetch
