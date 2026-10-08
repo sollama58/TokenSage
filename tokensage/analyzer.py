@@ -645,21 +645,28 @@ async def _vision_labels(
     if enc is None:
         return None
     key = m.image_content_key
+    if not key:
+        # the logo was never downloaded (or failed just now): nothing to label, and no image
+        # row to cache labels on, so fetching it here would repeat on every read
+        return None
     cached = await fulldepth.vision_cached(conn, key, vision.load_config().model)
     if cached is not None:
         return cached
     data = image_bytes
     if data is None:
+        # hashes and OCR came from cache: fetch the logo once more for its labels, which are
+        # cached under the coin's known content key (that image row exists)
         tmp = md.Metadata(status="ok", image_url=m.image_url)
         await md.attach_image(ctx.http, tmp, ctx.settings)
-        data, key = tmp.image_bytes, tmp.image_content_key or key
+        data = tmp.image_bytes
     if not data:
         return None
     res = await vision.label_async(enc, data)
-    if res.error is None and key:
-        await fulldepth.persist_vision(conn, key, res)
-    elif res.error:
+    if res.error:
         log.info("vision.failed", key=key, error=res.error)
+    if not (res.error or "").startswith(vision.MODEL_ERROR):
+        # an unreadable image is cached as such (no labels): the same bytes fail the same way
+        await fulldepth.persist_vision(conn, key, res)
     return res
 
 
