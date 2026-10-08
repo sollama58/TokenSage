@@ -127,8 +127,8 @@ class FeeRecipient(_Model):
     )
     github_login: str | None = Field(
         default=None,
-        description="For a GitHub recipient: the login looked up from the id (when the "
-        "lookup is enabled and succeeded)",
+        description="Always null since rules 0.22.0: the GitHub login is not looked up; "
+        "use user_id (kept for v1 compatibility)",
     )
     url: str | None = None
     charity_config_id: str | None = Field(

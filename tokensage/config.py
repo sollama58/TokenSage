@@ -79,11 +79,9 @@ class Settings(BaseSettings):
     # "method:credits,..." overrides for the credit table in net/metrics.py
     helius_credit_costs: str = ""
     coingecko_api_key: str = ""
-    # Creator-fee recipients (rules 0.19.0): a GitHub-linked recipient's numeric user id is
-    # turned into a login via api.github.com (60 calls/h unauthenticated per IP; a token
-    # allows 5,000/h). Results are cached in fee_recipient for fee_recipient_cache_days.
-    enable_github_lookup: bool = True
-    github_token: str = ""
+    # Creator-fee recipients (rules 0.19.0): what a plain wallet or another program's account
+    # is, cached in fee_recipient for fee_recipient_cache_days. A GitHub-linked recipient is
+    # reported by its numeric account id; its login is not looked up (since rules 0.22.0).
     fee_recipient_cache_days: int = 7
     twitterapi_io_key: str = ""
     ipfs_gateways: str = (
