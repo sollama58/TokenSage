@@ -182,20 +182,27 @@ async def _onchain_metadata(
 async def read_mint_metadata(rpc: SolanaRpc, mint: str) -> dict[str, str] | None:
     """Name / symbol / uri of any SPL or Token-2022 mint (e.g. a pair token), or None when
     the address is not a mint or carries no metadata."""
-    # one call for the mint and its Metaplex PDA (1 credit instead of 2 for SPL mints)
-    acc, md_acc = await rpc.get_multiple_accounts(
-        [mint, metaplex.metadata_pda(mint)], encoding="jsonParsed"
+    return (await read_pair_mint(rpc, mint))[0]
+
+
+async def read_pair_mint(rpc: SolanaRpc, mint: str) -> tuple[dict[str, str] | None, bool]:
+    """read_mint_metadata, and whether the mint is a pump.fun coin (it has a pump.fun
+    bonding curve, graduated or not; many have no "pump" suffix)."""
+    # one call for the mint, its Metaplex PDA and its bonding curve (1 credit instead of 3)
+    acc, md_acc, curve_acc = await rpc.get_multiple_accounts(
+        [mint, metaplex.metadata_pda(mint), bonding_curve_pda(mint)], encoding="jsonParsed"
     )
+    pumpfun = bool(curve_acc and curve_acc.get("owner") == PUMP_PROGRAM)
     if acc is None:
-        return None
+        return None, False
     token_program = TOKEN_PROGRAMS.get(acc.get("owner") or "")
     parsed = acc.get("data") if isinstance(acc.get("data"), dict) else None
     if token_program is None or not parsed or parsed.get("parsed", {}).get("type") != "mint":
-        return None
+        return None, False
     meta, _ = await _onchain_metadata(
         rpc, mint, token_program, parsed["parsed"]["info"], metaplex_acc=md_acc, metaplex_read=True
     )
-    return meta
+    return meta, pumpfun
 
 
 # ----------------------------------------------------------------- creation time

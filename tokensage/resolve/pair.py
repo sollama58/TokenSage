@@ -3,6 +3,8 @@
 SOL and stablecoins are answered locally. Any other mint is identified, in order, by a
 stored TokenSage analysis of it, a token row we already hold, or its on-chain metadata;
 the name / symbol is cached in pair_token so popular pair tokens cost one RPC read a week.
+Each answer also says whether the pair token is itself a pump.fun coin (pump.fun pairs a
+coin with any other pump.fun coin, not just SOL, stablecoins and a few majors).
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import structlog
 from tokensage.engine.context import ReferentCandidate
 from tokensage.engine.pairing import PairInput, neutral
 from tokensage.resolve.metadata import _clean_str
-from tokensage.resolve.resolver import read_mint_metadata
+from tokensage.resolve.resolver import read_pair_mint
 from tokensage.resolve.rpc import RpcError, SolanaRpc
 
 log = structlog.get_logger("pair")
@@ -38,14 +40,18 @@ async def lookup(
     if pair.name or pair.symbol:
         return pair
     row = await conn.fetchrow(
-        "select name, symbol from token where mint=$1 and (name is not null or symbol is not null)",
+        """select name, symbol, is_pumpfun from token
+            where mint=$1 and (name is not null or symbol is not null)""",
         quote,
     )
     if row:
         pair.name, pair.symbol, pair.source = row["name"], row["symbol"], "db"
+        pair.pumpfun = row["is_pumpfun"]
         return pair
+    # rows cached before is_pumpfun existed are read again, once
     cached = await conn.fetchrow(
-        """select name, symbol, source from pair_token where mint=$1
+        """select name, symbol, source, is_pumpfun from pair_token where mint=$1
+           and (is_pumpfun is not null or source = 'none')
            and fetched_at > now() - make_interval(
                  secs => case when source = 'none' then $2::float8 else $3::float8 end)""",
         quote,
@@ -54,24 +60,27 @@ async def lookup(
     )
     if cached:
         pair.name, pair.symbol, pair.source = cached["name"], cached["symbol"], cached["source"]
+        pair.pumpfun = cached["is_pumpfun"]
         return pair
     meta = None
     if rpc is not None:
         try:
-            meta = await read_mint_metadata(rpc, quote)
+            meta, pair.pumpfun = await read_pair_mint(rpc, quote)
         except RpcError as e:
             log.info("pair.metadata_failed", mint=quote, error=str(e)[:120])
     pair.name = _clean_str((meta or {}).get("name"), 200)
     pair.symbol = _clean_str((meta or {}).get("symbol"), 32)
     pair.source = "onchain" if (pair.name or pair.symbol) else "none"
     await conn.execute(
-        """insert into pair_token (mint, name, symbol, source) values ($1, $2, $3, $4)
+        """insert into pair_token (mint, name, symbol, source, is_pumpfun)
+           values ($1, $2, $3, $4, $5)
            on conflict (mint) do update set name=excluded.name, symbol=excluded.symbol,
-             source=excluded.source, fetched_at=now()""",
+             source=excluded.source, is_pumpfun=excluded.is_pumpfun, fetched_at=now()""",
         quote,
         pair.name,
         pair.symbol,
         pair.source,
+        pair.pumpfun,
     )
     return pair
 
@@ -90,6 +99,7 @@ async def _from_analysis(conn: asyncpg.Connection, pair: PairInput) -> None:
     if not (pair.name or pair.symbol):
         return
     pair.source = "analysis"
+    pair.pumpfun = doc.get("launchpad") == "pump.fun"
     ref = doc.get("referent")
     if isinstance(ref, dict) and ref.get("label"):
         pair.referent = ReferentCandidate(

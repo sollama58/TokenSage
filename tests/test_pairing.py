@@ -152,12 +152,13 @@ async def test_pair_token_name_is_cached(
     conn = await asyncpg.connect(migrated_db)
     try:
         await conn.execute(
-            "insert into pair_token (mint, name, symbol, source) "
-            "values ($1, 'Bonk', 'BONK', 'onchain')",
+            "insert into pair_token (mint, name, symbol, source, is_pumpfun) "
+            "values ($1, 'Bonk', 'BONK', 'onchain', false)",
             BONK,
         )
         p = await pair_lookup.lookup(conn, _NoRpc(), BONK)  # type: ignore[arg-type]
         assert p is not None and p.symbol == "BONK" and p.source == "onchain"
+        assert p.pumpfun is False
         s = await pair_lookup.lookup(conn, _NoRpc(), "SOL")  # type: ignore[arg-type]
         assert s is not None and s.kind == "sol"
         assert await pair_lookup.lookup(conn, _NoRpc(), None) is None  # type: ignore[arg-type]
@@ -265,14 +266,48 @@ def test_short_names_are_not_read_from_compound_fragments() -> None:
     assert out.agg.referent is None or "Xi" not in out.agg.referent.label
 
 
+# pump.fun coins on mainnet are paired with other pump.fun coins, many of them without the
+# "pump" suffix (TikTok Coin, 64oAuE88...: 60 of 400 new coins on 2026-10-08)
+PUMP_PAIR = "64oAuE88tNP7KsSyaiJTKGP4sWmLMFGWLUs9eBTLYgCp"
+
+
 @needs_db
-async def test_unknown_pump_pair_token_is_queued_for_analysis(
+async def test_pumpfun_pair_token_is_named_and_queued_for_analysis(
     migrated_db: str,
     clean_tables: None,
     router: respx.MockRouter,  # noqa: F811
 ) -> None:
-    pump_pair = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM".replace("WWM", "ump")
-    pump_pair = pump_pair[:-4] + "pump"
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "Moon Frog", "MFROG", META_URI, quote=PUMP_PAIR)
+    chain.add_spl_pump(PUMP_PAIR, "Tiktok Coin", "TikTok", "")
+    install_web(router, chain, meta=metadata_json(name="Moon Frog", symbol="MFROG", twitter=None))
+    async with make_client(migrated_db) as c:
+        r = await c.get(f"/v1/tokens/{T22_MINT}", params={"depth": "basic", "wait": 5})
+    assert r.status_code == 200, r.text
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a is not None and a.market.pair is not None
+    assert a.market.pair.pumpfun is True and a.market.pair.symbol == "TikTok"
+    assert "$TikTok (Tiktok Coin)" in a.summary and "pump.fun coin" in a.summary
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        queued = await conn.fetchval(
+            "select count(*) from job where kind='analyze' and mint=$1 and depth='basic'",
+            PUMP_PAIR,
+        )
+        cached = await conn.fetchval("select is_pumpfun from pair_token where mint=$1", PUMP_PAIR)
+    finally:
+        await conn.close()
+    assert queued == 1 and cached is True
+
+
+@needs_db
+async def test_non_pump_pair_token_is_not_queued(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    # a "...pump" vanity address is not enough: no pump.fun bonding curve, no pump.fun coin
+    pump_pair = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtpump"
     chain = FakeChain()
     chain.add_t22_pump(T22_MINT, "Moon Frog", "MFROG", META_URI, quote=pump_pair)
     chain.add_spl_token(pump_pair, "Zzqx", "ZZQX")
@@ -281,13 +316,68 @@ async def test_unknown_pump_pair_token_is_queued_for_analysis(
         r = await c.get(f"/v1/tokens/{T22_MINT}", params={"depth": "basic", "wait": 5})
     assert r.status_code == 200, r.text
     a = TokenResponse.model_validate(r.json()).analysis
-    assert a is not None and a.referent is None or a.referent.supported_by is not None
+    assert a is not None and a.market.pair is not None and a.market.pair.pumpfun is False
+    assert "$ZZQX (Zzqx)" in a.summary and "pump.fun coin" not in a.summary
     conn = await asyncpg.connect(migrated_db)
     try:
-        queued = await conn.fetchval(
-            "select count(*) from job where kind='analyze' and mint=$1 and depth='basic'",
-            pump_pair,
-        )
+        queued = await conn.fetchval("select count(*) from job where mint=$1", pump_pair)
     finally:
         await conn.close()
-    assert queued == 1
+    assert queued == 0
+
+
+# ----------------------------------------------------------------- summary (rules 0.27.0)
+
+
+def _pump_pair(mint: str, symbol: str, name: str, **kw: object) -> PairInput:
+    return PairInput(mint=mint, symbol=symbol, name=name, source="onchain", pumpfun=True, **kw)  # type: ignore[arg-type]
+
+
+def test_summary_leads_with_the_pump_pair_when_the_name_says_nothing() -> None:
+    # mainnet FcAxN8...pump "Bao Bao" ($Bao) trades against DBDqhn...pump OGCALLERS
+    pair = _pump_pair("DBDqhnAi5MjaHsk1JyUonAtUUrmRBJPjJi3GdiBLpump", "OGCALLERS", "OG Callers")
+    out = _run("Bao Bao", "Bao", pair)
+    assert out.summary.startswith(
+        "Bao Bao ($BAO) was launched into the $OGCALLERS (OG Callers) community, trading "
+        "against it instead of SOL. $OGCALLERS (OG Callers) is itself a pump.fun coin."
+    )
+    assert "Context: trades against" not in out.summary
+    assert any("another pump.fun coin" in e.detail for e in out.evidence)
+
+
+def test_summary_names_the_pump_pair_and_what_it_is_about() -> None:
+    from tokensage.engine.context import ReferentCandidate
+
+    pair = _pump_pair(
+        "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+        "BULL",
+        "The Black Bull",
+        referent=ReferentCandidate("Ansem", "person", "Solana memecoin KOL", "x", 0.9),
+    )
+    out = _run("Cat In Hat", "CIH", pair)  # the coin's own theme leads
+    assert out.summary.startswith("Cat In Hat ($CIH) reads as an animal-mascot coin")
+    assert (
+        "It trades against $BULL (The Black Bull) instead of SOL. $BULL (The Black Bull) is "
+        "itself a pump.fun coin about Ansem (Solana memecoin KOL)."
+    ) in out.summary
+
+
+def test_summary_says_when_the_name_builds_on_the_pump_pair() -> None:
+    out = _run(
+        "Baby Bonk", "BBONK", PairInput(mint=BONK, symbol="BONK", name="Bonk", pumpfun=False)
+    )
+    assert "It trades against $BONK (Bonk) instead of SOL; its name builds on it." in out.summary
+
+
+@pytest.mark.parametrize(
+    "mint",
+    [
+        "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",  # ZEC
+        "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",  # PUMP
+    ],
+)
+def test_major_pairs_say_nothing(mint: str) -> None:
+    pair = neutral(mint)
+    assert pair is not None and pair.kind == "major"
+    out = _run("Moon Frog", "MFROG", pair)
+    assert "trades against" not in out.summary

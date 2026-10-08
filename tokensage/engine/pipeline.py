@@ -36,12 +36,13 @@ from tokensage.engine.aggregate import (
     aggregate,
     channel,
     is_theme,
+    main_category,
 )
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.gazetteer import Gazetteer
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
 from tokensage.engine.normalize import normalize
-from tokensage.engine.render_summary import summarize
+from tokensage.engine.render_summary import category_phrase, summarize
 from tokensage.sources.x import ProfileData, TweetData
 from tokensage.versions import RULES_VERSION as RULES_VERSION
 
@@ -1177,6 +1178,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         context=context,
         framing=_framing(n, head, agg, k),
         narrative=_narrative(inp, xa),
+        pair_who=_pair_who(pair, agg),
+        pair_builds_on=pair is not None and pair.builds_on,
         rival=any(m.code == "marker:rival" for m in n.markers),
     )
     return EngineOutput(
@@ -1795,10 +1798,9 @@ def _context(
     """The launch context in a few clauses: what it trades against, what it copies, what is
     trending. (The X post it rides is its own sentence, see _narrative.)"""
     out: list[str] = []
-    if pair is not None and pair.meaningful:
-        what = f"the tokenized ${pair.underlying} stock" if pair.underlying else "that token"
+    if pair is not None and pair.underlying:  # a token pair is its own sentence (_pair_who)
         out.append(
-            f"trades against {pair.label()} ({what})"
+            f"trades against {pair.label()} (the tokenized ${pair.underlying} stock)"
             + (", and its name builds on it" if pair.builds_on else "")
         )
     if recent_copies:
@@ -1820,6 +1822,32 @@ def _context(
         else:
             out.append(f"matches the trending topic '{t.term}'")
     return out
+
+
+def _pair_who(
+    pair: pairing.PairAssessment | None, agg: Aggregated
+) -> tuple[str, str | None] | None:
+    """The token a coin trades against, for the summary: its ticker and name ("$OGC (OG
+    Callers)") and what it is ("itself a pump.fun coin about Ansem (...)"), or None for SOL,
+    stablecoins, majors and tokenized stocks (a stock pair is a context clause)."""
+    if pair is None or pair.kind != "token":
+        return None
+    kind = "itself a pump.fun coin" if pair.pumpfun else "a token"
+    ref = pair.referent
+    if ref is not None and ref.score >= 0.45:
+        if agg.referent is not None and agg.referent.label == ref.label:
+            # the coin's own referent is the pair's: the lead already says what it is
+            return pair.label(), (kind if pair.pumpfun else None)
+        if ref.label.casefold() in ((pair.name or "").casefold(), (pair.symbol or "").casefold()):
+            # Fartcoin refers to Fartcoin: say what it is instead
+            return pair.label(), f"{kind}: {ref.desc}" if ref.desc else kind
+        return pair.label(), f"{kind} about {ref.label}" + (f" ({ref.desc})" if ref.desc else "")
+    tp = main_category(
+        [(lbl, c) for lbl, c in pair.categories if not lbl.startswith(pairing.SKIP_CATEGORIES)]
+    )
+    if tp is not None:
+        return pair.label(), f"{kind} that reads as {category_phrase(tp[0], pair.categories)}"
+    return pair.label(), (kind if pair.pumpfun else None)
 
 
 def _pair(inp: EngineInput, n: Normalized, k: Knowledge) -> pairing.PairAssessment | None:

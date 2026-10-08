@@ -277,7 +277,9 @@ on a credibility of 0.05 is the coin's own profile and says nothing; a `related`
 Most pump.fun coins trade against SOL; some against a stablecoin. Those say nothing about
 the coin and only get reported. A coin paired against **another token** was launched into
 that token's community, and it often builds on that token by name (e.g. "Baby Bonk" paired
-with BONK). That pairing feeds the analysis.
+with BONK). That pairing feeds the analysis. Since October 2026 pump.fun lets a coin pair with
+**any other pump.fun coin**; on 2026-10-08 about a quarter of new coins did (TikTok Coin,
+Fartcoin, X Coin, 4CHAN and many small coins), most of them without the `…pump` suffix.
 
 ```json
 "pair": {
@@ -285,6 +287,7 @@ with BONK). That pairing feeds the analysis.
   "symbol": "BONK", "name": "Bonk",
   "kind": "token",
   "source": "onchain",
+  "pumpfun": false,
   "builds_on": true,
   "builds_on_detail": "same ticker base as $BONK",
   "referent": {"label": "Bonk", "kind": "coin", "desc": "Solana dog coin; 'bonk' meme", "confidence": 0.95},
@@ -294,9 +297,10 @@ with BONK). That pairing feeds the analysis.
 
 | Field | Meaning |
 |---|---|
-| `kind` | `sol`, `stablecoin` (USDC, USDT, USD1, PYUSD), `lst` (JitoSOL, mSOL, bSOL, JupSOL), `major` (cbBTC, WBTC, WETH): reported only. `token` and `tokenized_stock` feed the analysis |
+| `kind` | `sol`, `stablecoin` (USDC, USDT, USD1, PYUSD), `lst` (JitoSOL, mSOL, bSOL, JupSOL), `major` (cbBTC, WBTC, WETH, ZEC, and pump.fun's own PUMP token): reported only. `token` and `tokenized_stock` feed the analysis |
 | `underlying` | For `tokenized_stock`: the stock ticker (TSLA for TSLAx) |
 | `source` | How the pair token was identified: `neutral` (SOL/stablecoin), `analysis` (our stored analysis of it), `db`, `onchain` (its Metaplex / Token-2022 metadata, cached for a week), `none` (unidentified) |
+| `pumpfun` | Since rules 0.27.0: the pair token is itself a pump.fun coin (it has a pump.fun bonding curve, graduated or not; read on-chain, not from the `…pump` suffix). `null` for SOL, stablecoins and majors, and when not known |
 | `builds_on` | The coin's name or ticker builds on the pair token's: same ticker base, ticker contains it (`BBONK`), or the name contains its ticker or a distinctive word of its name |
 | `referent`, `categories` | What the pair token itself is about: from our stored analysis of it, else from reading its own name and ticker |
 
@@ -307,7 +311,15 @@ How it changes the analysis when `kind` is `token`:
   becomes a strong referent candidate for the coin (Baby Bonk → Bonk). Its categories count
   at 0.6× their confidence;
 - otherwise the pair token's categories count weakly (0.25×) and its referent is reported
-  here only: the coin's own name, ticker and logo still decide what it refers to.
+  here only: the coin's own name, ticker and logo still decide what it refers to;
+- since rules 0.27.0 the `summary` names the pair token by ticker and name and says what it
+  is. When the coin's own name says nothing (no referent, no theme, no X post it was launched
+  on), the pairing leads: "Bao Bao ($BAO) was launched into the $OGCALLERS community, trading
+  against it instead of SOL. $OGCALLERS is itself a pump.fun coin." Otherwise it follows the
+  lead: "… It trades against $BULL (The Black Bull) instead of SOL. $BULL (The Black Bull) is
+  itself a pump.fun coin about Ansem (Solana memecoin KOL)." (with "; its name builds on it"
+  when `builds_on`). This replaces the old "Context: trades against … (that token)" clause;
+  SOL, stablecoins and majors are never mentioned.
 
 **Tokenized stocks (xStocks).** A pair token whose symbol is a stock ticker plus `x` (TSLAx,
 NVDAx, SPYx) and whose name says "xStock" (or whose mint is one of Backed's `Xs…` addresses)
@@ -320,8 +332,9 @@ count, weakly. Company names and tickers are also understood in the coin itself 
 "$NVDA", "TSLAx"); common-word names and tickers (Apple, Meta, COIN, HOOD, SPY) only count in
 an unambiguous form ("apple inc", "metax").
 
-When the pair token is itself a pump.fun coin TokenSage has never analysed, a basic analysis of
-it is queued in the background, so later coins paired with it get its full meaning.
+When the pair token is itself a pump.fun coin (`pumpfun: true`) TokenSage has never analysed, a
+basic analysis of it is queued in the background, so later coins paired with it get its full
+meaning. (Before rules 0.27.0 only pair tokens ending in `pump` were queued.)
 
 `market.pair` is `null` when the quote mint is unknown, e.g. a coin analysed from hints
 before it is visible on-chain.

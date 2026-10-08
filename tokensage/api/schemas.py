@@ -69,16 +69,18 @@ class PairReferent(_Model):
 
 
 class Pair(_Model):
-    """The token the coin trades against on its bonding curve. SOL and stablecoins carry no
-    meaning; any other token feeds the analysis (category crypto_native/paired_ecosystem,
-    derivative/pair_family when the name builds on it, flag non_sol_pair)."""
+    """The token the coin trades against on its bonding curve. SOL, stablecoins and majors
+    (wrapped BTC/ETH/ZEC, PUMP) carry no meaning; any other token, often another pump.fun
+    coin, feeds the analysis (category crypto_native/paired_ecosystem,
+    derivative/pair_family when the name builds on it, flag non_sol_pair) and the summary
+    names it by ticker and name."""
 
     mint: str
     symbol: str | None = None
     name: str | None = None
     kind: Literal["sol", "stablecoin", "lst", "major", "token", "tokenized_stock"] = Field(
-        description="sol, stablecoin, lst (staked SOL) and major (wrapped BTC/ETH) carry no "
-        "meaning; token and tokenized_stock (an xStock such as TSLAx) feed the analysis"
+        description="sol, stablecoin, lst (staked SOL) and major (wrapped BTC/ETH/ZEC, PUMP) "
+        "carry no meaning; token and tokenized_stock (an xStock such as TSLAx) feed the analysis"
     )
     underlying: str | None = Field(
         default=None, description="For a tokenized stock: the stock ticker (TSLA for TSLAx)"
@@ -87,6 +89,12 @@ class Pair(_Model):
         default=None,
         description="Where the pair token was identified: neutral (SOL/stablecoin), "
         "known_coin, analysis (a stored TokenSage analysis), db, onchain, none",
+    )
+    pumpfun: bool | None = Field(
+        default=None,
+        description="The pair token is itself a pump.fun coin (it has a pump.fun bonding "
+        "curve; pump.fun pairs coins with any other pump.fun coin). Null when not looked up "
+        "(SOL, stablecoins and majors) or unknown",
     )
     builds_on: bool = Field(
         default=False, description="The coin's name or ticker builds on the pair token's"

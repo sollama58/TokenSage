@@ -39,6 +39,9 @@ NEUTRAL = {
     "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij": ("cbBTC", "major"),
     "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh": ("WBTC", "major"),
     "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs": ("WETH", "major"),
+    "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS": ("ZEC", "major"),
+    # pump.fun's own token: the platform, not a community a coin is launched into
+    "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn": ("PUMP", "major"),
 }
 # Kinds that feed the analysis; the rest are only reported.
 MEANINGFUL = ("token", "tokenized_stock")
@@ -72,6 +75,7 @@ class PairInput:
     name: str | None = None
     kind: str = "token"  # sol | stablecoin | lst | major | token | tokenized_stock
     source: str | None = None  # neutral | known_coin | analysis | db | onchain | none
+    pumpfun: bool | None = None  # the pair token is itself a pump.fun coin (None: unknown)
     # from a stored TokenSage analysis of the pair token, when there is one
     referent: ReferentCandidate | None = None
     categories: list[tuple[str, float]] = field(default_factory=list)
@@ -84,6 +88,7 @@ class PairAssessment:
     name: str | None
     kind: str
     source: str | None
+    pumpfun: bool | None = None
     builds_on: bool = False
     builds_on_detail: str | None = None
     referent: ReferentCandidate | None = None
@@ -180,7 +185,12 @@ def assess(
     """pair_meaning: the engine's basic read of the pair token's name/ticker, used when no
     stored analysis or known-coin entry says what the pair token is."""
     a = PairAssessment(
-        mint=pair.mint, symbol=pair.symbol, name=pair.name, kind=pair.kind, source=pair.source
+        mint=pair.mint,
+        symbol=pair.symbol,
+        name=pair.name,
+        kind=pair.kind,
+        source=pair.source,
+        pumpfun=pair.pumpfun,
     )
     if not a.meaningful:
         return a
@@ -223,7 +233,9 @@ def assess(
             kind="pair",
             label="crypto_native/paired_ecosystem",
             weight=W_ECOSYSTEM,
-            detail=f"trades against {who} instead of SOL: launched into that token's community",
+            detail=f"trades against {who}"
+            + (", another pump.fun coin," if a.pumpfun else "")
+            + " instead of SOL: launched into that token's community",
             source=src,
             where="chain",
         )
