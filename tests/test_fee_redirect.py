@@ -6,6 +6,7 @@ The golden cases in tests/golden/fee_cases.yaml replay real mainnet accounts cap
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -28,6 +29,7 @@ from tests.fixtures.chain import (
     FakeChain,
     install_web,
     public_resolver,
+    social_fee_pda_bytes,
 )
 from tokensage.analyzer import build_document
 from tokensage.api.schemas import Analysis
@@ -379,10 +381,14 @@ async def test_resolve_reads_sharing_config_in_the_batched_call_and_caches_recip
                 "9VZA4fKUT5SQXiirfdoFaxpA87bHGBUfmjWxhHFhTkpP",
             )
             assert cached and cached["kind"] == "github" and cached["user_id"] == "258455447"
-            # a second resolve finds the recipient in the cache: no extra read
+            # a second resolve re-reads the fee PDA (its claimed total moves) but not GitHub
             chain.calls.clear()
+            github_calls = router.calls.call_count
             r2 = await resolve(db, rpc, http, settings, captured["mint"])
-            assert chain.calls.count("getMultipleAccounts") == 1
+            assert chain.calls.count("getMultipleAccounts") == 2
+            assert not any(
+                "api.github.com" in str(c.request.url) for c in list(router.calls)[github_calls:]
+            )
             assert r2.creator_fee is not None and r2.creator_fee.destination == "github"
             assert r2.creator_fee.recipients[0].user_id == "258455447"
 
@@ -433,3 +439,183 @@ async def test_api_reports_creator_fee(client: httpx.AsyncClient, db: asyncpg.Co
     assert body["analysis"]["versions"]["rules"] == RULES_VERSION
     meta = (await client.get("/v1/meta")).json()
     assert "creator_fee_charity" in [f["code"] for f in meta["flags"]]
+
+
+# ----------------------------------------------------------------- bugs audit (2026-10-08)
+
+
+def _curve_of(chain: FakeChain, mint: str) -> dict[str, Any]:
+    return decode_bonding_curve(
+        base64.b64decode(chain.accounts[bonding_curve_pda(mint)]["data"][0])
+    )
+
+
+async def _resolve_fee(
+    chain: FakeChain,
+    *,
+    rpc_ok: bool = True,
+    conn: asyncpg.Connection | None = None,
+) -> fees.CreatorFee:
+    async with httpx.AsyncClient() as http:
+        with respx.mock(assert_all_called=False) as router:
+            if rpc_ok:
+                router.post(RPC).mock(side_effect=chain.handle)
+            else:
+                router.post(RPC).mock(return_value=httpx.Response(503))
+            return await fees.resolve_creator_fee(
+                T22_MINT,
+                _curve_of(chain, T22_MINT),
+                chain.accounts[fees.sharing_config_pda(T22_MINT)],
+                rpc=SolanaRpc(RPC, http),
+                conn=conn,
+                http=http,
+                lookup_github=False,
+            )
+
+
+async def test_failed_recipient_read_on_a_split_is_unknown_not_a_split_flag() -> None:
+    # Two shareholders and a failed read used to give destination "split" and the summary
+    # "70% to unresolved B8wt…": now no verdict, no flag, no internal kind word.
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    chain.add_sharing_config(T22_MINT, CREATOR, [(CREATOR, 3_000), (WALLET, 7_000)])
+    cf = await _resolve_fee(chain, rpc_ok=False)
+    assert cf.destination == "unknown" and cf.split is True
+    assert "unresolved" not in cf.describe()
+    doc = build_document(
+        _resolved(T22_MINT, cf, _curve_of(chain, T22_MINT)), None, "basic", None, None
+    )
+    assert not [f for f in doc.flags if f.code.startswith("creator_fee_")]
+    assert "unresolved" not in doc.summary
+    # the renderer has a phrase for every kind, even when a caller builds a split by hand
+    cf2 = fees.CreatorFee("split", "sharing_config", admin=CREATOR)
+    cf2.recipients = [
+        fees.FeeRecipient(WALLET, 5_000, "unresolved"),
+        fees.FeeRecipient(CREATOR, 5_000, "social", platform="platform:7"),
+    ]
+    text = cf2.describe()
+    assert "unresolved" not in text and "could not be classified" in text
+    assert "a linked social account (platform:7)" in text
+
+
+async def test_uncreated_social_fee_pda_is_not_a_wallet() -> None:
+    # A GitHub user's fee PDA that nobody has created yet does not exist on-chain. It is off
+    # the ed25519 curve, so it cannot be a wallet.
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    pda = fees.social_fee_pda("7654321", 2)
+    chain.add_sharing_config(T22_MINT, CREATOR, [(pda, 10_000)])
+    cf = await _resolve_fee(chain)
+    assert cf.destination == "unknown" and cf.recipients[0].kind == "unresolved"
+    assert any("does not exist yet" in c for c in cf.caveats)
+    # a never-funded wallet (on the curve) is still a wallet
+    assert fees.classify_recipient_account(WALLET, None) == {"kind": "wallet"}
+
+
+@needs_db
+async def test_uncreated_pda_and_running_totals_are_not_cached(
+    db: asyncpg.Connection,
+) -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    pda = fees.social_fee_pda("7654321", 2)
+    chain.add_sharing_config(T22_MINT, CREATOR, [(pda, 10_000)])
+    cf = await _resolve_fee(chain, conn=db)
+    assert cf.destination == "unknown"
+    assert await db.fetchval("select count(*) from fee_recipient where address=$1", pda) == 0
+    # the PDA is created and claims 1 SOL: the next read sees it
+    chain.add_social_fee_pda("7654321", 2, total_claimed=10**9)
+    cf = await _resolve_fee(chain, conn=db)
+    assert cf.destination == "github" and cf.recipients[0].lifetime_received == 1.0
+    # it claims 500 SOL more: the total is re-read, not served from the 7-day cache
+    chain.add_social_fee_pda("7654321", 2, total_claimed=501 * 10**9)
+    chain.calls.clear()
+    cf = await _resolve_fee(chain, conn=db)
+    assert cf.recipients[0].lifetime_received == 501.0
+    assert chain.calls.count("getMultipleAccounts") == 1
+    # a plain wallet is cached and not read again
+    chain.add_wallet(WALLET)
+    chain.add_sharing_config(T22_MINT, CREATOR, [(WALLET, 10_000)])
+    await _resolve_fee(chain, conn=db)
+    chain.calls.clear()
+    cf = await _resolve_fee(chain, conn=db)
+    assert cf.destination == "wallet" and chain.calls.count("getMultipleAccounts") == 0
+
+
+async def test_recipient_read_asks_for_a_data_slice() -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    pda = chain.add_social_fee_pda("1234567", 2, total_claimed=10**9)
+    chain.add_sharing_config(T22_MINT, CREATOR, [(pda, 10_000)])
+    seen: list[dict] = []
+
+    def spy(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body["method"] == "getMultipleAccounts":
+            seen.append(body["params"][1])
+        return chain.handle(request)
+
+    async with httpx.AsyncClient() as http:
+        with respx.mock(assert_all_called=False) as router:
+            router.post(RPC).mock(side_effect=spy)
+            cf = await fees.resolve_creator_fee(
+                T22_MINT,
+                _curve_of(chain, T22_MINT),
+                chain.accounts[fees.sharing_config_pda(T22_MINT)],
+                rpc=SolanaRpc(RPC, http),
+                lookup_github=False,
+            )
+    assert len(seen) == 1 and seen[0]["dataSlice"] == {"offset": 0, "length": 256}
+    # the decoder still reads everything it needs from the first 256 bytes
+    assert cf.destination == "github" and cf.recipients[0].lifetime_received == 1.0
+
+
+async def test_hostile_social_user_id_is_never_echoed() -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    hostile = "\x1b[31m<img src=x>\r\n#"
+    pda = fees.social_fee_pda(hostile, 2)
+    raw = base64.b64encode(social_fee_pda_bytes(hostile, 2)).decode()
+    chain.accounts[pda] = {"owner": fees.PUMP_FEES_PROGRAM, "lamports": 1, "data": [raw, "base64"]}
+    chain.add_sharing_config(T22_MINT, CREATOR, [(pda, 10_000)])
+    cf = await _resolve_fee(chain)
+    r = cf.recipients[0]
+    assert cf.destination == "github" and r.user_id is None and r.url is None
+    assert hostile not in cf.describe() and "\x1b" not in cf.describe()
+    assert await fees.github_login(httpx.AsyncClient(), "١٢٣") == (None, None)  # non-ASCII digits
+
+
+async def test_shares_over_10000_bps_degrade_to_unknown() -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    chain.add_sharing_config(T22_MINT, CREATOR, [(CREATOR, 20_000)])
+    cf = await fees.resolve_creator_fee(
+        T22_MINT,
+        _curve_of(chain, T22_MINT),
+        chain.accounts[fees.sharing_config_pda(T22_MINT)],
+        rpc=None,
+    )
+    assert cf.destination == "unknown" and any("could not be read" in c for c in cf.caveats)
+    doc = build_document(
+        _resolved(T22_MINT, cf, _curve_of(chain, T22_MINT)), None, "basic", None, None
+    )
+    Analysis.model_validate(doc.model_dump(mode="json"))
+
+
+async def test_odd_account_shapes_never_raise() -> None:
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "n", "s", META_URI)
+    pda = fees.sharing_config_pda(T22_MINT)
+    chain.set_curve(T22_MINT, creator=pda)
+    curve = _curve_of(chain, T22_MINT)
+    # the sharing config as a jsonParsed object
+    cf = await fees.resolve_creator_fee(
+        T22_MINT, curve, {"owner": fees.PUMP_FEES_PROGRAM, "data": {"parsed": {}}}, rpc=None
+    )
+    assert cf.destination == "unknown"
+    # recipient accounts whose data element is not a base64 string
+    for data in ([123, "base64"], [None], {"parsed": {}}):
+        info = fees.classify_recipient_account(
+            WALLET, {"owner": fees.PUMP_FEES_PROGRAM, "data": data}
+        )
+        assert info["kind"] == "program"

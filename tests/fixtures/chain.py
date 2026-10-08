@@ -269,6 +269,11 @@ class FakeChain:
                     and isinstance(a["data"], dict)
                 ):
                     a = {**a, "data": ["", "base64"]}
+                sl = params[1].get("dataSlice")
+                if a is not None and sl and isinstance(a["data"], list) and a["data"][0]:
+                    raw = base64.b64decode(a["data"][0])
+                    raw = raw[sl["offset"] : sl["offset"] + sl["length"]]
+                    a = {**a, "data": [base64.b64encode(raw).decode(), "base64"]}
                 value.append(a)
             return httpx.Response(
                 200,
