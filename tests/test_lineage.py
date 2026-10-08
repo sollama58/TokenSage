@@ -317,3 +317,35 @@ def test_a_copy_is_marked_derivative_but_its_main_category_is_its_theme() -> Non
     bare = _run("Blorbo", "BLORBO", DbContext(same_name=_names([3])))
     assert bare.agg.main is not None and bare.agg.main[0] == "derivative"
     assert "a derivative of an existing coin" in bare.summary
+
+
+# ----------------------------------------------------------------- bugs audit (2026-10-08)
+
+
+def test_a_copy_trading_against_a_token_still_inherits_its_originals_theme() -> None:
+    # crypto_native/paired_ecosystem and the pair token's own categories (db) are context,
+    # not the copy's theme: they used to block inheritance, so main_category was the pair's
+    from tokensage.engine.pairing import PairInput
+
+    prior = PriorRead(categories=[("animal", 0.9), ("animal/frog", 0.9)])
+    late = DbContext(same_name=_names([0.1 * i for i in range(1, 15)]), originals={"m13": prior})
+    for pair in (
+        PairInput(mint="Q" * 32, symbol="ZZQX", name="Zzqx", source="onchain"),
+        PairInput(mint="B" * 32, symbol="BONK", name="Bonk", source="onchain"),
+    ):
+        inp = EngineInput("mine", "Blorbo", "BLORBO", None, None, NOW, ctx=late, pair=pair)
+        out = run_basic(inp)
+        cats = dict(out.agg.categories)
+        assert "animal/frog" in cats, (pair.symbol, out.agg.categories)
+        assert out.agg.main is not None and out.agg.main[0] == "animal"
+
+
+def test_a_generic_inherited_referent_does_not_override_the_copys_own_kind() -> None:
+    frog = ReferentCandidate("frog", "animal", None, "analysis", 0.41, generic=True)
+    prior = PriorRead(categories=[("animal", 0.55), ("animal/frog", 0.55)], referent=frog)
+    late = DbContext(same_name=_names([0.1 * i for i in range(1, 15)]), originals={"m13": prior})
+    out = _run("Blorbo Cat", "BLORBO", late)
+    assert out.referent_read is not None and out.referent_read.label == "cat"
+    # with no theme of its own the copy is still a frog coin
+    bare = _run("Blorbo", "BLORBO", late)
+    assert bare.referent_read is not None and bare.referent_read.label == "frog"

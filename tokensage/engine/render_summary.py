@@ -63,6 +63,7 @@ def summarize(
     framing: str | None = None,
     narrative: str | None = None,
     rival: bool = False,
+    referent_confidence: float | None = None,
 ) -> tuple[str, list[str]]:
     """framing: "a cat coin" when the referent is only the name's modifier. narrative: the
     X post the coin was launched on, if any. rival: the name sets itself against the
@@ -72,13 +73,15 @@ def summarize(
     r = agg.referent
     if r and r.score >= 0.45:
         desc = f" ({r.desc})" if r.desc else ""
-        conf = f" (confidence {r.score:.2f})"
+        # the reported (banded) confidence, as referent.confidence says it
+        score = referent_confidence if referent_confidence is not None else r.score
+        conf = f" (confidence {score:.2f})"
         if rival:
             parts.append(f"{head} sets itself against {r.label}{desc}{conf}.")
         elif framing:
             parts.append(f"{head} is {framing} tied to {r.label}{desc}{conf}.")
         else:
-            parts.append(f"{head} {_verb(r.score)} {r.label}{desc}{conf}.")
+            parts.append(f"{head} {_verb(score)} {r.label}{desc}{conf}.")
     elif narrative:
         # no name anyone knows: the post it was launched on is the story
         joiner = " was " if narrative.startswith("launched") else ": "

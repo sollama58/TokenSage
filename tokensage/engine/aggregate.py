@@ -16,6 +16,17 @@ NO_PARENT = {"crypto_native/paired_ecosystem"}
 # Labels that say how the coin relates to another coin (a copy, a "Baby X"), not what it is
 # about: kept in categories[] as the relation, never the coin's main category.
 RELATION_PREFIXES = ("derivative",)
+# Top-level labels about the coin's setting, not its subject: a name in Han or Cyrillic says
+# which community it is for, not what it is about. The main category only when nothing else is.
+CONTEXT_LABELS = {"regional_language"}
+# On a tie between two themes the subject wins over the setting: a "golden bull" is a bull
+# before it is crypto slang. Shared by main_category and the generic referent's kind.
+THEME_ORDER = [
+    "animal", "celebrity", "meme_template", "pop_culture", "news_event", "political",
+    "ai_agent", "tradfi", "food_object_abstract", "humor_crude_offensive", "crypto_native",
+]  # fmt: skip
+# Evidence source prefixes of the trend stage (trends.py): the world's input
+TREND_SOURCES = {"wikipedia", "gtrends", "xtrends", "news", "bsky"}
 # Evidence kinds that only say what a word usually means, not what this coin refers to.
 DICTIONARY_KINDS = {"wordnet", "emoji"}
 # Labels a dictionary noun gives any text that has one: only the name, ticker or image can
@@ -42,12 +53,30 @@ def is_relation(label: str) -> bool:
     return label.split("/")[0] in RELATION_PREFIXES
 
 
+def is_theme(label: str) -> bool:
+    """A label about what the coin is about: not the copy relation, not its setting (the
+    script of its name, the pair it trades against)."""
+    return (
+        not is_relation(label)
+        and label.split("/")[0] not in CONTEXT_LABELS
+        and (label not in NO_PARENT)
+    )
+
+
+def theme_rank(label: str) -> int:
+    top = label.split("/")[0]
+    return THEME_ORDER.index(top) if top in THEME_ORDER else len(THEME_ORDER)
+
+
 def main_category(categories: list[tuple[str, float]]) -> tuple[str, float] | None:
-    """The coin's main category: its strongest top-level theme. A relation label
-    (derivative) is the main category only when the coin has no theme at all."""
+    """The coin's main category: its strongest top-level theme, the subject before the
+    setting on a tie. A relation (derivative) or context label (regional_language) is the
+    main category only when the coin has no theme at all."""
     tops = [(lbl, s) for lbl, s in categories if "/" not in lbl]
-    theme = next(((lbl, s) for lbl, s in tops if not is_relation(lbl)), None)
-    return theme or (tops[0] if tops else None)
+    themes = [(lbl, s) for lbl, s in tops if is_theme(lbl)]
+    if themes:
+        return max(themes, key=lambda t: (t[1], -theme_rank(t[0])))
+    return tops[0] if tops else None
 
 
 def _effective_weight(ev: Ev, k: Knowledge) -> float:
@@ -65,7 +94,8 @@ def channel(ev: Ev, symbol_is_name: bool = False) -> str:
     """The independent input a piece of evidence comes from: name, symbol, description,
     image, x, trend or db. A ticker that spells the name is the name again, and a trend or
     headline hit is the world's input whatever text it was found in."""
-    if ev.kind == "trend":
+    if ev.kind == "trend" or (ev.referent is not None and ev.source.split(":")[0] in TREND_SOURCES):
+        # a trending article, search, topic, headline or post naming the referent
         return "trend"
     if ev.where == "symbol" and symbol_is_name:
         return "name"

@@ -79,7 +79,8 @@ _RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ("crypto_native/company",),
     ),
     (
-        r"cryptocurrency|blockchain|memecoin|meme coin|crypto|stablecoin",
+        # "crypto" as a word: a cryptographer or cryptozoologist is not a coin
+        r"cryptocurrenc|blockchain|memecoin|meme coin|\bcrypto\b|stablecoin",
         "coin",
         ("crypto_native/chain_or_coin",),
     ),

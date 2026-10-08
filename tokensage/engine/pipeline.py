@@ -26,7 +26,16 @@ from tokensage.engine import (
 )
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
-from tokensage.engine.aggregate import NO_PARENT, Aggregated, aggregate, channel, is_relation
+from tokensage.engine.aggregate import (
+    NO_PARENT,
+    THEME_ORDER,
+    TREND_SOURCES,
+    Aggregated,
+    aggregate,
+    channel,
+    is_relation,
+    is_theme,
+)
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.gazetteer import Gazetteer
 from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, load_knowledge
@@ -1146,6 +1155,14 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         agg,
         tk.text,
         extra_caveats,
+        referent_confidence=(
+            referent_read.confidence
+            if referent_read is not None
+            and not referent_read.generic
+            and agg.referent is not None
+            and referent_read.label == agg.referent.label
+            else None
+        ),
         context=context,
         framing=_framing(n, head, agg, k),
         narrative=_narrative(inp, xa),
@@ -1271,12 +1288,18 @@ def _inherit(
     factor = float(lineage_stage.config(k).get("inherit_factor", 0.8))
     who = f"${o.ticker}" if o.ticker else (o.name or o.mint[:6] + "…")
     evs: list[Ev] = []
-    own_theme = [lbl for lbl, _ in agg.categories if not is_relation(lbl)]
+    # The copy's own theme: not the relation, not its setting (script, pair ecosystem), and
+    # not what it only borrows from the token it trades against (db-only labels)
+    own_theme = [
+        lbl
+        for lbl, _ in agg.categories
+        if is_theme(lbl) and lbl != meta.LABEL and agg.inputs.get(lbl) != ["db"]
+    ]
     if not own_theme:
         labels = [lbl for lbl, _ in prior.categories]
         for lbl, conf in prior.categories:
-            if is_relation(lbl) or lbl == meta.LABEL or lbl in NO_PARENT:
-                continue  # the relation, old corpus-rule labels and the pair's ecosystem
+            if not is_theme(lbl) or lbl == meta.LABEL:
+                continue  # the relation, old corpus-rule labels, the script, the pair's ecosystem
             if any(other.startswith(lbl + "/") for other in labels):
                 continue  # the parent is lifted again by its child; adding both inflates it
             evs.append(
@@ -1296,6 +1319,8 @@ def _inherit(
         r is not None
         and not r.label.startswith(meta.REFERENT_PREFIX)
         and (own is None or own.score < weak)
+        # a kind-only read ("frog") says less than the copy's own theme ("cat")
+        and not (r.generic and own_theme)
     ):
         ref = ReferentCandidate(
             label=r.label,
@@ -1345,10 +1370,6 @@ _CATEGORY_KIND = {
     "tradfi": "organization",
     "humor_crude_offensive": "concept",
 }
-_THEME_ORDER = [
-    "animal", "celebrity", "meme_template", "pop_culture", "news_event", "political",
-    "ai_agent", "tradfi", "food_object_abstract", "humor_crude_offensive", "crypto_native",
-]  # fmt: skip
 # The generic label when no matched word can stand for the kind.
 _KIND_LABEL = {
     "animal": "animal",
@@ -1410,8 +1431,27 @@ def _theme(agg: Aggregated, floor: float) -> tuple[str, str, float] | None:
         return None
     # on a tie the subject wins over the setting: a "golden bull" is a bull before it is
     # crypto slang
-    top = max(best, key=lambda t: (best[t][1], -_THEME_ORDER.index(t)))
+    top = max(best, key=lambda t: (best[t][1], -THEME_ORDER.index(t)))
     return top, best[top][0], best[top][1]
+
+
+def _trend_backs(label: str, evidence: list[Ev]) -> bool:
+    """A trend hit names this referent: a Wikipedia article whose title is the label, as
+    referent_hits() matches them ("Peanut (squirrel)", not the "Peanut" article), or an X,
+    Google, news or Bluesky label that is its name ("Moo Deng" for "Moo Deng (hippo)": those
+    labels carry no disambiguation)."""
+    full = trends._clean(label)
+    base = trends._clean(re.sub(r"\s*\([^)]*\)\s*$", "", label))
+    for ev in evidence:
+        src, _, term = ev.source.partition(":")
+        if ev.kind != "trend" or src not in TREND_SOURCES or not term:
+            continue
+        if src == "wikipedia":
+            if full in trends.surfaces_for(term):
+                return True
+        elif trends._clean(term) in (full, base):
+            return True
+    return False
 
 
 def _theme_kind(labels: list[str]) -> str | None:
@@ -1438,6 +1478,8 @@ def read_referent(agg: Aggregated, symbol_is_name: bool, k: Knowledge) -> Refere
             for ev in agg.evidence
             if ev.referent is not None and ev.referent.label == r.label
         ]
+        if "trend" not in chans and _trend_backs(r.label, agg.evidence):
+            chans.append("trend")  # a live trend names this referent too
         inputs = list(dict.fromkeys(chans))
         raw = r.score
         if raw >= 0.45:

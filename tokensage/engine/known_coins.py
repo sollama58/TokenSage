@@ -144,6 +144,8 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
         )
         verb = "matches" if self_coin else "builds on"
         detail = f"{verb} ${c.symbol} ({c.name}) via {', '.join(m.signals)}"
+        # which input matched: a ticker-only match is the symbol's, not the name's
+        where = "symbol" if m.signals and set(m.signals) <= {"ticker", "ticker_base"} else "name"
         if not self_coin:
             evs.append(
                 Ev(
@@ -152,6 +154,7 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
                     weight=min(k.scoring.get("known_coin_exact_weight", 0.9), m.score),
                     detail=detail,
                     source=f"known_coins:{c.symbol}",
+                    where=where,  # type: ignore[arg-type]
                     referent=ref,
                 )
             )
@@ -167,6 +170,7 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
                     weight=round(m.score * (0.8 if self_coin else 0.6), 3),
                     detail=f"inherited from ${c.symbol}: {c.lore}",
                     source=f"known_coins:{c.symbol}",
+                    where=where,  # type: ignore[arg-type]
                     referent=ref,
                 )
             )
@@ -177,6 +181,7 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
                 weight=ref.score,
                 detail=f"{c.referent_label}: {c.referent_desc or c.lore}",
                 source=f"known_coins:{c.symbol}",
+                where=where,  # type: ignore[arg-type]
                 referent=ref,
             )
         )
