@@ -866,6 +866,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     extra_passes: list[Pass] = []
     ocr_lines: list[ocr.OcrLine] = []
     ocr_err: str | None = None
+    ocr_text = ""
     xa: xsignals.XAssessment | None = None
     if depth == "full":
         ocr_lines, ocr_err, ocr_evs, ocr_text = _ocr_pass(inp, n, k)
@@ -975,6 +976,29 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 if h.term.term not in seen_terms:
                     seen_terms.add(h.term.term)
                     trend_hits.append(h)
+        # a one-word name may be one word of what trends ("Leoncio" of "Leoncio Gomez"), and
+        # a ticker that is not the name may be the whole of it; gate() below weeds out the
+        # everyday words
+        if (
+            len(n.name_tokens) == 1
+            and len(n.name_tokens[0]) >= trends.MIN_WORD_LEN
+            and not any(h.where == "name" for h in trend_hits)
+        ):
+            word_hit = inp.trend_index.match_word(n.name_tokens[0], "name")
+            if word_hit is not None and word_hit.term.term not in seen_terms:
+                seen_terms.add(word_hit.term.term)
+                trend_hits.append(word_hit)
+        tick = (n.ticker or "").lower()
+        if (
+            len(tick) >= trends.MIN_TERM_LEN
+            and tick.isalpha()
+            and tick != n.name_compact
+            and tick not in n.name_tokens
+        ):
+            tick_hit = inp.trend_index.match_exact(tick, "symbol")
+            if tick_hit is not None and tick_hit.term.term not in seen_terms:
+                seen_terms.add(tick_hit.term.term)
+                trend_hits.append(tick_hit)
         for h in inp.news_hits or ():
             if h.term.term.lower() not in {t.lower() for t in seen_terms}:
                 seen_terms.add(h.term.term)
@@ -984,6 +1008,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             if h.term.term not in seen_terms:
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
+        support = " ".join(text for _, text in texts) + " " + ocr_text
+        trend_hits = trends.gate(trend_hits, support, k)
         for h in trend_hits:
             h.score = trends.score(h, inp.trend_index)
         evidence += trends.evidence(trend_hits, inp.trend_index)

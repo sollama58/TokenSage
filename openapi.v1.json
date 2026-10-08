@@ -3598,7 +3598,7 @@
             "type": "string"
           },
           "status": {
-            "description": "ok: the source had current data; stale: only old data (see detail); failed: the lookup failed and nothing was cached; skipped: not looked up for this coin (news, bluesky: the name is too generic to search); unavailable: no data loaded at all",
+            "description": "ok: the source had current data; stale: only old data (see detail); failed: the lookup failed and nothing was cached; skipped: not looked up for this coin (news, bluesky: the name is too generic to search, see detail); unavailable: no data loaded at all",
             "enum": [
               "ok",
               "stale",
@@ -3702,8 +3702,20 @@
                 "type": "null"
               }
             ],
-            "description": "What matched: name, description or x (the coin's own text), referent (the referent it resolves to) or alias (an alias of that referent)",
+            "description": "What matched: name, symbol, description or x (the coin's own text), referent (the referent it resolves to) or alias (an alias of that referent)",
             "title": "Matched On"
+          },
+          "partial": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "true when the coin's one-word name is one word of a longer trending label (\"Leoncio\" of \"Leoncio Gomez\"), not the whole label (since rules 0.18.0)",
+            "title": "Partial"
           },
           "posts": {
             "anyOf": [

@@ -1410,6 +1410,7 @@ def _trend_out(out: EngineOutput) -> TrendOut:
             rank=h.term.rank if h.term.source == "x_trends" else None,
             hours=h.term.views if h.term.source == "x_trends" else None,
             posts=h.term.views if h.term.source == "bluesky" else None,
+            partial=True if h.partial else None,
         )
         for h in out.trend_hits
     ]
@@ -1489,9 +1490,14 @@ async def _name_news(
     named after a story that broke today is "in the news" long before, or without ever, its
     subject reaching Wikipedia's daily top 1000. Also returns the search's status."""
     phrase = gnews.name_query(inp.name)
+    one_word = None
+    if phrase is None:
+        phrase = one_word = trends.news_word(inp.name, load_knowledge())
     if phrase is None:
         return [], trends.SourceStatus(
-            "news", "skipped", detail="name not specific enough to search (needs two words)"
+            "news",
+            "skipped",
+            detail="name not specific enough to search (needs two words, or one uncommon word)",
         )
     try:
         found = await fulldepth.news_lookup(conn, ctx.http, phrase, exact=True)
@@ -1501,13 +1507,18 @@ async def _name_news(
     if found is None:
         return [], trends.SourceStatus("news", "failed", detail="Google News unavailable")
     rel = gnews.relevant(found.headlines, phrase, inp.symbol)
-    hit = trends.news_hit(phrase, rel)
+    hit = trends.news_hit(
+        phrase,
+        rel,
+        min_outlets=trends.MIN_ONE_WORD_OUTLETS if one_word else trends.MIN_NEWS_HEADLINES,
+    )
     st = trends.SourceStatus(
         "news",
         "stale" if found.stale else "ok",
         as_of=found.as_of,
         terms=len(rel),
         detail=f"searched '{phrase}'"
+        + (f"; one word, needs {trends.MIN_ONE_WORD_OUTLETS} outlets" if one_word else "")
         + ("; Google News unavailable, older cached headlines" if found.stale else ""),
     )
     return ([hit] if hit else []), st
@@ -1522,7 +1533,16 @@ async def _name_bluesky(
     phrase = gnews.name_query(inp.name)
     if phrase is None:
         return [], trends.SourceStatus(
-            "bluesky", "skipped", detail="name not specific enough to search (needs two words)"
+            "bluesky",
+            "skipped",
+            detail="name not specific enough to search (needs two words; one-word names are "
+            "not searched on Bluesky)",
+        )
+    if trends.ordinary(phrase, load_knowledge()):
+        return [], trends.SourceStatus(
+            "bluesky",
+            "skipped",
+            detail=f"'{phrase}' is everyday words: people post it whatever is trending",
         )
     try:
         found = await fulldepth.bsky_for(conn, ctx.http, phrase)

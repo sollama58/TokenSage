@@ -23,7 +23,8 @@ _PUB = re.compile(r"<pubDate>(.*?)</pubDate>", re.S)
 # Pages about a coin's price or chart, not news about what the coin is named after
 _CRYPTO = re.compile(
     r"\b(price|prices|coin|coins|token|tokens|crypto|cryptocurrency|memecoins?|pump\.?fun|"
-    r"solana|usdt?|converter|market cap|chart|airdrop|presale|binance|coinbase|dex)\b",
+    r"solana|usdt?|converter|market cap|chart|airdrop|presale|binance|coinbase|dex|bitcoin|"
+    r"btc|ethereum|altcoins?|stablecoins?|dogecoin|blockchain|defi|web3|nfts?)\b",
     re.I,
 )
 # Words that do not make a coin name specific enough to search the news for

@@ -149,7 +149,7 @@ async def test_full_depth_fills_x_trend_and_caches(
         "google_trends": "failed",
         "x_trends": "failed",
         "news": "ok",
-        "bluesky": "failed",
+        "bluesky": "skipped",  # "Peanut the Squirrel" is everyday words
     }
     assert len(fx_calls) == 1
 
