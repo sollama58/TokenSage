@@ -451,23 +451,28 @@ async def curves_now(
     if not stale:
         return out
     fresh: dict[str, tuple[bool, float | None]] = {}
-    if rpc is not None:
+
+    async def read(rpc: SolanaRpc) -> None:
         accs: list = []
         try:
-            read = rpc.get_multiple_accounts([bonding_curve_pda(m) for m in stale])
-            accs = await (asyncio.wait_for(read, rpc_timeout_s) if rpc_timeout_s else read)
-        except TimeoutError:
-            log.info("curve_now.timeout", mints=stale)
-            return out
+            accs = await rpc.get_multiple_accounts([bonding_curve_pda(m) for m in stale])
         except (RpcError, ValueError) as e:
             log.info("curve_now.failed", mints=stale, error=str(e)[:120])
         for mint, acc in zip(stale, accs, strict=False):
             try:
                 if acc and acc.get("owner") == PUMP_PROGRAM:
                     curve = decode_bonding_curve(base64.b64decode(acc["data"][0]))
+                    # may read pump.fun's Global account: inside the same time bound
                     fresh[mint] = await _curve_state(rpc, curve)
             except (RpcError, ValueError, KeyError, IndexError, TypeError) as e:
                 log.info("curve_now.failed", mint=mint, error=str(e)[:120])
+
+    if rpc is not None:
+        try:
+            await (asyncio.wait_for(read(rpc), rpc_timeout_s) if rpc_timeout_s else read(rpc))
+        except TimeoutError:
+            log.info("curve_now.timeout", mints=stale)
+            return out
     if fresh:
         # store back only coins TokenSage knows (token_market rows reference token)
         unknown = [m for m in fresh if m not in rows]

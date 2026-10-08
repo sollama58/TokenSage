@@ -848,7 +848,7 @@
             "title": "Creator Fee Bps"
           },
           "destination": {
-            "description": "creator: the creator wallet; wallet: one other wallet; split: several recipients with no single dominant kind; holder_rewards: set aside for holders, paid out by pump.fun; charity: a donate.gg charity holds at least half; github: a GitHub-linked account holds at least half; social: an X- or pump.fun-linked account holds at least half; other: a single recipient that is an account of some other program; cashback: back to traders (deprecated coin type); unknown: could not be determined. New values may be added",
+            "description": "creator: the creator wallet; wallet: one other wallet; split: several recipients, where no charity, GitHub or social recipient holds half (or two of them hold half each); holder_rewards: set aside for holders, paid out by pump.fun; charity: donate.gg charities hold at least half; github: GitHub-linked accounts hold at least half; social: X- or pump.fun-linked accounts hold at least half; other: a single recipient that is an account of some other program; cashback: back to traders (deprecated coin type); unknown: could not be determined. New values may be added",
             "enum": [
               "creator",
               "wallet",

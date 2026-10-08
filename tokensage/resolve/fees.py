@@ -23,8 +23,9 @@ and the redirect is visible on-chain:
 
 Cost: the sharing-config PDA rides in the resolver's one getMultipleAccounts call (no extra
 credit). Only a fee-shared coin whose shareholders are not just its own admin costs one
-more getMultipleAccounts (1 Helius credit) to classify the recipient accounts; wallets,
-social and donation PDAs are then cached in `fee_recipient`.
+more getMultipleAccounts (1 Helius credit) to classify the recipient accounts. Wallets and
+other programs' accounts are then cached in `fee_recipient`; social and donation PDAs are
+re-read every time, because their running totals change.
 
 Verified on mainnet 2026-10-08 against real coins of every kind (tests/fixtures/
 fee_accounts.json holds their account bytes).
@@ -250,7 +251,11 @@ class CreatorFee:
         for r in sorted(self.recipients, key=lambda r: -r.share_bps):
             pct = f"{r.share_bps / 100:g}%"
             if r.kind == "github":
-                who = f"GitHub account #{r.user_id or '?'}"
+                who = (
+                    f"GitHub account #{r.user_id}"
+                    if r.user_id
+                    else "a GitHub account with no valid id"
+                )
             elif r.kind == "charity":
                 who = "a charity via donate.gg"
             elif r.kind == "creator":
@@ -322,16 +327,24 @@ def classify_recipient_account(address: str, acc: dict | None) -> dict[str, Any]
         return {"kind": "unresolved"}
     owner = acc.get("owner")
     if owner == SYSTEM_PROGRAM:
+        if _is_off_curve(address):
+            # a vault (Squads), or a fee PDA someone pre-funded before pump.fun created it:
+            # report it as a wallet, but read it again next time instead of caching it
+            return {"kind": "wallet", "off_curve": True}
         return {"kind": "wallet"}
     data = _account_bytes(acc)
     if owner == PUMP_FEES_PROGRAM:
         try:
             if data[:8] == SOCIAL_FEE_PDA_DISC:
                 s = decode_social_fee_pda(data)
+                kind = PLATFORMS.get(s["platform"], "social")
+                user_id = _clean_user_id(s["user_id"])
+                if kind == "github" and user_id is not None and not user_id.isdigit():
+                    user_id = None  # GitHub ids are numbers: "torvalds" names nobody who can claim
                 return {
-                    "kind": PLATFORMS.get(s["platform"], "social"),
+                    "kind": kind,
                     "platform": PLATFORMS.get(s["platform"], f"platform:{s['platform']}"),
-                    "user_id": _clean_user_id(s["user_id"]),
+                    "user_id": user_id,
                     "lifetime_lamports": s["total_claimed"],
                 }
             if data[:8] == DONATION_FEE_PDA_DISC:
@@ -360,9 +373,16 @@ def _destination(recipients: list[FeeRecipient]) -> tuple[Destination, dict[str,
     if any(r.kind == "unresolved" for r in live):
         # a share we could not classify (a failed read) can be the dominant one: no verdict
         return "unknown", shares, True
-    top_kind, top_share = max(shares.items(), key=lambda kv: kv[1])
-    if top_share >= 0.5 and top_kind in ("charity", "github", "x", "pump", "social"):
-        return _KIND_DESTINATION[top_kind], shares, True
+    # a charity, GitHub or social destination holding at least half (all its recipients
+    # together; x and pump.fun-linked accounts are both "social") names the split; two of
+    # them at 50% each is a split. The shareholders' order never matters.
+    by_dest: dict[str, float] = {}
+    for kind, share in shares.items():
+        d = _KIND_DESTINATION.get(kind, "other")
+        by_dest[d] = by_dest.get(d, 0.0) + share
+    named = [d for d in ("charity", "github", "social") if by_dest.get(d, 0.0) >= 0.5 - 1e-9]
+    if len(named) == 1:
+        return named[0], shares, True
     return "split", shares, True
 
 
@@ -386,12 +406,29 @@ _KIND_DESTINATION = {
 }
 
 
-def _lamports_to_quote(lamports: int, quote_mint: str | None) -> float:
-    # SOL-paired coins (the default) count in lamports; a USDC-paired coin's fee is in USDC
-    # base units (6 decimals). Anything else is reported in the quote's base units / 1e9.
-    if quote_mint and quote_mint not in (ZERO_KEY, "So11111111111111111111111111111111111111112"):
-        return round(lamports / 1e6, 6) if quote_mint.startswith("EPjFWdd5") else lamports / 1e9
-    return round(lamports / 1e9, 9)
+# decimals of the quote tokens a coin can pair against (SOL and liquid-staked SOL use 9)
+_QUOTE_DECIMALS = {
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6,  # USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": 6,  # USDT
+    "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB": 6,  # USD1
+    "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo": 6,  # PYUSD
+    "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn": 9,  # JitoSOL
+    "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So": 9,  # mSOL
+    "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1": 9,  # bSOL
+    "jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v": 9,  # JupSOL
+    "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij": 8,  # cbBTC
+    "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh": 8,  # WBTC
+    "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs": 8,  # WETH
+}
+
+
+def _lamports_to_quote(lamports: int, quote_mint: str | None) -> float | None:
+    """A donation total in the coin's quote token; None for a quote whose decimals we do not
+    know (a wrong unit is worse than none)."""
+    if not quote_mint or quote_mint in (ZERO_KEY, "So11111111111111111111111111111111111111112"):
+        return round(lamports / 1e9, 9)
+    dec = _QUOTE_DECIMALS.get(quote_mint)
+    return round(lamports / 10**dec, dec) if dec is not None else None
 
 
 # ----------------------------------------------------------------- resolve
@@ -529,7 +566,12 @@ async def resolve_creator_fee(
         cached = await _cached_recipients(conn, [r.address for r in todo], cache_max_age)
         # A wallet or another program's account stays what it is, so its cached kind is
         # reused. A fee PDA's running total (claimed / donated so far) changes, so it is
-        # re-read every time; its cached row only saves the GitHub login lookup.
+        # re-read every time.
+        cached = {
+            a: c
+            for a, c in cached.items()
+            if not (c["kind"] == "wallet" and _is_off_curve(a))  # stored before 0.21.0
+        }
         fresh = [
             r
             for r in todo
@@ -578,7 +620,7 @@ async def resolve_creator_fee(
             if r.kind == "github" and r.user_id and r.user_id.isdigit():
                 # the public record for the numeric id (the login is not looked up)
                 r.url = f"https://api.github.com/user/{r.user_id}"
-            if info.get("uncreated") or r.kind == "unresolved":
+            if info.get("uncreated") or info.get("off_curve") or r.kind == "unresolved":
                 continue  # nothing to cache: read it again next time
             if r.address not in cached or r.kind not in _STATIC_KINDS:
                 await _store_recipient(conn, r, info)

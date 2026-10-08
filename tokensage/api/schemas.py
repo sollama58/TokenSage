@@ -159,11 +159,12 @@ class CreatorFee(_Model):
         "unknown",
     ] = Field(
         description="creator: the creator wallet; wallet: one other wallet; split: several "
-        "recipients with no single dominant kind; holder_rewards: set aside for holders, paid "
-        "out by pump.fun; charity: a donate.gg charity holds at least half; github: a "
-        "GitHub-linked account holds at least half; social: an X- or pump.fun-linked account "
-        "holds at least half; other: a single recipient that is an account of some other "
-        "program; cashback: back to traders (deprecated coin type); unknown: could not be "
+        "recipients, where no charity, GitHub or social recipient holds half (or two of them "
+        "hold half each); holder_rewards: set aside for holders, paid out by pump.fun; "
+        "charity: donate.gg charities hold at least half; github: GitHub-linked accounts hold "
+        "at least half; social: X- or pump.fun-linked accounts hold at least half; other: a "
+        "single recipient that is an account of some other program; cashback: back to "
+        "traders (deprecated coin type); unknown: could not be "
         "determined. New values may be added"
     )
     mechanism: Literal["direct", "sharing_config", "holder_rewards", "cashback"] = Field(
@@ -913,14 +914,16 @@ def analysis_json_schema() -> dict[str, Any]:
 
 def stored_analysis(doc: dict[str, Any]) -> Analysis:
     """A stored analysis document as the API serves it. The API and the worker deploy
-    separately, so a document written by a newer worker can carry fields this process does
-    not know yet: v1 only ever adds fields, so they are dropped rather than failing the
-    request. Any other mismatch still raises."""
+    separately, so a document written by a newer worker can carry fields or enum values this
+    process does not know yet: v1 only ever adds them. An unknown field is dropped, and an
+    unknown value of an open enum (creator_fee.destination, referent.kind, ...) is served as
+    that enum's catch-all ("unknown", else "other") rather than failing the request. Any
+    other mismatch still raises."""
     try:
         return Analysis.model_validate(doc)
     except ValidationError as e:
         errs = e.errors()
-        if not errs or any(x["type"] != "extra_forbidden" for x in errs):
+        if not errs or any(not _tolerated(x) for x in errs):
             raise
         doc = copy.deepcopy(doc)
         for x in errs:
@@ -928,6 +931,23 @@ def stored_analysis(doc: dict[str, Any]) -> Analysis:
             node: Any = doc
             for part in path:
                 node = node[part]
-            if isinstance(node, dict):
-                node.pop(last, None)
+            if x["type"] == "extra_forbidden":
+                if isinstance(node, dict):
+                    node.pop(last, None)
+            else:
+                node[last] = _catch_all(x)
         return Analysis.model_validate(doc)
+
+
+def _catch_all(err: Any) -> str | None:
+    expected = str((err.get("ctx") or {}).get("expected") or "")
+    for v in ("unknown", "other"):
+        if f"'{v}'" in expected:
+            return v
+    return None
+
+
+def _tolerated(err: Any) -> bool:
+    if err["type"] == "extra_forbidden":
+        return True
+    return err["type"] == "literal_error" and _catch_all(err) is not None

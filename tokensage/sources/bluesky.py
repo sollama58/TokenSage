@@ -15,7 +15,7 @@ import httpx
 import structlog
 
 from tokensage.net.breaker import breaker
-from tokensage.sources.gnews import _CRYPTO
+from tokensage.sources.gnews import _CRYPTO, straight
 
 log = structlog.get_logger("bluesky")
 URL = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
@@ -95,7 +95,7 @@ def relevant(posts: list[dict], phrase: str, symbol: str | None = None) -> list[
     sym_pat = re.compile(r"\$" + re.escape(sym) + r"(?!\w)") if len(sym) >= 2 else None
     out = []
     for p in posts:
-        t = " ".join(str(p.get("text") or "").lower().split())
+        t = " ".join(straight(str(p.get("text") or "")).lower().split())
         if not pat.search(t) or _CRYPTO.search(t) or (sym_pat and sym_pat.search(t)):
             continue
         out.append(p)
