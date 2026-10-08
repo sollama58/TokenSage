@@ -135,11 +135,14 @@ def rewrite_dead_gateways(url: str) -> str:
     return url
 
 
+def ipfs_content_key(uri: str | None) -> str | None:
+    """The content key of an IPFS URL, known without downloading (CIDs are immutable)."""
+    ref = parse_ipfs(uri) if uri else None
+    return "ipfs:" + ref.key if ref else None
+
+
 def content_key_for(uri: str, body: bytes) -> str:
-    ref = parse_ipfs(uri)
-    if ref:
-        return "ipfs:" + ref.key
-    return "sha256:" + hashlib.sha256(body).hexdigest()
+    return ipfs_content_key(uri) or "sha256:" + hashlib.sha256(body).hexdigest()
 
 
 def parse_metadata_json(body: bytes) -> dict[str, Any]:

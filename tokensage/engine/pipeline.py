@@ -41,8 +41,7 @@ from tokensage.engine.knowledge import Entity, Knowledge, KnownCoin, SlangTerm, 
 from tokensage.engine.normalize import normalize
 from tokensage.engine.render_summary import summarize
 from tokensage.sources.x import ProfileData, TweetData
-
-RULES_VERSION = "0.23.0-full"
+from tokensage.versions import RULES_VERSION as RULES_VERSION
 
 _WORDNET_LABEL = {
     "food": "food_object_abstract",

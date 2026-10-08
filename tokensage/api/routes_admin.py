@@ -16,10 +16,10 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import Field
 
 from tokensage import __version__, queue, recall
-from tokensage.analyzer import LEXICON_VERSION, RULES_VERSION
 from tokensage.api import errors, usage
 from tokensage.api.auth import ApiKey, KeyStore, new_raw_key, require_admin, sha256_hex
 from tokensage.api.schemas import Depth, _Model
+from tokensage.versions import LEXICON_VERSION, RULES_VERSION
 
 log = structlog.get_logger("admin")
 router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(require_admin)])

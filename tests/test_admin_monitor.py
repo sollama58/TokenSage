@@ -213,6 +213,9 @@ async def test_monitor_routes(client: httpx.AsyncClient, migrated_db: str) -> No
     assert depth["full"]["failed"] == 1
     assert q["errors"][0]["error_code"] == "not_found"
     assert len(q["hourly"]) == 24
+    assert sum(hr["created"] for hr in q["hourly"]) == 2
+    assert sum(hr["done"] for hr in q["hourly"]) == 1
+    assert sum(hr["failed"] for hr in q["hourly"]) == 1
 
     s = (await client.get("/admin/v1/signals", headers=ADMIN)).json()
     assert {k["name"] for k in s["knowledge"]} >= {"trend_term", "known_coin", "top_volume"}

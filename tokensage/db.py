@@ -19,6 +19,11 @@ log = structlog.get_logger("db")
 CONNECT_WAIT_S = 120.0
 CONNECT_RETRY_S = 3.0
 _NOT_READY = (OSError, asyncpg.CannotConnectNowError, asyncio.TimeoutError)
+# asyncpg prepares every statement, and after five runs Postgres may switch it to a generic
+# plan that cannot see the time bounds: the same-name and current-meta lookups then scan the
+# whole 30/90-day created_at index (tens of ms to seconds) instead of the name/trigram index.
+# A custom plan per execution costs tens of microseconds.
+SERVER_SETTINGS = {"plan_cache_mode": "force_custom_plan"}
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
@@ -26,6 +31,15 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.set_type_codec(
         "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
     )
+
+
+async def _reset_connection(conn: asyncpg.Connection) -> None:
+    """Pool release hook replacing asyncpg's default reset query (pg_advisory_unlock_all,
+    CLOSE ALL, UNLISTEN *, RESET ALL), which costs a round trip on every release. asyncpg
+    still rolls back an open transaction and drops listener callbacks before calling this.
+    Nothing here leaves session state behind: advisory locks are xact-scoped, there are no
+    SET/DECLARE statements, and the LISTEN holders (queue.DoneWaiter, the worker) unlisten
+    through remove_listener before releasing."""
 
 
 async def create_pool(
@@ -40,7 +54,13 @@ async def create_pool(
     while True:
         try:
             pool = await asyncpg.create_pool(
-                dsn, min_size=min_size, max_size=max_size, init=_init_connection, command_timeout=30
+                dsn,
+                min_size=min_size,
+                max_size=max_size,
+                init=_init_connection,
+                reset=_reset_connection,
+                command_timeout=30,
+                server_settings=SERVER_SETTINGS,
             )
             assert pool is not None
             return pool

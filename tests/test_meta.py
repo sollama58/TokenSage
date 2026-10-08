@@ -214,6 +214,78 @@ async def test_db_context_counts_namesakes_and_words_around_the_launch(
     assert dbc.meta_counts.recent_total == 10 and dbc.meta_counts.history_total == 70
 
 
+@needs_db
+async def test_meta_totals_leave_out_only_this_token_and_only_when_it_is_in_the_window(
+    db: asyncpg.Connection,
+) -> None:
+    from tokensage import analyzer
+
+    for i in range(3):
+        await _token(db, f"recent{i}", "Some Coin", "SOME", NOW - timedelta(hours=i + 1))
+    for i in range(4):
+        await _token(db, f"older{i}", "Some Coin", "SOME", NOW - timedelta(days=i + 2))
+    await _token(db, "ancient", "Some Coin", "SOME", NOW - timedelta(days=200))
+    await _token(db, "mine", "Some Coin", "SOME", NOW)
+
+    async def totals(mint: str) -> tuple[int, int]:
+        r = SimpleNamespace(mint=mint, created_at=NOW)
+        mc = await analyzer._meta_counts(db, r, ["some"], window_hours=24, history_days=90)  # type: ignore[arg-type]
+        return mc.recent_total, mc.history_total
+
+    assert await totals("mine") == (3, 7)  # its own row is in the window: left out
+    assert await totals("unknown") == (4, 8)  # a mint without a row takes nothing off
+    assert await totals("ancient") == (4, 8)  # its row is outside the window: nothing off
+
+
+async def test_db_context_adds_external_namesakes_after_ours(
+    db: asyncpg.Connection,
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    """The pump.fun / DexScreener searches run alongside the database queries; their
+    matches still join same_name after the database's, without duplicates."""
+    from tokensage import analyzer
+    from tokensage.net.breaker import breaker
+
+    breaker.states.clear()
+    await _token(db, "dbm", "Sahur Cat", "SAHUR", NOW - timedelta(hours=1))
+    await _token(db, "mine", "Sahur Cat", "SAHUR", NOW)
+    ms = int((NOW - timedelta(hours=2)).timestamp() * 1000)
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "api.dexscreener.com":
+            base = [("dx1", "SAHUR"), ("dbm", "SAHUR"), ("dx2", "OTHER")]
+            return httpx.Response(
+                200,
+                json={
+                    "pairs": [
+                        {
+                            "chainId": "solana",
+                            "baseToken": {"address": a, "name": "x", "symbol": sym},
+                            "pairCreatedAt": ms,
+                        }
+                        for a, sym in base
+                    ]
+                },
+            )
+        coins = [("pf1", "SAHUR"), ("mine", "SAHUR"), ("pf2", "NOPE")]
+        return httpx.Response(
+            200,
+            json=[
+                {"mint": a, "name": "y", "symbol": sym, "created_timestamp": ms} for a, sym in coins
+            ],
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+        ctx = SimpleNamespace(settings=settings, http=http)
+        r = SimpleNamespace(mint="mine", created_at=NOW, creator=None)
+        dbc = await analyzer._db_context(db, ctx, r, None, None, "SAHUR", "sahurcat", [])  # type: ignore[arg-type]
+    assert [(t.mint, t.source) for t in dbc.same_name] == [
+        ("dbm", "db"),
+        ("pf1", "pumpfun_search"),
+        ("dx1", "dexscreener"),
+    ]
+
+
 # ----------------------------------------------------------------- the day's top tokens by volume
 
 

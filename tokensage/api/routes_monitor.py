@@ -18,8 +18,8 @@ from pydantic import Field
 from tokensage.api.auth import require_admin
 from tokensage.api.routes_admin import ADMIN_RESPONSES
 from tokensage.api.schemas import _Model
-from tokensage.fulldepth import PAID_X_USAGE_KEY
 from tokensage.net import metrics
+from tokensage.versions import PAID_X_USAGE_KEY
 
 router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -494,6 +494,29 @@ async def upstreams(
 # ---------------------------------------------------------------- jobs
 
 
+# Jobs created, done and failed per hour over the last $1 hours, every hour listed: one pass
+# over the window for each of created_at and finished_at, not one scan of the job table per
+# hour (no join, so the row estimate stays small and the planner does not JIT-compile it).
+JOBS_HOURLY_SQL = """
+    select hour, sum(created)::bigint as created, sum(done)::bigint as done,
+           sum(failed)::bigint as failed
+    from (
+      select generate_series(date_trunc('hour', now()) - make_interval(hours => $1 - 1),
+                             date_trunc('hour', now()), interval '1 hour') as hour,
+             0 as created, 0 as done, 0 as failed
+      union all
+      select date_trunc('hour', created_at), 1, 0, 0 from job
+      where created_at >= date_trunc('hour', now()) - make_interval(hours => $1 - 1)
+      union all
+      select date_trunc('hour', finished_at), 0, (status = 'done')::int,
+             (status = 'failed')::int
+      from job
+      where status in ('done', 'failed')
+        and finished_at >= date_trunc('hour', now()) - make_interval(hours => $1 - 1)
+    ) as t
+    group by hour order by hour"""
+
+
 @router.get("/queue", response_model=JobsResponse, responses=ADMIN_RESPONSES)
 async def queue_stats(
     request: Request,
@@ -550,19 +573,7 @@ async def queue_stats(
                group by error_code order by count desc limit 20""",
             hours,
         )
-        hourly = await conn.fetch(
-            """select g.hour,
-                 (select count(*) from job where created_at >= g.hour
-                    and created_at < g.hour + interval '1 hour') as created,
-                 (select count(*) from job where status = 'done' and finished_at >= g.hour
-                    and finished_at < g.hour + interval '1 hour') as done,
-                 (select count(*) from job where status = 'failed' and finished_at >= g.hour
-                    and finished_at < g.hour + interval '1 hour') as failed
-               from generate_series(date_trunc('hour', now()) - make_interval(hours => $1 - 1),
-                                    date_trunc('hour', now()), interval '1 hour') as g(hour)
-               order by g.hour""",
-            hours,
-        )
+        hourly = await conn.fetch(JOBS_HOURLY_SQL, hours)
         who = await conn.fetch(
             """select requested_by, count(*) as jobs from job
                where created_at > now() - make_interval(hours => $1)

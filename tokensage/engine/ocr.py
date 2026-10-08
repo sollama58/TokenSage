@@ -3,6 +3,7 @@ because it costs ~250 MB RSS. Never raises."""
 
 from __future__ import annotations
 
+import asyncio
 import io
 import threading
 from dataclasses import dataclass
@@ -48,12 +49,33 @@ def _get_engine():  # noqa: ANN202
 
 
 _slots = threading.BoundedSemaphore(1)
+_concurrency = 1
+_async_slots: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
 
 
 def set_concurrency(n: int) -> None:
     """How many OCR reads may run at once (engine runs happen on worker threads)."""
-    global _slots
-    _slots = threading.BoundedSemaphore(max(1, n))
+    global _slots, _concurrency, _async_slots
+    _concurrency = max(1, n)
+    _slots = threading.BoundedSemaphore(_concurrency)
+    _async_slots = None
+
+
+def _async_semaphore() -> asyncio.Semaphore:
+    """The same cap for async callers, one per event loop (a semaphore is bound to its loop)."""
+    global _async_slots
+    loop = asyncio.get_running_loop()
+    if _async_slots is None or _async_slots[0] is not loop:
+        _async_slots = (loop, asyncio.Semaphore(_concurrency))
+    return _async_slots[1]
+
+
+async def read_async(data: bytes) -> tuple[list[OcrLine], str | None]:
+    """read() for async callers: waits for an OCR slot on the event loop, so a job queued
+    behind another OCR does not hold an executor thread (which other jobs' hashing and
+    engine runs need) while it waits."""
+    async with _async_semaphore():
+        return await asyncio.to_thread(read, data)
 
 
 def read(data: bytes) -> tuple[list[OcrLine], str | None]:

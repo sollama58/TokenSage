@@ -6,11 +6,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from tokensage.versions import KNOWN_COINS_VERSION, LEXICON_VERSION
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
@@ -39,9 +41,16 @@ class KnownCoin:
     mint: str | None = None
     logo_phash: int | None = None
 
-    @property
+    # Cached: match_known reads every coin's surfaces on every engine run, and the coins
+    # (seed and the analyzer's known_coin cache) live for the process.
+    @cached_property
     def surfaces(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys([self.name.lower(), *(a.lower() for a in self.aliases)]))
+
+    @cached_property
+    def compact_surfaces(self) -> tuple[tuple[str, str], ...]:
+        """(surface, its letters+digits only) for every surface."""
+        return tuple((s, "".join(filter(str.isalnum, s.lower()))) for s in self.surfaces)
 
 
 @dataclass(frozen=True)
@@ -268,5 +277,5 @@ def load_knowledge() -> Knowledge:
         meta=_yaml("meta.yaml"),
         name_words=frozenset(str(w).lower() for w in t.get("wordnet_name_words") or []),
         cjk={str(w): str(v or "").lower() for w, v in _yaml("cjk_words.yaml")["words"].items()},
-        versions={"lexicon": "2026-10-07.3", "known_coins": "seed-2026-10-06"},
+        versions={"lexicon": LEXICON_VERSION, "known_coins": KNOWN_COINS_VERSION},
     )

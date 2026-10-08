@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 
+import asyncpg
 import httpx
 import respx
 
@@ -13,6 +14,7 @@ from tests.fixtures.chain import (
     CID_IMG,
     CID_META,
     MISSING,
+    PNG,
     T22_MINT,
     FakeChain,
     install_web,
@@ -169,3 +171,41 @@ async def test_batch_needs_at_least_one_ca(
     async with make_client(migrated_db, inline_analyzer=False) as c:
         r = await c.post("/v1/tokens:batch", json={"items": []})
     assert r.status_code in (400, 422)
+
+
+async def test_hinted_ipfs_logo_with_cached_hashes_is_not_downloaded_again(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        await conn.execute("delete from image")  # not truncated between tests
+    finally:
+        await conn.close()
+    img_calls: list[str] = []
+
+    def img(request: httpx.Request) -> httpx.Response:
+        img_calls.append(str(request.url))
+        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+
+    # registered first, so it wins over install_web's image route on every gateway
+    router.get(url__regex=rf".*/ipfs/{CID_IMG}$").mock(side_effect=img)
+    install_web(router, _chain())
+    async with make_client(migrated_db) as c:
+        first = await c.post(f"/v1/tokens/{T22_MINT}", params={"wait": 5}, json={"hints": HINTS})
+        assert first.status_code == 200, first.text
+        n_first = len(img_calls)
+        again = await c.post(
+            f"/v1/tokens/{T22_MINT}",
+            params={"wait": 5, "refresh": "true"},
+            json={"hints": HINTS},
+        )
+        assert again.status_code == 200, again.text
+    assert n_first >= 1  # the first read downloads and hashes the logo
+    assert len(img_calls) == n_first  # the re-read reuses the cached hashes (IPFS is immutable)
+    a1 = TokenResponse.model_validate(first.json()).analysis
+    a2 = TokenResponse.model_validate(again.json()).analysis
+    assert a1 is not None and a2 is not None
+    assert a2.image == a1.image and a2.image.status == "ok" and a2.image.phash
+    assert a2.caveats == a1.caveats and a2.flags == a1.flags

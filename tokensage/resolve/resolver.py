@@ -10,6 +10,7 @@ resolve(conn, rpc, http, settings, ca) -> Resolved
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import struct
 from dataclasses import dataclass
@@ -415,43 +416,89 @@ async def _curve_state(rpc: SolanaRpc, curve: dict) -> tuple[bool, float | None]
     return complete, progress
 
 
-async def curve_now(
-    conn: asyncpg.Connection, rpc: SolanaRpc | None, mint: str, max_age_s: int = 300
-) -> tuple[bool | None, float | None, datetime | None] | None:
-    """Another coin's bonding curve (complete, curve_progress, as_of): the stored state when
-    it is fresher than max_age_s, else one RPC read (stored back). None when unknown."""
-    row = await conn.fetchrow(
-        "select complete, curve_progress, updated_at from token_market where mint=$1", mint
-    )
+async def curves_now(
+    conn: asyncpg.Connection,
+    rpc: SolanaRpc | None,
+    mints: list[str],
+    max_age_s: int = 300,
+    rpc_timeout_s: float | None = None,
+) -> dict[str, tuple[bool | None, float | None, datetime | None]]:
+    """Other coins' bonding curves, mint -> (complete, curve_progress, as_of): the stored
+    state when fresher than max_age_s, else read on-chain (and stored back), all the stale
+    ones in one getMultipleAccounts (1 RPC credit for up to 100 instead of one each). A
+    failed read falls back to the stored state; one that times out (rpc_timeout_s) leaves
+    the coins it was for out. Coins with no answer are absent."""
+    mints = list(dict.fromkeys(mints))
+    if not mints:
+        return {}
+    rows = {
+        r["mint"]: r
+        for r in await conn.fetch(
+            "select mint, complete, curve_progress, updated_at from token_market"
+            " where mint = any($1::text[])",
+            mints,
+        )
+    }
     now = datetime.now(UTC)
-    if row and row["updated_at"] and (now - row["updated_at"]).total_seconds() <= max_age_s:
-        return row["complete"], row["curve_progress"], row["updated_at"]
+    out: dict[str, tuple[bool | None, float | None, datetime | None]] = {}
+    stale: list[str] = []
+    for mint in mints:
+        row = rows.get(mint)
+        if row and row["updated_at"] and (now - row["updated_at"]).total_seconds() <= max_age_s:
+            out[mint] = (row["complete"], row["curve_progress"], row["updated_at"])
+        else:
+            stale.append(mint)
+    if not stale:
+        return out
+    fresh: dict[str, tuple[bool, float | None]] = {}
     if rpc is not None:
+        accs: list = []
         try:
-            acc = await rpc.get_account_info(bonding_curve_pda(mint), encoding="base64")
-            if acc and acc.get("owner") == PUMP_PROGRAM:
-                curve = decode_bonding_curve(base64.b64decode(acc["data"][0]))
-                complete, progress = await _curve_state(rpc, curve)
-                if row is not None or await conn.fetchval(
-                    "select 1 from token where mint=$1", mint
-                ):
-                    await conn.execute(
-                        """insert into token_market (mint, complete, curve_progress, updated_at)
-                           values ($1,$2,$3,$4)
-                           on conflict (mint) do update set complete=excluded.complete,
-                             curve_progress=excluded.curve_progress,
-                             updated_at=excluded.updated_at""",
-                        mint,
-                        complete,
-                        progress,
-                        now,
-                    )
-                return complete, progress, now
-        except (RpcError, ValueError, KeyError, IndexError, TypeError) as e:
-            log.info("curve_now.failed", mint=mint, error=str(e)[:120])
-    if row:
-        return row["complete"], row["curve_progress"], row["updated_at"]
-    return None
+            read = rpc.get_multiple_accounts([bonding_curve_pda(m) for m in stale])
+            accs = await (asyncio.wait_for(read, rpc_timeout_s) if rpc_timeout_s else read)
+        except TimeoutError:
+            log.info("curve_now.timeout", mints=stale)
+            return out
+        except (RpcError, ValueError) as e:
+            log.info("curve_now.failed", mints=stale, error=str(e)[:120])
+        for mint, acc in zip(stale, accs, strict=False):
+            try:
+                if acc and acc.get("owner") == PUMP_PROGRAM:
+                    curve = decode_bonding_curve(base64.b64decode(acc["data"][0]))
+                    fresh[mint] = await _curve_state(rpc, curve)
+            except (RpcError, ValueError, KeyError, IndexError, TypeError) as e:
+                log.info("curve_now.failed", mint=mint, error=str(e)[:120])
+    if fresh:
+        # store back only coins TokenSage knows (token_market rows reference token)
+        unknown = [m for m in fresh if m not in rows]
+        known = set(rows)
+        if unknown:
+            known |= {
+                r["mint"]
+                for r in await conn.fetch(
+                    "select mint from token where mint = any($1::text[])", unknown
+                )
+            }
+        keep = [m for m in fresh if m in known]
+        if keep:
+            await conn.execute(
+                """insert into token_market (mint, complete, curve_progress, updated_at)
+                   select m, c, p, $4 from unnest($1::text[], $2::bool[], $3::float8[])
+                     as u(m, c, p)
+                   on conflict (mint) do update set complete=excluded.complete,
+                     curve_progress=excluded.curve_progress,
+                     updated_at=excluded.updated_at""",
+                keep,
+                [fresh[m][0] for m in keep],
+                [fresh[m][1] for m in keep],
+                now,
+            )
+    for mint in stale:
+        if mint in fresh:
+            out[mint] = (fresh[mint][0], fresh[mint][1], now)
+        elif (row := rows.get(mint)) is not None:
+            out[mint] = (row["complete"], row["curve_progress"], row["updated_at"])
+    return out
 
 
 async def persist(conn: asyncpg.Connection, r: Resolved) -> None:

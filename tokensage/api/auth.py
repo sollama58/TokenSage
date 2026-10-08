@@ -153,7 +153,8 @@ async def require_api_key(
         from tokensage.api import usage
 
         async with pool.acquire() as conn:
-            await usage.bump(conn, key.name, requests=1)
+            # kept for the X-Quota-* headers of a response that charges nothing (a cache hit)
+            request.state.usage = await usage.bump(conn, key.name, requests=1)
     return key
 
 

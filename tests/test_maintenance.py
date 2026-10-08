@@ -139,3 +139,32 @@ async def test_failing_step_does_not_stop_the_rest(
     stats = await maintenance.run_once()
     assert stats["failed_steps"] == ["pruned_jobs"]
     assert "pruned_usage_rows" in stats  # later steps still ran
+
+
+@needs_db
+async def test_prune_lookup_cache_drops_expired_lookups_only(
+    db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(maintenance, "PRUNE_BATCH", 2)  # several batches in one run
+    await db.execute("truncate lookup_cache")
+    rows = [
+        ("bsky:q:old one", "9 days"),
+        ("gnews:q:old two", "20 days"),
+        ("gnews:old three", "30 days"),
+        ("wiki:old four", "8 days 1 hour"),
+        ("wiki:fresh", "6 days"),  # within WIKI_TTL: still served
+        ("bsky:q:fresh", "1 hour"),
+        ("gtrends:seen", "60 days"),  # long-lived trend rows are never pruned
+        ("xtrends:seen", "60 days"),
+    ]
+    for key, age in rows:
+        await db.execute(
+            """insert into lookup_cache (key, value, fetched_at)
+               values ($1, '[]'::jsonb, now() - $2::text::interval)""",
+            key,
+            age,
+        )
+    assert await maintenance._prune_lookup_cache(db) == 4
+    left = [r["key"] for r in await db.fetch("select key from lookup_cache order by key")]
+    assert left == ["bsky:q:fresh", "gtrends:seen", "wiki:fresh", "xtrends:seen"]
+    assert await maintenance._prune_lookup_cache(db) == 0
