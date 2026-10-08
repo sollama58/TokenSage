@@ -126,13 +126,15 @@ def decode_sharing_config(data: bytes) -> dict[str, Any]:
     n, o = _u(data, o, "<I")
     if n > 32:
         raise ValueError("too many shareholders")
-    shareholders = []
+    shareholders: list[dict[str, Any]] = []
+    total = 0
     for _ in range(n):
         addr, o = _pk(data, o)
         bps, o = _u(data, o, "<H")
+        total += bps
         shareholders.append({"address": addr, "share_bps": bps})
     # the program enforces a 10,000 bps total; anything else is not a config we can read
-    if sum(sh["share_bps"] for sh in shareholders) > 10_000:
+    if total > 10_000:
         raise ValueError("shareholder shares exceed 10,000 bps")
     return {
         "version": version,

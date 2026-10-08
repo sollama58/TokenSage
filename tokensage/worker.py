@@ -165,7 +165,7 @@ class Worker:
     async def _callback(self, conn: asyncpg.Connection, job: queue.Job) -> None:
         from tokensage import callbacks
         from tokensage.api import service
-        from tokensage.api.schemas import Analysis, JobResponse, TokenResponse
+        from tokensage.api.schemas import JobResponse, TokenResponse, stored_analysis
 
         payload = job.payload or {}
         target = await queue.get(conn, int(payload["target_job_id"]))
@@ -193,7 +193,7 @@ class Worker:
                     ca=target.mint,
                     status=service._status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
-                    analysis=Analysis.model_validate(doc),
+                    analysis=stored_analysis(doc),
                     request_id=f"callback-{job.id}",
                 )
         body = JobResponse(

@@ -9,7 +9,12 @@ import asyncpg
 
 from tokensage import queue
 from tokensage.api.auth import ApiKey
-from tokensage.api.schemas import Analysis, Freshness, TokenResponse, UpstreamError
+from tokensage.api.schemas import (
+    Freshness,
+    TokenResponse,
+    UpstreamError,
+    stored_analysis,
+)
 from tokensage.config import Settings
 from tokensage.engine.pipeline import RULES_VERSION
 
@@ -151,7 +156,7 @@ async def get_or_enqueue(
                     ca=mint,
                     status=_status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
-                    analysis=Analysis.model_validate(doc),
+                    analysis=stored_analysis(doc),
                     freshness=fr,
                     request_id=request_id,
                 )
@@ -169,7 +174,7 @@ async def get_or_enqueue(
                     ca=mint,
                     status="failed",
                     depth=depth,  # type: ignore[arg-type]
-                    stale_analysis=Analysis.model_validate(cached[0]) if cached else None,
+                    stale_analysis=stored_analysis(cached[0]) if cached else None,
                     errors=[
                         UpstreamError(
                             source="analyzer",
@@ -232,7 +237,7 @@ async def get_or_enqueue(
                         ca=mint,
                         status=_status_for(doc),  # type: ignore[arg-type]
                         depth=doc["depth"],
-                        analysis=Analysis.model_validate(doc),
+                        analysis=stored_analysis(doc),
                         freshness=_freshness(doc, max_age, from_cache=False),
                         request_id=request_id,
                     )
@@ -255,7 +260,7 @@ async def get_or_enqueue(
             ca=mint,
             status="pending",
             depth=depth,  # type: ignore[arg-type]
-            stale_analysis=Analysis.model_validate(stale) if stale else None,
+            stale_analysis=stored_analysis(stale) if stale else None,
             freshness=_freshness(stale, max_age, from_cache=True) if stale else Freshness(),
             job_id=job.id,
             request_id=request_id,

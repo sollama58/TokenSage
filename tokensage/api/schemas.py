@@ -6,10 +6,11 @@ changing meaning needs a new schema_version served under a new path.
 
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SCHEMA_VERSION = "1"
 
@@ -749,8 +750,8 @@ class Analysis(_Model):
         description="The coin's main category: its strongest top-level theme from "
         "categories[] (animal, celebrity, ...). derivative is the relation to another coin, "
         "not a theme: it stays in categories[] and copy_of/lineage, and is the main category "
-        "only when the coin has no theme at all. null when categories[] is empty (since rules "
-        "0.20.0)",
+        "only when the coin has no theme at all; so is regional_language (since rules 0.21.0). "
+        "null when categories[] has no top-level label (since rules 0.20.0)",
     )
     ticker_explanation: str | None = None
     copy_of: list[CopyOf] = []
@@ -906,3 +907,25 @@ class ErrorResponse(_Model):
 
 def analysis_json_schema() -> dict[str, Any]:
     return Analysis.model_json_schema()
+
+
+def stored_analysis(doc: dict[str, Any]) -> Analysis:
+    """A stored analysis document as the API serves it. The API and the worker deploy
+    separately, so a document written by a newer worker can carry fields this process does
+    not know yet: v1 only ever adds fields, so they are dropped rather than failing the
+    request. Any other mismatch still raises."""
+    try:
+        return Analysis.model_validate(doc)
+    except ValidationError as e:
+        errs = e.errors()
+        if not errs or any(x["type"] != "extra_forbidden" for x in errs):
+            raise
+        doc = copy.deepcopy(doc)
+        for x in errs:
+            *path, last = x["loc"]
+            node: Any = doc
+            for part in path:
+                node = node[part]
+            if isinstance(node, dict):
+                node.pop(last, None)
+        return Analysis.model_validate(doc)

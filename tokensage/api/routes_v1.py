@@ -12,7 +12,6 @@ from tokensage.api import errors, service
 from tokensage.api.auth import ApiKey, require_api_key
 from tokensage.api.schemas import (
     SCHEMA_VERSION,
-    Analysis,
     BatchItem,
     BatchRequest,
     BatchRequestItem,
@@ -27,6 +26,7 @@ from tokensage.api.schemas import (
     TokenRequest,
     TokenResponse,
     Versions,
+    stored_analysis,
 )
 from tokensage.resolve.pump_ca import parse_ca
 from tokensage.taxonomy import load_taxonomy
@@ -266,7 +266,7 @@ async def get_job(
                     ca=job.mint,
                     status=service._status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
-                    analysis=Analysis.model_validate(doc),
+                    analysis=stored_analysis(doc),
                     request_id=rid,
                 )
     return JobResponse(

@@ -501,7 +501,7 @@ Tweet text is fed back through S1–S5 and S8. **The tweet is often the "meaning
   | visual label | 0.2–0.5 |
   | known-coin copy | 0.9 |
 
-- **Recall (built 2026-10-06):** the production number the golden set cannot give. Every analysis logs `analysis.referent` with a status (`resolved` ≥ 0.6, `weak` ≥ 0.45, `guess`, `none`) and stores `analysis.referent_score`; the hourly maintenance job logs `recall.daily`, the last day's shares per depth (`tokensage/recall.py`). Sample the `none` and `guess` rows for the Phase 6 labelling set.
+- **Recall (built 2026-10-06):** the production number the golden set cannot give. Every analysis logs `analysis.referent` with a status (`resolved` ≥ 0.7, `weak` ≥ 0.5, `guess`, `none`; the referent bands of rules 0.17.0) and stores `analysis.referent_score`; the hourly maintenance job logs `recall.daily`, the last day's shares per depth (`tokensage/recall.py`). Sample the `none` and `guess` rows for the Phase 6 labelling set.
 - **Calibration (Phase 6):**
   - Hand-label 300–500 real tokens with a small internal labelling page (part of the debug pages, admin key only).
   - Fit per-rule weights by logistic regression (scikit-learn, still classical).
