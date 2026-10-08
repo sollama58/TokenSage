@@ -3593,12 +3593,12 @@
             "title": "Detail"
           },
           "source": {
-            "description": "wikipedia, google_trends or news",
+            "description": "wikipedia, google_trends, x_trends, news or bluesky",
             "title": "Source",
             "type": "string"
           },
           "status": {
-            "description": "ok: the source had current data; stale: only old data (see detail); failed: the lookup failed and nothing was cached; skipped: not looked up for this coin (news: the name is too generic to search); unavailable: no data loaded at all",
+            "description": "ok: the source had current data; stale: only old data (see detail); failed: the lookup failed and nothing was cached; skipped: not looked up for this coin (news, bluesky: the name is too generic to search, see detail); unavailable: no data loaded at all",
             "enum": [
               "ok",
               "stale",
@@ -3618,7 +3618,7 @@
                 "type": "null"
               }
             ],
-            "description": "Trending terms the source contributed (news: relevant headlines found)",
+            "description": "Trending terms the source contributed (news: relevant headlines found; bluesky: matching posts in the last 24 h)",
             "title": "Terms"
           }
         },
@@ -3678,7 +3678,20 @@
                 "type": "null"
               }
             ],
+            "description": "A news headline about the term, the story behind a Google Trends search, or (bluesky) the most liked matching post",
             "title": "Headline"
+          },
+          "hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "X trends only: hourly trending lists it was on in the last 24 h (any region)",
+            "title": "Hours"
           },
           "matched_on": {
             "anyOf": [
@@ -3689,8 +3702,44 @@
                 "type": "null"
               }
             ],
-            "description": "What matched: name, description or x (the coin's own text), referent (the referent it resolves to) or alias (an alias of that referent)",
+            "description": "What matched: name, symbol, description or x (the coin's own text), referent (the referent it resolves to) or alias (an alias of that referent)",
             "title": "Matched On"
+          },
+          "partial": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "true when the coin's one-word name is one word of a longer trending label (\"Leoncio\" of \"Leoncio Gomez\"), not the whole label (since rules 0.18.0)",
+            "title": "Partial"
+          },
+          "posts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bluesky only: posts naming it in the last 24 h (from at least 3 accounts; coin chatter excluded; at most 100)",
+            "title": "Posts"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "X trends only: best position on X's trending list (1-50)",
+            "title": "Rank"
           },
           "score": {
             "anyOf": [
@@ -3701,7 +3750,7 @@
                 "type": "null"
               }
             ],
-            "description": "Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1); halved for perennially popular articles",
+            "description": "Strength of this trend, 0-1: Wikipedia by spike (30x = 1), Google Trends by search count (100 = 0, 100,000 = 1), news by headline count (8 = 1), X trends by rank and hours listed (#1 for 12 h = 1), Bluesky by posts in 24 h (25 = 1); halved for perennially popular articles",
             "title": "Score"
           },
           "searches": {
@@ -3726,11 +3775,11 @@
                 "type": "null"
               }
             ],
-            "description": "How fresh the hit is: the UTC day of the Wikipedia spike (day granularity), when Google Trends first listed the search, or the newest matching news headline",
+            "description": "How fresh the hit is: the UTC day of the Wikipedia spike (day granularity), when Google Trends or X first listed it, or the newest matching news headline or Bluesky post",
             "title": "Seen At"
           },
           "source": {
-            "description": "wikipedia, google_trends or news",
+            "description": "wikipedia, google_trends, x_trends, news or bluesky",
             "title": "Source",
             "type": "string"
           },

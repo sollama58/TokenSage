@@ -58,6 +58,8 @@ HOSTS: list[tuple[str, str]] = [
     ("wikidata.org", "wikidata"),
     ("news.google.com", "google_news"),
     ("trends.google.com", "google_trends"),
+    ("trends24.in", "x_trends"),
+    ("api.bsky.app", "bluesky"),
     ("api.geckoterminal.com", "geckoterminal"),
     ("api.coingecko.com", "coingecko"),
     ("pro-api.coingecko.com", "coingecko"),

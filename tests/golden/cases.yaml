@@ -21,6 +21,10 @@
 #   referent_confidence_between             : [low, high] reported confidence
 #   referent_inputs                         : the exact supported_by list
 #   referent_null                           : true -> no reported referent at all
+#   trend (rules 0.18.0; the case runs at full depth against `trending`, a list of
+#   {term, source, rank, views, spike, headline}):
+#   trend_terms / trend_matched_on / trend_partial : the matched terms, their matched_on and
+#                                             whether each is one word of a longer label
 cases:
   # ---------------------------------------------------------------- the famous ones (self)
   - name: dogwifhat
@@ -546,3 +550,61 @@ cases:
     referent_kind: concept
     referent_label: crypto trading
     referent_generic: true
+  # ---------------------------------------------------------------- trends (rules 0.18.0)
+  - name: Leoncio
+    symbol: LEON
+    trending: [{term: Leoncio Gomez, source: x_trends, rank: 3, views: 5}]
+    trend_terms: [Leoncio Gomez]
+    trend_matched_on: [name]
+    trend_partial: [true]
+    categories_include: [news_event]
+  - name: Leôncio
+    symbol: LEONCIO
+    trending: [{term: Leoncio Gomez, source: x_trends, rank: 12, views: 2}]
+    trend_terms: [Leoncio Gomez]
+    trend_partial: [true]
+  - name: Glasnow
+    symbol: GLAS
+    trending: [{term: Tyler Glasnow, source: google_trends, views: 5000, headline: Glasnow strikes out ten}]
+    trend_terms: [Tyler Glasnow]
+    trend_partial: [true]
+  - name: Hat Dog
+    symbol: GLASNOW
+    trending: [{term: Glasnow, source: x_trends, rank: 1, views: 6}]
+    trend_terms: [Glasnow]
+    trend_matched_on: [symbol]
+    trend_partial: [false]
+  - name: WEST
+    symbol: WEST
+    trending: [{term: Kanye West, source: x_trends, rank: 2, views: 8}]
+    trend_terms: []
+  - name: WEST
+    symbol: WEST
+    description: "kanye said it first"
+    trending: [{term: Kanye West, source: x_trends, rank: 2, views: 8}]
+    trend_terms: [Kanye West]
+    trend_partial: [true]
+  - name: Tyler
+    symbol: TYLER
+    trending: [{term: Tyler Mahle, source: x_trends, rank: 4, views: 3}]
+    trend_terms: []
+  - name: Chow
+    symbol: CHOW
+    trending: [{term: Chow, source: x_trends, rank: 8, views: 4}]
+    trend_terms: []
+  - name: Moon
+    symbol: MOON
+    trending: [{term: Moon, source: wikipedia, spike: 8.0, views: 200000}]
+    trend_terms: [Moon]  # a spiking article is the word's main sense: kept as before 0.18.0
+  - name: Juniper
+    symbol: JUNI
+    trending: [{term: juniper, source: google_trends, views: 2000}]
+    trend_terms: [juniper]
+  - name: Juniper
+    symbol: JUNI
+    trending: [{term: Juniper Networks, source: google_trends, views: 2000}]
+    trend_terms: []  # an everyday word of a longer label: needs a second signal
+  - name: Hat Dog
+    symbol: MOON
+    trending: [{term: Moon, source: x_trends, rank: 1, views: 6}]
+    trend_terms: []

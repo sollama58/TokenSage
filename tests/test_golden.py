@@ -10,9 +10,17 @@ from typing import Any
 import pytest
 import yaml
 
+from tokensage.engine import trends
 from tokensage.engine.context import ReferentCandidate
 from tokensage.engine.knowledge import load_knowledge
-from tokensage.engine.pipeline import DbContext, EngineInput, PriorRead, SameNameToken, run_basic
+from tokensage.engine.pipeline import (
+    DbContext,
+    EngineInput,
+    PriorRead,
+    SameNameToken,
+    run_basic,
+    run_full,
+)
 from tokensage.engine.ticker import explain
 
 CASES = yaml.safe_load((Path(__file__).parent / "golden" / "cases.yaml").read_text("utf-8"))[
@@ -53,7 +61,27 @@ def _ctx(case: dict[str, Any]) -> DbContext:
     return ctx
 
 
+def _trend_index(case: dict[str, Any]) -> trends.TrendIndex | None:
+    """trending: [{term, source, rank, views, spike, headline}]: what is trending for this
+    case; the case then runs at full depth (no OCR, no X) against just these terms."""
+    if "trending" not in case:
+        return None
+    terms = [
+        trends.TrendTerm(
+            t["term"],
+            float(t.get("spike", 0.0)),
+            int(t.get("views", 1)),
+            source=t.get("source", "wikipedia"),
+            headline=t.get("headline"),
+            rank=t.get("rank"),
+        )
+        for t in case["trending"] or []
+    ]
+    return trends.TrendIndex(terms, load_knowledge())
+
+
 def _run(case: dict[str, Any]):  # type: ignore[no-untyped-def]
+    idx = _trend_index(case)
     inp = EngineInput(
         mint="So11111111111111111111111111111111111111112",
         name=case.get("name"),
@@ -62,8 +90,9 @@ def _run(case: dict[str, Any]):  # type: ignore[no-untyped-def]
         image_bytes=None,
         created_at=NOW,
         ctx=_ctx(case),
+        trend_index=idx,
     )
-    return run_basic(inp)
+    return run_full(inp) if idx is not None else run_basic(inp)
 
 
 @pytest.mark.parametrize("case", CASES, ids=_ids())
@@ -134,6 +163,13 @@ def test_golden(case: dict[str, Any]) -> None:
         assert rr is not None and lo <= rr.confidence <= hi, f"confidence{rctx}"
     if "referent_inputs" in case:
         assert rr is not None and rr.supported_by == case["referent_inputs"], f"inputs{rctx}"
+    got = [(h.term.term, h.matched_on, h.partial) for h in out.trend_hits]
+    if "trend_terms" in case:
+        assert [g[0] for g in got] == case["trend_terms"], f"trend hits {got}{ctx}"
+    if "trend_matched_on" in case:
+        assert [g[1] for g in got] == case["trend_matched_on"], f"trend hits {got}{ctx}"
+    if "trend_partial" in case:
+        assert [g[2] for g in got] == case["trend_partial"], f"trend hits {got}{ctx}"
     for c in case.get("caveats_include", []):
         assert any(c in cv for cv in out.caveats), f"caveat {c!r} missing: {out.caveats}"
     # every result must be explainable and summarised
