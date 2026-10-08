@@ -17,6 +17,8 @@ import asyncpg
 RESOLVED = 0.7
 GUESS = 0.5
 STATUSES = ("resolved", "weak", "guess", "none")
+# the summary runs from the hourly cron, which nobody waits on
+SUMMARY_TIMEOUT_S = 120.0
 
 
 def status(score: float | None) -> str:
@@ -31,12 +33,20 @@ def status(score: float | None) -> str:
 
 async def summary(conn: asyncpg.Connection, hours: int = 24) -> dict[str, Any]:
     """Per depth, how many analyses in the last `hours` ended in each referent status, and
-    the share that resolved. Only the newest version per mint and depth counts."""
+    the share that resolved. Only the newest version per mint and depth counts.
+
+    The window is read first (materialized, from analysis_recent_idx alone): left to
+    itself, the planner may answer `distinct on (mint, depth)` by walking the whole
+    (mint, depth, version) index in order and filtering on created_at, which reads every
+    analysis ever written."""
     rows = await conn.fetch(
-        """with latest as (
-             select distinct on (mint, depth) depth, referent_score, referent
+        """with recent as materialized (
+             select mint, depth, version, referent_score, referent
              from analysis
-             where created_at >= now() - make_interval(hours => $1)
+             where created_at >= now() - make_interval(hours => $1)),
+           latest as (
+             select distinct on (mint, depth) depth, referent_score, referent
+             from recent
              order by mint, depth, version desc)
            select depth,
                   count(*) filter (where referent is null) as none,
@@ -48,6 +58,7 @@ async def summary(conn: asyncpg.Connection, hours: int = 24) -> dict[str, Any]:
         hours,
         GUESS,
         RESOLVED,
+        timeout=SUMMARY_TIMEOUT_S,
     )
     out: dict[str, Any] = {"hours": hours, "depths": {}}
     for r in rows:
