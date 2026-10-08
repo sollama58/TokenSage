@@ -193,6 +193,26 @@ async def _prune_lookup_cache(conn: asyncpg.Connection) -> int:
             return deleted
 
 
+# token.logo_phash is kept by triggers (migration 0017); this re-derives it for the coins
+# inside the logo scan window (data/meta.yaml logo_scan_days, 7) in case two concurrent
+# writes for one logo still left a copy behind. Index-backed on token_created_at_idx.
+LOGO_REPAIR_WINDOW = "8 days"
+
+
+async def _repair_logo_hashes(conn: asyncpg.Connection) -> int:
+    return _count(
+        await conn.execute(
+            f"""update token t set logo_phash = i.phash
+                  from token_metadata tm
+                  join image i on i.content_key = tm.image_content_key
+                 where tm.mint = t.mint
+                   and t.created_at > now() - interval '{LOGO_REPAIR_WINDOW}'
+                   and t.logo_phash is distinct from i.phash""",
+            timeout=STEP_TIMEOUT_S,
+        )
+    )
+
+
 async def _recall(conn: asyncpg.Connection) -> None:
     # the recall number (guide §5.9): how often the last day's analyses resolved a
     # referent, per depth; the series to watch as the gazetteer and rules change
@@ -207,6 +227,7 @@ STEPS: list[tuple[str, Callable[[asyncpg.Connection], Awaitable[Any]], bool]] = 
     ("pruned_analyses", _prune_analyses, True),
     ("pruned_usage_rows", _prune_usage, True),
     ("pruned_lookup_cache", _prune_lookup_cache, True),
+    ("repaired_logo_hashes", _repair_logo_hashes, False),
     ("recall", _recall, False),
 ]
 

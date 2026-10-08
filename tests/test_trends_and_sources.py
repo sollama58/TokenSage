@@ -253,3 +253,11 @@ def test_name_in_the_news_raises_news_event() -> None:
     assert [h.term.source for h in out.trend_hits] == ["news"]
     assert "news_event" in dict(out.agg.categories)
     assert any(e.kind == "trend" and e.label == "news_event" for e in out.evidence)
+
+
+def test_ocr_error_from_the_analyzer_keeps_its_caveat() -> None:
+    """The analyzer runs OCR before the engine; a failed read still reaches the document."""
+    pre = EngineInput("m", "Fluffy", "FLUF", None, b"logo", None, ocr_lines=[], ocr_error="boom")
+    out = run_full(pre)
+    assert out.ocr_error == "boom"
+    assert "OCR unavailable: boom" in out.caveats

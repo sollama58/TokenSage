@@ -1397,6 +1397,7 @@ async def analyze(
             # OCR here rather than inside run_full: waiting for the single OCR slot then
             # happens on the event loop, not on a blocked executor thread
             inp.ocr_lines, ocr_error = await ocr.read_async(image_bytes)
+            inp.ocr_error = ocr_error  # keeps the 'OCR unavailable' caveat
         inp.trend_index = await fulldepth.trend_index(conn, ctx.http)
         inp.x_media = await fulldepth.media_hashes(
             conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)

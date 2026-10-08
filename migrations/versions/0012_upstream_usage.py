@@ -35,7 +35,9 @@ def upgrade() -> None:
     )
     op.execute("create index upstream_usage_source_hour_idx on upstream_usage (source, hour)")
     op.execute("alter table job add column started_at timestamptz")
-    op.execute("create index job_finished_at_idx on job (finished_at) where finished_at is not null")
+    op.execute(
+        "create index job_finished_at_idx on job (finished_at) where finished_at is not null"
+    )
     op.execute("alter table source_health add column updated_at timestamptz not null default now()")
 
 

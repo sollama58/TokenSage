@@ -168,3 +168,26 @@ async def test_prune_lookup_cache_drops_expired_lookups_only(
     left = [r["key"] for r in await db.fetch("select key from lookup_cache order by key")]
     assert left == ["bsky:q:fresh", "gtrends:seen", "wiki:fresh", "xtrends:seen"]
     assert await maintenance._prune_lookup_cache(db) == 0
+
+
+@needs_db
+async def test_repair_logo_hashes_fixes_a_missed_copy_inside_the_window(
+    db: asyncpg.Connection,
+) -> None:
+    for mint, age in (("recent", "1 hour"), ("old", "30 days")):
+        await db.execute(
+            "insert into token (mint, created_at) values ($1, now() - $2::text::interval)",
+            mint,
+            age,
+        )
+        await db.execute(
+            "insert into token_metadata (mint, status, image_content_key) values ($1, 'ok', 'k')",
+            mint,
+        )
+    await db.execute("insert into image (content_key, phash) values ('k', 42)")
+    # the triggers copied the hash; simulate a copy two racing writes left behind
+    await db.execute("update token set logo_phash = null")
+    assert await maintenance._repair_logo_hashes(db) == 1
+    rows = dict(await db.fetch("select mint, logo_phash from token"))  # type: ignore[arg-type]
+    assert rows == {"recent": 42, "old": None}  # only the logo scan window is repaired
+    assert await maintenance._repair_logo_hashes(db) == 0

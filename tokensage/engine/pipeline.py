@@ -108,6 +108,7 @@ class EngineInput:
     tweet: TweetData | None = None
     profile: ProfileData | None = None
     ocr_lines: list[ocr.OcrLine] | None = None  # pre-computed (cached) OCR; None = run it
+    ocr_error: str | None = None  # the error of an OCR the analyzer ran before the engine
     run_ocr: bool = False
     trend_index: trends.TrendIndex | None = None
     x_media: list[xmatch.MediaHash] | None = None  # hashed post images / profile avatar
@@ -802,7 +803,7 @@ def _ocr_pass(
     lines: list[ocr.OcrLine] = []
     err: str | None = None
     if inp.ocr_lines is not None:
-        lines = inp.ocr_lines
+        lines, err = inp.ocr_lines, inp.ocr_error
     elif inp.run_ocr and inp.image_bytes:
         lines, err = ocr.read(inp.image_bytes)
     if not lines:
