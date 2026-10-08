@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import respx
 
-from tokensage.resolve import metaplex
+from tokensage.resolve import fees, metaplex
 from tokensage.resolve.pump_ca import BONDING_CURVE_DISC, PUMP_PROGRAM, b58decode, bonding_curve_pda
 from tokensage.resolve.pump_event import b58encode
 from tokensage.resolve.resolver import GLOBAL_DISC, SPL_TOKEN, TOKEN_2022, _global_pda
@@ -52,13 +52,49 @@ def b64(b: bytes) -> list[str]:
 
 
 def curve_bytes(
-    real_token_reserves: int, complete: bool, creator: str = CREATOR, quote: str | None = None
+    real_token_reserves: int,
+    complete: bool,
+    creator: str = CREATOR,
+    quote: str | None = None,
+    *,
+    cashback: bool = False,
+    holder_reward: bool = False,
+    creator_fee_bps: int = 0,
 ) -> bytes:
     body = struct.pack("<QQQQQ?", 1_000, 30_000_000_000, real_token_reserves, 0, 10**15, complete)
-    body += b58decode(creator) + struct.pack("<??", False, False)
+    body += b58decode(creator) + struct.pack("<??", False, cashback)
     body += b58decode(quote) if quote else bytes(32)
-    body += struct.pack("<Q??", 0, False, False)
+    body += struct.pack("<Q??", creator_fee_bps, False, holder_reward)
     return BONDING_CURVE_DISC + body
+
+
+# --- pump-fees accounts (creator-fee redirects, rules 0.19.0) ---
+
+
+def sharing_config_bytes(
+    mint: str, admin: str, shareholders: list[tuple[str, int]], *, revoked: bool = True
+) -> bytes:
+    body = struct.pack("<BBB", 255, 2, 1) + b58decode(mint) + b58decode(admin)
+    body += struct.pack("<?I", revoked, len(shareholders))
+    for addr, bps in shareholders:
+        body += b58decode(addr) + struct.pack("<H", bps)
+    return fees.SHARING_CONFIG_DISC + body + bytes(1024 - 8 - len(body))
+
+
+def social_fee_pda_bytes(user_id: str, platform: int, total_claimed: int = 0) -> bytes:
+    uid = user_id.encode()
+    body = struct.pack("<BB", 255, 1) + struct.pack("<I", len(uid)) + uid
+    body += struct.pack("<BQQQ", platform, total_claimed, 0, 0) + bytes(120)
+    return fees.SOCIAL_FEE_PDA_DISC + body
+
+
+def donation_fee_pda_bytes(
+    mint: str, config_id: str, creator: str, total_donated: int = 0
+) -> bytes:
+    body = struct.pack("<BB", 255, 1) + b58decode(config_id) + b58decode(mint)
+    body += b58decode("So11111111111111111111111111111111111111112") + b58decode(creator)
+    body += struct.pack("<Qq", total_donated, 0) + bytes(64)
+    return fees.DONATION_FEE_PDA_DISC + body
 
 
 def global_bytes() -> bytes:
@@ -155,6 +191,58 @@ class FakeChain:
 
     def add_wallet(self, addr: str) -> None:
         self.accounts[addr] = acct("11111111111111111111111111111111", ["", "base64"])
+
+    # --- creator-fee redirects (rules 0.19.0) ---
+
+    def set_curve(self, mint: str, **curve_kw: Any) -> None:
+        """Replace a pump coin's bonding curve (e.g. creator=<PDA>, holder_reward=True)."""
+        self.accounts[bonding_curve_pda(mint)] = acct(
+            PUMP_PROGRAM, b64(curve_bytes(curve_kw.pop("real", 10**14), False, **curve_kw))
+        )
+
+    def add_sharing_config(
+        self,
+        mint: str,
+        admin: str,
+        shareholders: list[tuple[str, int]],
+        *,
+        revoked: bool = True,
+        point_curve: bool = True,
+    ) -> str:
+        """A fee-sharing config for `mint`; by default the curve's creator is re-pointed at it,
+        as create_fee_sharing_config does on-chain."""
+        pda = fees.sharing_config_pda(mint)
+        self.accounts[pda] = acct(
+            fees.PUMP_FEES_PROGRAM,
+            b64(sharing_config_bytes(mint, admin, shareholders, revoked=revoked)),
+        )
+        if point_curve:
+            self.set_curve(mint, creator=pda)
+        return pda
+
+    def add_social_fee_pda(self, user_id: str, platform: int = 2, total_claimed: int = 0) -> str:
+        pda = fees.social_fee_pda(user_id, platform)
+        self.accounts[pda] = acct(
+            fees.PUMP_FEES_PROGRAM, b64(social_fee_pda_bytes(user_id, platform, total_claimed))
+        )
+        return pda
+
+    def add_donation_fee_pda(
+        self, mint: str, config_id: str, creator: str, total_donated: int = 0
+    ) -> str:
+        pda = fees.donation_fee_pda(mint, config_id)
+        self.accounts[pda] = acct(
+            fees.PUMP_FEES_PROGRAM,
+            b64(donation_fee_pda_bytes(mint, config_id, creator, total_donated)),
+        )
+        return pda
+
+    def load_captured(self, case: dict[str, Any]) -> None:
+        """Install the real mainnet accounts of one tests/fixtures/fee_accounts.json case."""
+        for addr, a in case["accounts"].items():
+            if a is None:
+                continue
+            self.accounts[addr] = acct(a["owner"], [a["data"], "base64"], lamports=a["lamports"])
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)

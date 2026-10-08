@@ -13,7 +13,7 @@ from __future__ import annotations
 import base64
 import struct
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import httpx
@@ -21,6 +21,7 @@ import structlog
 
 from tokensage.config import Settings
 from tokensage.resolve import metaplex
+from tokensage.resolve.fees import CreatorFee, resolve_creator_fee, sharing_config_pda
 from tokensage.resolve.pump_ca import (
     PUMP_PROGRAM,
     bonding_curve_pda,
@@ -68,6 +69,11 @@ class Resolved:
     created_at: datetime | None
     created_at_source: str | None
     onchain_metadata_source: str | None  # token2022 | metaplex | das | none
+    # rules 0.19.0: `creator` is the creator *wallet*. The bonding curve's creator field
+    # can be a PDA (a fee-sharing config, the holder-rewards PDA); it is kept here as is.
+    creator_onchain: str | None = None
+    creator_kind: str | None = None  # wallet | sharing_config | holder_rewards_pda | unknown
+    creator_fee: CreatorFee | None = None
 
 
 # ----------------------------------------------------------------- helpers
@@ -276,11 +282,12 @@ async def resolve(
     API and the (RPC-expensive) signature-history lookup when nothing better is stored."""
     mint = parse_ca(raw_ca)
 
-    # 1. mint, bonding curve and Metaplex PDA in one call (1 RPC credit instead of 2-3).
-    # The curve and Metaplex accounts have no jsonParsed parser, so they come back base64.
+    # 1. mint, bonding curve, Metaplex PDA and the pump-fees sharing config in one call
+    # (1 RPC credit instead of 2-4). Accounts with no jsonParsed parser come back base64.
     curve_addr = bonding_curve_pda(mint)
-    acc, curve_acc, md_acc = await rpc.get_multiple_accounts(
-        [mint, curve_addr, metaplex.metadata_pda(mint)], encoding="jsonParsed"
+    acc, curve_acc, md_acc, sharing_acc = await rpc.get_multiple_accounts(
+        [mint, curve_addr, metaplex.metadata_pda(mint), sharing_config_pda(mint)],
+        encoding="jsonParsed",
     )
     if acc is None:
         raise ResolveError("token_not_found", "no account found on-chain for this address")
@@ -307,13 +314,36 @@ async def resolve(
         raise ResolveError("not_pumpfun", "mint has no pump.fun bonding curve")
 
     complete = curve_progress = creator = quote_mint = is_mayhem = None
+    creator_onchain = creator_kind = None
+    creator_fee: CreatorFee | None = None
     if curve:
         complete, curve_progress = await _curve_state(rpc, curve)
         creator = curve.get("creator")
         if creator and set(creator) == {"1"}:
             creator = None
+        creator_onchain = creator
         is_mayhem = curve.get("is_mayhem_mode")
         quote_mint = _quote_label(curve.get("quote_mint")) or "SOL"
+        # where the creator fee goes; the curve's creator may be a PDA rather than a wallet
+        creator_fee = await resolve_creator_fee(
+            mint,
+            curve,
+            sharing_acc if sharing_acc and sharing_acc.get("owner") else None,
+            rpc=rpc,
+            conn=conn,
+            http=http,
+            github_token=settings.github_token,
+            lookup_github=settings.enable_github_lookup,
+            cache_max_age=timedelta(days=settings.fee_recipient_cache_days),
+        )
+        if creator_fee.mechanism == "sharing_config":
+            creator_kind = "sharing_config"
+            creator = creator_fee.admin  # the wallet that opted the coin into fee sharing
+        elif creator_fee.mechanism == "holder_rewards":
+            creator_kind = "holder_rewards_pda"
+            creator = None  # a pump.fun-controlled PDA; the launch wallet is found below
+        else:
+            creator_kind = "wallet" if creator else "unknown"
 
     # 3. on-chain name / symbol / uri
     meta, meta_source = await _onchain_metadata(
@@ -326,7 +356,8 @@ async def resolve(
     row = await conn.fetchrow(
         "select created_at, created_at_source, creator from token where mint=$1", mint
     )
-    if row:
+    if row and row["creator"] and row["creator"] != creator_onchain:
+        # a row stored by older rules may hold the curve's PDA as creator: never reuse that
         creator = creator or row["creator"]
     if row and row["created_at"] and row["created_at_source"] != "hints":
         created, created_src = row["created_at"], row["created_at_source"]
@@ -367,6 +398,9 @@ async def resolve(
         created_at=created,
         created_at_source=created_src,
         onchain_metadata_source=meta_source,
+        creator_onchain=creator_onchain,
+        creator_kind=creator_kind,
+        creator_fee=creator_fee,
     )
     await persist(conn, res)
     return res
@@ -434,7 +468,8 @@ async def persist(conn: asyncpg.Connection, r: Resolved) -> None:
           name = coalesce(token.name, excluded.name),
           symbol = coalesce(token.symbol, excluded.symbol),
           uri = coalesce(token.uri, excluded.uri),
-          creator = coalesce(token.creator, excluded.creator),
+          creator = coalesce(excluded.creator,
+                             case when token.creator = $13 then null else token.creator end),
           bonding_curve = coalesce(token.bonding_curve, excluded.bonding_curve),
           token_program = excluded.token_program,
           quote_mint = coalesce(excluded.quote_mint, token.quote_mint),
@@ -465,6 +500,7 @@ async def persist(conn: asyncpg.Connection, r: Resolved) -> None:
         r.is_mayhem,
         r.created_at,
         r.created_at_source,
+        r.creator_onchain,
     )
     await conn.execute(
         """

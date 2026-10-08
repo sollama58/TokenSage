@@ -47,6 +47,9 @@ from tokensage.api.schemas import (
     XRef,
 )
 from tokensage.api.schemas import (
+    CreatorFee as CreatorFeeOut,
+)
+from tokensage.api.schemas import (
     Normalized as NormalizedOut,
 )
 from tokensage.api.schemas import (
@@ -82,6 +85,7 @@ from tokensage.engine.xref import parse_x_ref, snowflake_time
 from tokensage.net import metrics
 from tokensage.resolve import metadata as md
 from tokensage.resolve import pair as pair_lookup
+from tokensage.resolve.fees import creator_fee_to_dict
 from tokensage.resolve.resolver import Resolved, ResolveError, curve_now, resolve
 from tokensage.resolve.rpc import SolanaRpc
 from tokensage.sources import bluesky, gnews, lookups
@@ -837,6 +841,19 @@ def build_document(
         elif out.image.error and image.status == "ok":
             image.status = "failed"
 
+    # where the creator fee goes (rules 0.19.0): a flag per redirect, a summary clause
+    fee_out: CreatorFeeOut | None = None
+    if r.creator_fee is not None:
+        cf = r.creator_fee
+        fee_out = CreatorFeeOut.model_validate(creator_fee_to_dict(cf))
+        code = _FEE_FLAGS.get(cf.destination)
+        if code:
+            flags.append(Flag(code=code, severity="info", detail=cf.describe()))
+        if cf.destination not in ("creator", "unknown"):
+            sentence = cf.describe()
+            summary = f"{summary.rstrip()} {sentence[0].upper()}{sentence[1:]}."
+        caveats.extend(f"creator fee: {c}" for c in cf.caveats)
+
     # "partial" promises a better result later: only when the metadata may still resolve
     # (invalid metadata is final and is reported via the metadata_unresolved flag instead)
     partial = (m is None or m.status in ("unresolved", "pending")) and bool(r.uri)
@@ -848,6 +865,9 @@ def build_document(
             complete=r.complete,
             curve_progress=r.curve_progress,
             creator=r.creator,
+            creator_onchain=r.creator_onchain,
+            creator_kind=r.creator_kind,  # type: ignore[arg-type]
+            creator_fee=fee_out,
             is_mayhem_mode=r.is_mayhem,
             quote_mint=r.quote_mint,
             pair=_pair_out(out.pair) if out is not None else None,
@@ -877,6 +897,18 @@ def build_document(
     if partial:
         doc.caveats.append("partial: metadata pending; the next request may be more complete")
     return doc
+
+
+_FEE_FLAGS = {
+    "holder_rewards": "creator_fee_holders",
+    "charity": "creator_fee_charity",
+    "github": "creator_fee_github",
+    "wallet": "creator_fee_wallet",
+    "split": "creator_fee_split",
+    "social": "creator_fee_social",
+    "other": "creator_fee_other",
+    "cashback": "creator_fee_cashback",
+}
 
 
 def _lineage_out(lin: lineage_stage.Lineage | None) -> Lineage | None:

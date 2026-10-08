@@ -93,7 +93,7 @@ Every error has one shape:
 |---|---|
 | `schema_version` | `"1"`. Adding fields/labels is compatible; breaking changes get a new version and path |
 | `mint`, `created_at`, `launchpad` | Canonical CA; token creation time (may be `null`); `pump.fun` or `unknown` |
-| `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `creator`, `quote_mint`, and `pair` (the token it trades against; see below) |
+| `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `creator` (the creator **wallet**; since rules 0.19.0 never a PDA), `creator_onchain` and `creator_kind` (what the bonding curve's creator field actually holds: `wallet`, `sharing_config`, `holder_rewards_pda`), `creator_fee` (where the creator fee goes: the creator, another wallet, a split, holders, a charity or a GitHub account; see below), `quote_mint`, and `pair` (the token it trades against; see below) |
 | `raw` | Name, symbol, description and social links as found in the metadata (**untrusted text, escape before rendering**) |
 | `normalized` | Cleaned tokens, ticker base, version markers (`version:2`), emoji keywords, obfuscation flags |
 | `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, `supported_by` and `generic`. `kind` is one of `famous_animal`, `meme`, `person`, `coin`, `event`, `concept`, `place`, `other`, and since rules 0.17.0 `animal` (an animal, not a specific famous one), `media` (a film, game, show or franchise), `project` (a crypto or AI product, protocol or launchpad), `object` (food, an object, an abstract thing) and `organization` (a company, exchange or listed stock); expect new kinds over time. `supported_by` lists the independent inputs pointing at it (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, and `copy_of` when it is inherited from the coin this one copies); a ticker that spells the name counts as the name. **`generic: true`** means only the kind is known: the name, ticker, image or description make it plain what sort of coin this is ("FROGMAN" is an animal coin) but no specific entity was identified, so `label` is a generic word for the kind (`"frog"`, `"cat"`, `"crypto project"`, `"AI agent"`) and `wave` is `null`. `confidence` bands (rules 0.17.0): **0.3-0.49** only the kind is known (`generic`), or a weak named guess; **0.5-0.69** a named referent from one input; **0.7+** two or more independent inputs agree. `referent` is `null` only when the coin has no readable theme at all (a random string, no description). `wave` counts the coins on the same referent, see below |
@@ -311,6 +311,77 @@ it is queued in the background, so later coins paired with it get its full meani
 
 `market.pair` is `null` when the quote mint is unknown, e.g. a coin analysed from hints
 before it is visible on-chain.
+
+### `market.creator_fee`: where the creator fee goes (all depths, since rules 0.19.0)
+
+pump.fun charges a creator fee on every trade (0.30% on the bonding curve, tiered on
+PumpSwap). Since 2025–2026 a coin can redirect it, and the redirect is on-chain, so TokenSage
+reads it in the same `getMultipleAccounts` call as the mint and the curve:
+
+- **holder rewards coin** (`is_holder_reward` on the curve, Sept 2026): the fee is set aside
+  for holders and pump.fun pays it out; there is nothing for the creator to claim;
+- **fee sharing** (Jan 2026): the curve's creator field is re-pointed at a Pump Fees
+  `SharingConfig` whose shareholders (up to 10, shares in basis points summing to 10,000) are
+  paid. A shareholder is a plain wallet (the creator's or anyone's), a **GitHub-linked**
+  account (a `SocialFeePda`, Feb 2026: only that GitHub user can claim, through pump.fun), or a
+  **charity** (a `DonationFeePda` escrow cranked into donate.gg, Apr 2026);
+- **cashback coin** (deprecated): the fee goes back to traders;
+- otherwise the fee goes straight to the wallet in the curve's creator field.
+
+```json
+"creator": "8PQxd6VmfGPMyg8WPnfkT9jUTmtE7UsnDmvBKXeAVP9z",
+"creator_onchain": "3Afd7nZqNmexpuSivoCq1a8mzEjhgs7JUbv8YhURFih4",
+"creator_kind": "sharing_config",
+"creator_fee": {
+  "destination": "charity",
+  "mechanism": "sharing_config",
+  "creator_fee_bps": 0,
+  "admin": "8PQxd6VmfGPMyg8WPnfkT9jUTmtE7UsnDmvBKXeAVP9z",
+  "sharing_config": "3Afd7nZqNmexpuSivoCq1a8mzEjhgs7JUbv8YhURFih4",
+  "sharing_version": 2,
+  "mutable": false,
+  "split": true,
+  "shares": {"creator": 0.01, "charity": 0.99},
+  "recipients": [
+    {"address": "8PQxd6VmfGPMyg8WPnfkT9jUTmtE7UsnDmvBKXeAVP9z", "share": 0.01, "share_bps": 100, "kind": "creator", "is_creator": true},
+    {"address": "CYoJ4CC1oGt1Hk1y2XZQ9aDJHsh7kZSFSHMWvChAgyxC", "share": 0.99, "share_bps": 9900, "kind": "charity",
+     "charity_config_id": "H16fEMZN9b8Zmhh5Ara343WdZdSdgn2P8oUkAGdB57Ru", "lifetime_received": 57.286407196}
+  ],
+  "summary": "creator fees go to charity: 99% to a charity via donate.gg, 1% to the creator wallet"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `destination` | `creator` (the creator wallet, directly or as the only shareholder), `wallet` (one other wallet), `split` (several recipients, none of charity/GitHub/social kind holding half), `holder_rewards`, `charity` (a donate.gg charity holds ≥ 50%), `github` (a GitHub-linked account holds ≥ 50%), `social` (an X- or pump.fun-linked account holds ≥ 50%; pump.fun's own docs say only GitHub is supported, so expect this to stay rare), `other` (a single recipient owned by some other program), `cashback`, `unknown` (the config could not be read; see `caveats`). Expect new values over time |
+| `mechanism` | `direct` (fee accrues to the curve's creator wallet), `sharing_config`, `holder_rewards`, `cashback` |
+| `admin` | Fee sharing: the wallet that controls the split. It is what `market.creator` reports for such a coin. Null otherwise |
+| `mutable` | Fee sharing: `true` while the admin can still change the split (one update is allowed on the current program version, then the admin is revoked), `false` once it is final |
+| `split`, `shares` | More than one recipient; the share of the fee per recipient kind (`creator`, `wallet`, `github`, `charity`, `x`, `pump`, `program`) |
+| `recipients[]` | Each shareholder: `address`, `share` / `share_bps`, `kind` (`creator`, `wallet`, `github`, `x`, `pump`, `social`, `charity`, `program`, `unresolved`), `is_creator`; for a GitHub recipient `user_id` (the numeric GitHub account id), `github_login` and `url` (looked up from api.github.com once, when the recipient is first seen, and cached for a week; null when the lookup is off or was rate-limited, and `url` then points at the API record for the id) and `lifetime_received` (SOL that GitHub account has claimed across all its coins: a measure of how established it is); for a charity `charity_config_id` (the donate.gg config; donate.gg does not publish a free lookup, so the charity's name is not resolved) and `lifetime_received` (what this coin has donated so far, in its quote token) |
+| `creator_fee_bps` | A custom creator fee rate set at creation; 0 or null means pump.fun's standard schedule (custom rates exist only on custom-pair coins) |
+| `summary` | One sentence, ready to show |
+
+Flags (all `info`): `creator_fee_holders`, `creator_fee_charity`, `creator_fee_github`,
+`creator_fee_social`, `creator_fee_wallet`, `creator_fee_split`, `creator_fee_other`,
+`creator_fee_cashback`. No flag is raised when the
+fee simply goes to the creator. The analysis `summary` gets a "Creator fees: …" sentence in
+the same cases.
+
+What it means for `market.creator`: before rules 0.19.0 a fee-shared or holder-rewards coin
+reported the PDA as `creator`. Now `creator` is the sharing config's admin (the wallet that
+opted the coin in, which is the launch wallet unless a community takeover re-pointed it) and
+on a holder-rewards coin it is the launch wallet when pump.fun's frontend API or the creation
+transaction gave it, else `null`. The raw field is `creator_onchain`.
+
+Caveats: pump.fun's frontend API has its own `is_charity` flag, set when the creator chose a
+charity in the app; TokenSage reports what the chain says, and the two can disagree while
+the app has not yet (or no longer) written the donation PDA into the config. A community
+takeover (`admin_cto`) can re-point the fee at any time, so re-read rather than cache
+`creator_fee` for long. `creator_fee` is `null` for a non-pump.fun mint and for a coin
+analysed from hints before it is visible on-chain. Cost: the sharing config rides in the
+resolver's one batched read; a fee-shared coin whose shareholders are not just its admin
+costs one more `getMultipleAccounts` (1 Helius credit) the first time each recipient is seen.
 
 ## Other endpoints
 

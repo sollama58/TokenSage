@@ -1,0 +1,129 @@
+# Creator-fee redirect golden cases (rules 0.19.0). Each case is a real mainnet coin whose
+# bonding curve, fee-sharing config and shareholder accounts were captured on 2026-10-08
+# into tests/fixtures/fee_accounts.json (key = the case name). The test replays those
+# accounts through the resolver's fee logic and checks what TokenSage reports.
+#
+#   destination / mechanism : market.creator_fee.destination / .mechanism
+#   creator                 : market.creator (the wallet, never a PDA)
+#   creator_kind            : market.creator_kind
+#   recipients              : [kind, share_bps] per shareholder, in on-chain order
+#   flag                    : the creator_fee_* flag raised (none: no flag)
+#   extra_rpc_calls         : getMultipleAccounts calls beyond the resolver's batched read
+cases:
+  - case: plain_streamer
+    note: a 2025 coin, fee straight to the launch wallet
+    destination: creator
+    mechanism: direct
+    creator: B8wtc55J62sZ9reiyWLCkJ46b9YnQeMqSbmeyZUg95vR
+    creator_kind: wallet
+    recipients: [[creator, 10000]]
+    flag: none
+    extra_rpc_calls: 0
+  - case: holder_rewards_shitcoin
+    note: is_holder_reward on the curve; the creator field is the holder-rewards PDA
+    destination: holder_rewards
+    mechanism: holder_rewards
+    creator: null
+    creator_kind: holder_rewards_pda
+    recipients: []
+    flag: creator_fee_holders
+    extra_rpc_calls: 0
+  - case: cashback_jars
+    destination: cashback
+    mechanism: cashback
+    creator: GdoCuJ2rRMmfAsDVfYRJPJDLiiF4LyNACAiBDBpL6tGL
+    creator_kind: wallet
+    recipients: []
+    flag: creator_fee_cashback
+    extra_rpc_calls: 0
+  - case: sharing_sole_creator_goldcoin
+    note: a fee-sharing config whose only shareholder is its admin (the default after create_fee_sharing_config); no extra read needed
+    destination: creator
+    mechanism: sharing_config
+    creator: AVwQTYtFwhUQTnc65pmbbXTSzyMZVV4uV1M1kuzE6WF
+    creator_kind: sharing_config
+    recipients: [[creator, 10000]]
+    flag: none
+    extra_rpc_calls: 0
+  - case: wallet_other_stinkdex
+    note: 100% to a wallet that is not the admin
+    destination: wallet
+    mechanism: sharing_config
+    creator: 3XwuAaYo4wiVw1AgBP4Jit5FxQgdTztM3dpWiLa3nY7X
+    creator_kind: sharing_config
+    recipients: [[wallet, 10000]]
+    flag: creator_fee_wallet
+    extra_rpc_calls: 1
+  - case: split_bobo
+    note: 50/50 between the admin and another wallet
+    destination: split
+    mechanism: sharing_config
+    creator: 9WFAVyj3mU5d8KPTzsy6JDWtjDyJxm43k293xcZa2S9o
+    creator_kind: sharing_config
+    recipients: [[creator, 5000], [wallet, 5000]]
+    flag: creator_fee_split
+    extra_rpc_calls: 1
+  - case: split_stix
+    note: six wallets; one outside wallet holds 75%, so it is a split (wallet kind, not charity/github, never dominates)
+    destination: split
+    mechanism: sharing_config
+    creator: AfLzcj6NhWs2vxPwqocaSJbnf37gvMdXfCRW8z7v9bpD
+    creator_kind: sharing_config
+    recipients:
+      - [creator, 500]
+      - [wallet, 500]
+      - [wallet, 500]
+      - [wallet, 500]
+      - [wallet, 7500]
+      - [wallet, 500]
+    flag: creator_fee_split
+    extra_rpc_calls: 1
+  - case: github_shelldon
+    note: "100% to SocialFeePda user_id 258455447 platform 2 (GitHub); that account had claimed 419.9 SOL by capture time"
+    destination: github
+    mechanism: sharing_config
+    creator: EM2C5hJ1CubYKhikyCR2JiBrLiaWPpZUoXANPZ3PsBsD
+    creator_kind: sharing_config
+    recipients: [[github, 10000]]
+    github_user_id: "258455447"
+    flag: creator_fee_github
+    extra_rpc_calls: 1
+  - case: charity_qizai
+    note: "100% to a DonationFeePda (donate.gg config JCZBhPewgvoAYHCmirP3vvXe3VpXiXVY1gSsj1o2ZsCw); frontend API says is_charity=true"
+    destination: charity
+    mechanism: sharing_config
+    creator: DZCDuaAdx1HZuqweJasaQLqgsPZ7R8His7oSYtWpXFtL
+    creator_kind: sharing_config
+    recipients: [[charity, 10000]]
+    charity_config_id: JCZBhPewgvoAYHCmirP3vvXe3VpXiXVY1gSsj1o2ZsCw
+    flag: creator_fee_charity
+    extra_rpc_calls: 1
+  - case: charity_stjude
+    note: "$STJUDE, graduated; 1,544.6 SOL donated by capture time"
+    destination: charity
+    mechanism: sharing_config
+    creator: JDQKDrc1TQgBRvdFh56tkta5sYcDj1SoP52Eiu64rSrT
+    creator_kind: sharing_config
+    recipients: [[charity, 10000]]
+    charity_config_id: H16fEMZN9b8Zmhh5Ara343WdZdSdgn2P8oUkAGdB57Ru
+    flag: creator_fee_charity
+    extra_rpc_calls: 1
+  - case: charity_plus_wallet_kind
+    note: KindnessCoin, 99% to a charity and 1% to the admin; charity dominates, so destination is charity with split=true
+    destination: charity
+    mechanism: sharing_config
+    creator: 8PQxd6VmfGPMyg8WPnfkT9jUTmtE7UsnDmvBKXeAVP9z
+    creator_kind: sharing_config
+    recipients: [[creator, 100], [charity, 9900]]
+    split: true
+    flag: creator_fee_charity
+    extra_rpc_calls: 1
+  - case: api_charity_but_wallet_punch
+    note: the frontend API says is_charity=true but on-chain the only shareholder is the admin wallet; TokenSage reports the chain
+    destination: creator
+    mechanism: sharing_config
+    creator: 7z64nniyHhdx2rzGfpVKYXZuPUzdGmsgrpXSuuuLpi5N
+    creator_kind: sharing_config
+    recipients: [[creator, 10000]]
+    flag: none
+    extra_rpc_calls: 0

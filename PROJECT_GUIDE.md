@@ -84,7 +84,7 @@ consumer app ──GET /v1/tokens/{CA}──▶ TokenSage ──▶ Solana RPC (
 - 2025–2026 additions to tolerate:
   - **Mayhem mode**: an opt-in random-trading agent for 24 h.
   - **Non-SOL quote mints** (USDC). Reserves fields were renamed `*_quote_reserves`, so "market cap in SOL" is not always SOL.
-  - Holder-rewards coins, creator fees, and "tokenized agents".
+  - Holder-rewards coins, creator fees, and "tokenized agents". **Creator-fee redirects** (fee sharing to wallets, GitHub accounts and donate.gg charities; holder rewards) are decoded by `tokensage/resolve/fees.py` and reported as `market.creator_fee` (rules 0.19.0, see `docs/API.md`).
 - **Mint addresses often end in `pump`**, but this is a UI vanity convention, not a rule. About 30% of creates in one Oct 2026 sample lacked it. **Never filter on the suffix.**
 - Third-party launchers and bots create coins through the same program, often with **non-IPFS metadata hosts**. The real events in `docs/reference/create_events.txt` include `metadata.j7tracker.io`, `meta.uxento.io` and `usepaid.app`.
 

@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # "method:credits,..." overrides for the credit table in net/metrics.py
     helius_credit_costs: str = ""
     coingecko_api_key: str = ""
+    # Creator-fee recipients (rules 0.19.0): a GitHub-linked recipient's numeric user id is
+    # turned into a login via api.github.com (60 calls/h unauthenticated per IP; a token
+    # allows 5,000/h). Results are cached in fee_recipient for fee_recipient_cache_days.
+    enable_github_lookup: bool = True
+    github_token: str = ""
+    fee_recipient_cache_days: int = 7
     twitterapi_io_key: str = ""
     ipfs_gateways: str = (
         "https://pump.mypinata.cloud,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"

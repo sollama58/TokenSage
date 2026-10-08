@@ -808,6 +808,134 @@
         "title": "CopyOf",
         "type": "object"
       },
+      "CreatorFee": {
+        "additionalProperties": false,
+        "description": "Where the coin's creator fee goes (rules 0.19.0; all depths).",
+        "properties": {
+          "admin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fee sharing: the wallet that controls the split (market.creator)",
+            "title": "Admin"
+          },
+          "creator_fee_bps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A custom creator fee rate set at creation (custom pairs only); 0 or null means pump.fun's standard schedule",
+            "title": "Creator Fee Bps"
+          },
+          "destination": {
+            "description": "creator: the creator wallet; wallet: one other wallet; split: several recipients with no single dominant kind; holder_rewards: set aside for holders, paid out by pump.fun; charity: a donate.gg charity holds at least half; github: a GitHub-linked account holds at least half; social: an X- or pump.fun-linked account holds at least half; other: a single recipient that is an account of some other program; cashback: back to traders (deprecated coin type); unknown: could not be determined. New values may be added",
+            "enum": [
+              "creator",
+              "wallet",
+              "split",
+              "holder_rewards",
+              "charity",
+              "github",
+              "social",
+              "other",
+              "cashback",
+              "unknown"
+            ],
+            "title": "Destination",
+            "type": "string"
+          },
+          "mechanism": {
+            "description": "direct: the fee accrues to the wallet in the bonding curve's creator field; sharing_config: the curve points at a Pump Fees SharingConfig whose shareholders are paid; holder_rewards / cashback: the coin types",
+            "enum": [
+              "direct",
+              "sharing_config",
+              "holder_rewards",
+              "cashback"
+            ],
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "mutable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fee sharing: true when the admin can still change the split (admin not revoked); false once it is final",
+            "title": "Mutable"
+          },
+          "recipients": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FeeRecipient"
+            },
+            "title": "Recipients",
+            "type": "array"
+          },
+          "shares": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "default": {},
+            "description": "Share of the fee per recipient kind, e.g. {charity: 0.99, creator: 0.01}",
+            "title": "Shares",
+            "type": "object"
+          },
+          "sharing_config": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fee sharing: the SharingConfig PDA",
+            "title": "Sharing Config"
+          },
+          "sharing_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharing Version"
+          },
+          "split": {
+            "default": false,
+            "description": "More than one recipient",
+            "title": "Split",
+            "type": "boolean"
+          },
+          "summary": {
+            "description": "One plain sentence, e.g. 'creator fees go to charity: 100% to a charity via donate.gg'",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination",
+          "mechanism",
+          "summary"
+        ],
+        "title": "CreatorFee",
+        "type": "object"
+      },
       "DayPoint": {
         "additionalProperties": false,
         "properties": {
@@ -1061,6 +1189,130 @@
           "source"
         ],
         "title": "Evidence",
+        "type": "object"
+      },
+      "FeeRecipient": {
+        "additionalProperties": false,
+        "description": "One shareholder of a fee-sharing config (rules 0.19.0).",
+        "properties": {
+          "address": {
+            "description": "The shareholder address as stored on-chain: a wallet, or a Pump Fees PDA for a GitHub/social or charity recipient",
+            "title": "Address",
+            "type": "string"
+          },
+          "charity_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a charity recipient: the donate.gg config id the fee is escrowed for",
+            "title": "Charity Config Id"
+          },
+          "github_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a GitHub recipient: the login looked up from the id (when the lookup is enabled and succeeded)",
+            "title": "Github Login"
+          },
+          "is_creator": {
+            "default": false,
+            "title": "Is Creator",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "creator: the wallet that controls the split (the launch wallet, or a community-takeover admin); wallet: any other plain wallet; github / x / pump: a social-fee PDA claimable by that linked account (platform 2 = GitHub); charity: a donate.gg donation PDA; program: an account of some other program; unresolved: not classified (RPC failure)",
+            "enum": [
+              "creator",
+              "wallet",
+              "github",
+              "x",
+              "pump",
+              "social",
+              "charity",
+              "program",
+              "unresolved"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lifetime_received": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a social recipient: what that account has claimed so far across all its coins, in SOL; for a charity recipient: what this coin has donated so far, in its quote token",
+            "title": "Lifetime Received"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a social recipient: github, x or pump",
+            "title": "Platform"
+          },
+          "share": {
+            "description": "Its share of the creator fee (share_bps / 10000)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Share",
+            "type": "number"
+          },
+          "share_bps": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Share Bps",
+            "type": "integer"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a social recipient: the platform's user id (GitHub: the numeric account id)",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "address",
+          "share",
+          "share_bps",
+          "kind"
+        ],
+        "title": "FeeRecipient",
         "type": "object"
       },
       "Flag": {
@@ -2337,7 +2589,48 @@
                 "type": "null"
               }
             ],
+            "description": "The creator wallet. Since rules 0.19.0 never a PDA: on a fee-shared coin it is the sharing config's admin; on a holder-rewards coin it is the launch wallet when a source gave it, else null. The raw on-chain value is creator_onchain",
             "title": "Creator"
+          },
+          "creator_fee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CreatorFee"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the creator fee goes (since rules 0.19.0); null for a non-pump.fun mint or a coin analysed from hints before it is visible on-chain"
+          },
+          "creator_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "wallet",
+                  "sharing_config",
+                  "holder_rewards_pda",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator Kind"
+          },
+          "creator_onchain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The bonding curve's creator field as stored: a wallet, a fee-sharing config PDA or the holder-rewards PDA (see creator_kind)",
+            "title": "Creator Onchain"
           },
           "curve_progress": {
             "anyOf": [
