@@ -2955,7 +2955,7 @@
       },
       "Pair": {
         "additionalProperties": false,
-        "description": "The token the coin trades against on its bonding curve. SOL and stablecoins carry no\nmeaning; any other token feeds the analysis (category crypto_native/paired_ecosystem,\nderivative/pair_family when the name builds on it, flag non_sol_pair).",
+        "description": "The token the coin trades against on its bonding curve. SOL, stablecoins and majors\n(wrapped BTC/ETH/ZEC, PUMP) carry no meaning; any other token, often another pump.fun\ncoin, feeds the analysis (category crypto_native/paired_ecosystem,\nderivative/pair_family when the name builds on it, flag non_sol_pair) and the summary\nnames it by ticker and name.",
         "properties": {
           "builds_on": {
             "default": false,
@@ -2983,7 +2983,7 @@
             "type": "array"
           },
           "kind": {
-            "description": "sol, stablecoin, lst (staked SOL) and major (wrapped BTC/ETH) carry no meaning; token and tokenized_stock (an xStock such as TSLAx) feed the analysis",
+            "description": "sol, stablecoin, lst (staked SOL) and major (wrapped BTC/ETH/ZEC, PUMP) carry no meaning; token and tokenized_stock (an xStock such as TSLAx) feed the analysis",
             "enum": [
               "sol",
               "stablecoin",
@@ -3009,6 +3009,18 @@
               }
             ],
             "title": "Name"
+          },
+          "pumpfun": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pair token is itself a pump.fun coin (it has a pump.fun bonding curve; pump.fun pairs coins with any other pump.fun coin). Null when not looked up (SOL, stablecoins and majors) or unknown",
+            "title": "Pumpfun"
           },
           "referent": {
             "anyOf": [

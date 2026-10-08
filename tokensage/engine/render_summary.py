@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tokensage.engine.aggregate import Aggregated, is_relation, main_category
+from tokensage.engine.aggregate import Aggregated, is_relation, is_theme, main_category
 from tokensage.engine.context import Ev
 
 _CATEGORY_PHRASE = {
@@ -36,12 +36,17 @@ _CRYPTO_PHRASE = {
 }
 
 
-def _phrase(label: str, categories: list[tuple[str, float]]) -> str:
+def category_phrase(label: str, categories: list[tuple[str, float]]) -> str:
     if label == "crypto_native":
         for lbl, _ in categories:  # sorted by confidence
             if lbl in _CRYPTO_PHRASE:
                 return _CRYPTO_PHRASE[lbl]
     return _CATEGORY_PHRASE.get(label, label)
+
+
+def _has_theme(agg: Aggregated) -> bool:
+    tp = main_category(agg.categories)
+    return tp is not None and is_theme(tp[0])
 
 
 def _verb(score: float) -> str:
@@ -62,12 +67,16 @@ def summarize(
     context: list[str] | None = None,
     framing: str | None = None,
     narrative: str | None = None,
+    pair_who: tuple[str, str | None] | None = None,
+    pair_builds_on: bool = False,
     rival: bool = False,
     referent_confidence: float | None = None,
 ) -> tuple[str, list[str]]:
     """framing: "a cat coin" when the referent is only the name's modifier. narrative: the
-    X post the coin was launched on, if any. rival: the name sets itself against the
-    referent ("Doge Killer")."""
+    X post the coin was launched on, if any. pair_who: the token it trades against instead
+    of SOL, as (its ticker and name, what it is): ("$OGC (OG Callers)", "itself a pump.fun
+    coin"). pair_builds_on: the coin's name builds on that token. rival: the name sets itself
+    against the referent ("Doge Killer")."""
     head = f"{name or '(unnamed)'} (${ticker or '?'})"
     parts: list[str] = []
     r = agg.referent
@@ -82,16 +91,25 @@ def summarize(
             parts.append(f"{head} is {framing} tied to {r.label}{desc}{conf}.")
         else:
             parts.append(f"{head} {_verb(score)} {r.label}{desc}{conf}.")
-    elif narrative:
-        # no name anyone knows: the post it was launched on is the story
-        joiner = " was " if narrative.startswith("launched") else ": "
-        parts.append(f"{head}{joiner}{narrative}.")
-        narrative = None
+    elif narrative or (pair_who and not _has_theme(agg)):
+        # no name anyone knows: the post it was launched on, or (when the name has no theme
+        # either) the token it was launched against, is the story
+        if narrative:
+            joiner = " was " if narrative.startswith("launched") else ": "
+            parts.append(f"{head}{joiner}{narrative}.")
+            narrative = None
+        elif pair_who:
+            parts.append(
+                f"{head} was launched into the {pair_who[0]} community, trading against it"
+                + (" and building on its name." if pair_builds_on else " instead of SOL.")
+                + (f" {pair_who[0]} is {pair_who[1]}." if pair_who[1] else "")
+            )
+            pair_who = None
         tp = main_category(agg.categories)
         guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
             parts.append(
-                f"Beyond that it reads as {_phrase(tp[0], agg.categories)} "
+                f"Beyond that it reads as {category_phrase(tp[0], agg.categories)} "
                 f"(confidence {tp[1]:.2f}){guess}."
             )
         elif guess:
@@ -100,13 +118,18 @@ def summarize(
         tp = main_category(agg.categories)
         guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
         if tp:
-            parts.append(
-                f"{head} reads as {_phrase(tp[0], agg.categories)} (confidence {tp[1]:.2f}){guess}."
-            )
+            phrase = category_phrase(tp[0], agg.categories)
+            parts.append(f"{head} reads as {phrase} (confidence {tp[1]:.2f}){guess}.")
         else:
             parts.append(f"{head}: no clear reference found; see evidence and caveats{guess}.")
     if narrative:
         parts.append(narrative[0].upper() + narrative[1:] + ".")
+    if pair_who:
+        parts.append(
+            f"It trades against {pair_who[0]} instead of SOL"
+            + ("; its name builds on it." if pair_builds_on else ".")
+            + (f" {pair_who[0]} is {pair_who[1]}." if pair_who[1] else "")
+        )
     # the theme before the relation: "animal/frog 0.49, derivative/copycat 0.75"
     subs = sorted(
         ((lbl, s) for lbl, s in agg.categories if "/" in lbl), key=lambda x: is_relation(x[0])

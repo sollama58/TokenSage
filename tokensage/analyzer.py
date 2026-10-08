@@ -1107,6 +1107,7 @@ def _pair_out(p: pairing.PairAssessment | None) -> Pair | None:
         name=p.name,
         kind=p.kind,  # type: ignore[arg-type]
         source=p.source,
+        pumpfun=p.pumpfun,
         underlying=p.underlying,
         builds_on=p.builds_on,
         builds_on_detail=p.builds_on_detail,
@@ -1637,7 +1638,7 @@ async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput
     pair token's full meaning (its referent and categories) instead of a read of its name."""
     if pair is None or pair.kind != "token" or pair.source not in ("db", "onchain", "none"):
         return
-    if not pair.mint.endswith("pump") or pairing.xstock_ticker(pair.symbol, pair.name, pair.mint):
+    if not pair.pumpfun or pairing.xstock_ticker(pair.symbol, pair.name, pair.mint):
         return
     try:
         await queue.enqueue(conn, "analyze", pair.mint, "basic", requested_by="pair_lookup")
