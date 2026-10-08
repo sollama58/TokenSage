@@ -20,10 +20,11 @@ log = structlog.get_logger("jobs.maintenance")
 # Statement timeout per step. A cron run has nobody waiting on it, so a prune that is slow
 # while the workers are busy gets more room than the pool's 30 s default.
 STEP_TIMEOUT_S = 120.0
-# A superseded analysis becomes prunable when it crosses 30 days or when a newer version
-# lands. The prune looks only at rows that changed state within this window, not the whole
-# table; an outage longer than this leaves a few superseded rows behind, which costs disk only.
-PRUNE_WINDOW = "3 days"
+# The analysis prune works in batches of this many rows and stops starting new ones after
+# this long; whatever is left waits for the next run (the cursors keep its place).
+PRUNE_BATCH = 5000
+PRUNE_BUDGET_S = 60.0
+KEEP_VERSIONS = 3
 
 
 def _count(status: str) -> int:
@@ -44,40 +45,110 @@ async def _prune_jobs(conn: asyncpg.Connection) -> int:
     )
 
 
-async def _prune_analyses(conn: asyncpg.Connection) -> int:
-    # keep the newest 3 versions per (mint, depth); drop older ones past 30 days. The
-    # candidates are rows that just crossed 30 days and the old rows of mints analysed again
-    # recently: a window over the whole table sorts every analysis ever written, every hour.
-    # `offset 0` keeps the old rows of recent mints a per-mint key lookup, and the victims are
-    # deleted by key, so neither half turns into a scan of the whole table.
-    victims = await conn.fetch(
-        f"""with cand as (
-              select mint, version, depth from analysis
-              where created_at < now() - interval '30 days'
-                and created_at >= now() - interval '30 days' - interval '{PRUNE_WINDOW}'
-              union
-              select r.mint, o.version, o.depth
-              from (select distinct mint from analysis
-                    where created_at >= now() - interval '{PRUNE_WINDOW}') r,
-                   lateral (select version, depth, created_at from analysis
-                            where mint = r.mint offset 0) o
-              where o.created_at < now() - interval '30 days')
-            select mint, version from cand c
-            where (select count(*) from analysis n
-                   where n.mint = c.mint and n.depth = c.depth and n.version > c.version) >= 3""",
-        timeout=STEP_TIMEOUT_S,
-    )
-    if not victims:
-        return 0
-    return _count(
-        await conn.execute(
-            """delete from analysis a using unnest($1::text[], $2::int[]) v(mint, version)
-               where a.mint = v.mint and a.version = v.version""",
-            [v["mint"] for v in victims],
-            [v["version"] for v in victims],
+# A superseded analysis (3 newer versions at its depth) is pruned once it is past 30 days.
+# It becomes prunable either when it ages past 30 days (the `analysis_aged` cursor walks rows
+# as they cross that line) or when a newer version lands after that (the `analysis_new`
+# cursor walks new rows and checks their mint and depth). Each batch commits with its cursor,
+# so a slow run loses nothing and the next one carries on: no step ever reads the whole table.
+AGED_VICTIMS = """
+    select a.mint, a.version from analysis a
+    where a.created_at > $1 and a.created_at <= $2
+      and (select count(*) from analysis n
+           where n.mint = a.mint and n.depth = a.depth and n.version > a.version) >= $3"""
+NEW_VICTIMS = """
+    select o.mint, o.version
+    from (select distinct mint, depth from analysis
+          where created_at > $1 and created_at <= $2) k,
+         lateral (select mint, version, created_at from analysis
+                  where mint = k.mint and depth = k.depth
+                  order by version desc offset $3) o
+    where o.created_at < now() - interval '30 days'"""
+
+
+async def _prune_batch(conn: asyncpg.Connection, cursor: str, upto: str, victims_sql: str) -> int:
+    """Prune one batch past `cursor` (rows up to `upto`) and move the cursor. Returns the
+    rows deleted, or -1 when the cursor has caught up."""
+    async with conn.transaction():
+        at = await conn.fetchval(
+            "select at from maintenance_cursor where name = $1 for update",
+            cursor,
             timeout=STEP_TIMEOUT_S,
         )
+        # the batch ends at the PRUNE_BATCH-th row's time; rows sharing that time go in too
+        end = await conn.fetchval(
+            f"""select max(created_at) from (
+                  select created_at from analysis
+                  where created_at > $1 and created_at <= {upto}
+                  order by created_at limit $2) b""",
+            at,
+            PRUNE_BATCH,
+            timeout=STEP_TIMEOUT_S,
+        )
+        if end is None:
+            return -1
+        victims = await conn.fetch(victims_sql, at, end, KEEP_VERSIONS, timeout=STEP_TIMEOUT_S)
+        deleted = 0
+        if victims:
+            deleted = _count(
+                await conn.execute(
+                    """delete from analysis a
+                       using unnest($1::text[], $2::int[]) v(mint, version)
+                       where a.mint = v.mint and a.version = v.version""",
+                    [v["mint"] for v in victims],
+                    [v["version"] for v in victims],
+                    timeout=STEP_TIMEOUT_S,
+                )
+            )
+        await conn.execute(
+            "update maintenance_cursor set at = $2 where name = $1",
+            cursor,
+            end,
+            timeout=STEP_TIMEOUT_S,
+        )
+        return deleted
+
+
+async def _prune_analyses(conn: asyncpg.Connection) -> dict[str, Any]:
+    # keep the newest 3 versions per (mint, depth); drop older ones past 30 days
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PRUNE_BUDGET_S
+    passes = [
+        # a few minutes behind now(): an insert still in flight carries an earlier created_at
+        ("analysis_new", "now() - interval '5 minutes'", NEW_VICTIMS),
+        ("analysis_aged", "now() - interval '30 days'", AGED_VICTIMS),
+    ]
+    deleted, batches = 0, 0
+    # one batch per cursor in turn, so a burst of new rows does not starve the backlog
+    while passes:
+        for p in list(passes):
+            n = await _prune_batch(conn, *p)
+            if n < 0:
+                passes.remove(p)
+            else:
+                deleted += n
+                batches += 1
+        if loop.time() >= deadline:
+            break
+    lag = await conn.fetchrow(
+        """select extract(epoch from now() - max(at) filter (where name = 'analysis_new'))
+                    as new_s,
+                  extract(epoch from now() - interval '30 days'
+                          - max(at) filter (where name = 'analysis_aged')) as aged_s
+           from maintenance_cursor""",
+        timeout=STEP_TIMEOUT_S,
     )
+    # how far behind each cursor still is (seconds); the aged one starts at the oldest row
+    # and is days behind until the backlog is through
+    return {
+        "deleted": deleted,
+        "batches": batches,
+        "new_lag_s": _secs(lag["new_s"]),
+        "aged_lag_s": _secs(lag["aged_s"]),
+    }
+
+
+def _secs(v: Any) -> int | None:
+    return None if v is None else max(0, int(v))
 
 
 async def _prune_usage(conn: asyncpg.Connection) -> int:
