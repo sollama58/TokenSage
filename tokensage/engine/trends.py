@@ -114,6 +114,13 @@ class TrendIndex:
                 if w not in words or _strength(t) > _strength(words[w]):
                     words[w] = t
         self._words = words
+        # a multi-word label also written as one word: trending "#MooDeng" (read "Moo Deng")
+        # against a coin named MOODENG, or X's "Chat GPT" against "ChatGPT" in a post
+        for s, t in list(best.items()):
+            c = s.replace(" ", "")
+            if " " in s and len(c) >= MIN_COMPACT_LEN and c.isalnum() and c not in best:
+                if not gazetteer.is_common(c):
+                    best[c] = t
         for s, t in best.items():
             self._auto.add_word(" " + s + " ", (s, t))
             n += 1
@@ -126,12 +133,13 @@ class TrendIndex:
             return []
         # the text as the surfaces are written: "Moo Deng's", "Moo Deng," and "#MooDeng" all
         # read "moo deng"
-        text = _HASHTAG.sub(lambda m: _CAMEL.sub(" ", m.group(1)), text)
-        padded = " " + _clean(text) + " "
+        split = _HASHTAG.sub(lambda m: _CAMEL.sub(" ", m.group(1)), text)
         out: dict[str, TrendHit] = {}
-        for _end, (s, t) in self._auto.iter(padded):
-            if t.term not in out or len(s) > len(out[t.term].surface):
-                out[t.term] = TrendHit(t, s, where)
+        # and as written: "#TikTok" in a post is the trending "TikTok" article
+        for variant in (split, text) if split != text else (split,):
+            for _end, (s, t) in self._auto.iter(" " + _clean(variant) + " "):
+                if t.term not in out or len(s) > len(out[t.term].surface):
+                    out[t.term] = TrendHit(t, s, where)
         return list(out.values())
 
     def match_exact(self, phrase: str, where: str, via: str | None = None) -> TrendHit | None:
@@ -154,6 +162,7 @@ class TrendIndex:
 
 
 _HASHTAG = re.compile(r"#(\w+)")
+MIN_COMPACT_LEN = 6  # "moodeng", "chatgpt": shorter run-together labels collide with words
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
@@ -541,6 +550,7 @@ def xtrends_evidence(h: TrendHit, index: TrendIndex) -> list[Ev]:
 
 MIN_BLUESKY_POSTS = 3  # from at least three accounts: one person posting is not a trend
 BLUESKY_WINDOW = timedelta(hours=24)
+MAX_BLUESKY_POSTS_PER_AUTHOR = 2  # posts counted per account
 
 
 def bluesky_hit(phrase: str, posts: list[dict], now: datetime | None = None) -> TrendHit | None:
@@ -559,8 +569,19 @@ def bluesky_hit(phrase: str, posts: list[dict], now: datetime | None = None) -> 
     if len(recent) < MIN_BLUESKY_POSTS or len(authors) < MIN_BLUESKY_POSTS:
         return None
     top = max(recent, key=lambda pd: int(pd[0].get("likes") or 0) + int(pd[0].get("reposts") or 0))
+    # one account posting eight times is not eight people talking about it
+    per_author: dict[str, int] = {}
+    for p, _ in recent:
+        a = str(p.get("author") or p.get("uri") or id(p))
+        per_author[a] = min(MAX_BLUESKY_POSTS_PER_AUTHOR, per_author.get(a, 0) + 1)
     return TrendHit(
-        TrendTerm(phrase, 0.0, len(recent), source="bluesky", seen_at=max(d for _, d in recent)),
+        TrendTerm(
+            phrase,
+            0.0,
+            sum(per_author.values()),
+            source="bluesky",
+            seen_at=max(d for _, d in recent),
+        ),
         phrase.lower(),
         "name",
         headline=" ".join(str(top[0].get("text") or "").split())[:200] or None,

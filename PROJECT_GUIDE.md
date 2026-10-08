@@ -464,13 +464,13 @@ Signals, with research-backed meanings:
 | Signal | Interpretation |
 |---|---|
 | tweet time < token time | **narrative source** (coin made *about* this tweet); a gap of minutes to hours is typical |
-| tweet after launch, author looks like the project account | launch announcement; weight by account age and followers |
+| tweet after launch, author looks like the project account | launch announcement; account age and followers are context (`x.credibility`), not a verdict |
 | author is a big or verified account unrelated to the creator | **borrowed narrative** (`relation = narrative_reference`); never call it "official" |
 | URL handle ≠ fetched author | **spoof attempt**: strong red flag |
 | tweet mentions the ticker, CA or pump.fun link | direct link; rare and strong if the author is notable |
 | `verified_type` Business/Government vs paid blue check | gold or grey checks are strong; blue is weak |
 | account joined days ago, few posts | disposable dev account |
-| `username_changes.count` > 0 (FxTwitter `/about`) | **recycled or bought account**: strong rug signal |
+| `username_changes.count` > 0 (FxTwitter `/about`) | **recycled or bought account**: context, flagged `recycled_x_account` at `info` since rules 0.23.0 |
 | tombstone, 404 or suspended | deleted narrative or banned account; keep the cached copy |
 | community created minutes before the token | purpose-built shell community: weak or neutral |
 | search or hashtag link instead of an account | no real socials: weak negative |

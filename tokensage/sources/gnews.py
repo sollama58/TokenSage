@@ -29,6 +29,13 @@ _CRYPTO = re.compile(
 )
 # Words that do not make a coin name specific enough to search the news for
 _FILLER = {"the", "of", "a", "an", "on", "and", "coin", "token", "inu", "sol", "wif", "official"}
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'"})
+
+
+def straight(text: str) -> str:
+    """Curly apostrophes as straight ones: "Trump\u2019s Cat" (an iPhone's default) and
+    "Trump's Cat" are the same name in a coin and in a headline."""
+    return text.translate(_APOSTROPHES)
 
 
 @dataclass
@@ -78,8 +85,14 @@ def name_query(name: str | None) -> str | None:
     word ("Claudia", "Einstein") matches unrelated stories, so it takes two content words."""
     if not name:
         return None
-    words = re.sub(r"[^\w' ]+", " ", name).split()
+    words = re.sub(r"[^\w' ]+", " ", straight(name)).split()
     while words and words[-1].isdigit():  # "Peanut the Squirrel 2.0": the story, not the sequel
+        words.pop()
+    # "Official Moo Deng", "Moo Deng Inu", "Moo Deng Coin": the story is "Moo Deng" (and a
+    # headline with "coin" in it is dropped as crypto, so the phrase could never be found)
+    while words and words[0].lower() in _FILLER:
+        words.pop(0)
+    while words and words[-1].lower() in _FILLER:
         words.pop()
     content = [w for w in words if w.lower() not in _FILLER]
     if len(content) < 2 or sum(len(w) for w in content) < 6 or len(words) > 6:
@@ -93,15 +106,20 @@ def relevant(heads: list[dict], phrase: str, symbol: str | None = None) -> list[
     heads: headlines as news_for caches them ({title, source, published})."""
     pat = re.compile(r"(?<!\w)" + re.escape(phrase.lower()) + r"(?!\w)")
     sym = (symbol or "").strip().lower()
+    # the ticker as a cashtag, or written in capitals ("QTC lists cross-chain"); the same
+    # letters as a plain word ("a baby hippo" for $HIPPO) are the story, not the coin
     sym_pat = (
-        re.compile(r"(?<!\w)\$?" + re.escape(sym) + r"(?!\w)")
+        re.compile(
+            r"(?i:\$" + re.escape(sym) + r")(?!\w)|(?<!\w)" + re.escape(sym.upper()) + r"(?!\w)"
+        )
         if len(sym) >= 2 and sym not in phrase.lower().split()
         else None
     )
     out = []
     for h in heads:
-        t = str(h.get("title") or "").lower()
-        if not pat.search(t) or _CRYPTO.search(t) or (sym_pat and sym_pat.search(t)):
+        title = straight(str(h.get("title") or ""))
+        t = title.lower()
+        if not pat.search(t) or _CRYPTO.search(t) or (sym_pat and sym_pat.search(title)):
             continue
         out.append(h)
     return out

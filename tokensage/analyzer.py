@@ -419,16 +419,25 @@ async def _db_context_queries(
         # token.logo_phash (kept by triggers) narrows the window to the near matches from
         # one index (token_logo_idx) without visiting token_metadata and image per coin;
         # the join below re-checks each against the image's own hash
+        near_sql = f"""select t.mint from token t
+             where t.logo_phash is not null and {window}
+               and least(bit_count((t.logo_phash # $4::bigint)::bit(64)),
+                         bit_count((t.logo_phash # $5::bigint)::bit(64))) <= $6"""
+        # as many as the join below keeps (the newest), plus the earliest: a logo reused by
+        # most of the window must not send every one of its coins to the join
         near = [
             row["mint"]
             for row in await conn.fetch(
-                f"""select t.mint from token t
-                     where t.logo_phash is not null and {window}
-                       and least(bit_count((t.logo_phash # $4::bigint)::bit(64)),
-                                 bit_count((t.logo_phash # $5::bigint)::bit(64))) <= $6""",
-                *args,
+                f"{near_sql} order by t.created_at desc limit {LOGO_ROWS}", *args
             )
         ]
+        if len(near) == LOGO_ROWS:
+            seen = set(near)
+            near += [
+                row["mint"]
+                for row in await conn.fetch(f"{near_sql} order by t.created_at limit 10", *args)
+                if row["mint"] not in seen
+            ]
         logo_sql = f"""from token t
            join token_metadata tm on tm.mint = t.mint
            join image i on i.content_key = tm.image_content_key

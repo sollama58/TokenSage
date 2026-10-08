@@ -195,19 +195,33 @@ async def _prune_lookup_cache(conn: asyncpg.Connection) -> int:
 
 # token.logo_phash is kept by triggers (migration 0017); this re-derives it for the coins
 # inside the logo scan window (data/meta.yaml logo_scan_days, 7) in case two concurrent
-# writes for one logo still left a copy behind. Index-backed on token_created_at_idx.
+# writes for one logo still left a copy behind. The window's coins come from
+# token_created_at_idx and each one's logo from the token_metadata and image primary keys:
+# a join here would read all of token_metadata every hour.
 LOGO_REPAIR_WINDOW = "8 days"
 
 
 async def _repair_logo_hashes(conn: asyncpg.Connection) -> int:
+    # `offset 0` keeps the planner on the per-coin primary-key lookups
+    rows = await conn.fetch(
+        f"""select w.mint, i.phash
+              from token w
+              join lateral (select tm.image_content_key from token_metadata tm
+                             where tm.mint = w.mint offset 0) tm on true
+              join image i on i.content_key = tm.image_content_key
+             where w.created_at > now() - interval '{LOGO_REPAIR_WINDOW}'
+               and w.logo_phash is distinct from i.phash""",
+        timeout=STEP_TIMEOUT_S,
+    )
+    if not rows:
+        return 0
     return _count(
         await conn.execute(
-            f"""update token t set logo_phash = i.phash
-                  from token_metadata tm
-                  join image i on i.content_key = tm.image_content_key
-                 where tm.mint = t.mint
-                   and t.created_at > now() - interval '{LOGO_REPAIR_WINDOW}'
-                   and t.logo_phash is distinct from i.phash""",
+            """update token t set logo_phash = u.phash
+                 from unnest($1::text[], $2::bigint[]) as u(mint, phash)
+                where t.mint = u.mint and t.logo_phash is distinct from u.phash""",
+            [r["mint"] for r in rows],
+            [r["phash"] for r in rows],
             timeout=STEP_TIMEOUT_S,
         )
     )
