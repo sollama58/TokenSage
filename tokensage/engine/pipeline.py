@@ -27,6 +27,7 @@ from tokensage.engine import (
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
 from tokensage.engine.aggregate import (
+    ACCOUNT_SIZE_KINDS,
     NO_PARENT,
     THEME_ORDER,
     TREND_SOURCES,
@@ -451,6 +452,7 @@ def _require_second_signal(evidence: list[Ev], k: Knowledge, symbol_is_name: boo
             o is not ev
             and o.label.split("/")[0] == top
             and o.kind not in ("wordnet", "emoji")
+            and o.kind not in ACCOUNT_SIZE_KINDS
             and (
                 o.surface is None
                 or o.surface != ev.surface

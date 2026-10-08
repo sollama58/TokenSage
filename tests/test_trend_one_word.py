@@ -202,7 +202,9 @@ def test_trending_label_matches_through_punctuation_and_hashtags() -> None:
     ):
         assert [h.term.term for h in idx.match(text, "x")] == ["Moo Deng"], text
     assert [h.term.term for h in idx.match("Dr. Dre dropped", "x")] == ["Dr. Dre"]
-    assert idx.match("moodeng is a word", "x") == []
+    # written as one word (a coin named MOODENG); short run-together labels are not indexed
+    assert [h.term.term for h in idx.match("MOODENG to the moon", "name")] == ["Moo Deng"]
+    assert idx.match("drdre", "x") == []
 
 
 def test_gated_whole_label_does_not_block_the_word_of_a_label_lookup() -> None:

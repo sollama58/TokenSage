@@ -29,6 +29,9 @@ THEME_ORDER = [
 TREND_SOURCES = {"wikipedia", "gtrends", "xtrends", "news", "bsky"}
 # Evidence kinds that only say what a word usually means, not what this coin refers to.
 DICTIONARY_KINDS = {"wordnet", "emoji"}
+# The "large account wrote, quoted or was replied to" hint is context about the account's
+# size, never a theme on its own: one per label counts, and it never makes an input agree.
+ACCOUNT_SIZE_KINDS = {"x_author", "x_quote_author", "x_reply_author"}
 # Labels a dictionary noun gives any text that has one: only the name, ticker or image can
 # start them.
 NOUN_ONLY = {"food_object_abstract"}
@@ -123,7 +126,8 @@ def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) ->
     seen: set[tuple[str, str, str, str]] = set()
     uniq: list[Ev] = []
     for ev in evidence:
-        key = (ev.kind, ev.label, ev.source, ev.where)
+        kind = "x_account_size" if ev.kind in ACCOUNT_SIZE_KINDS else ev.kind
+        key = (kind, ev.label, ev.source, ev.where)
         if key in seen:
             continue
         seen.add(key)
@@ -148,6 +152,9 @@ def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) ->
 
     # per label, per input: the weights of the rows that support it
     per: dict[str, dict[str, list[float]]] = {}
+    substantive: dict[str, set[str]] = {}  # inputs with more than an account-size hint
+    per_no_hint: dict[str, dict[str, list[float]]] = {}
+    hinted: set[str] = set()
     named: set[str] = set()  # labels with evidence beyond dictionary words
     image_backed: set[str] = set()
     for ev in uniq:
@@ -166,6 +173,11 @@ def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) ->
         ch = channel(ev, symbol_is_name)
         for t in targets(ev):
             per.setdefault(t, {}).setdefault(ch, []).append(w)
+            if ev.kind in ACCOUNT_SIZE_KINDS:
+                hinted.add(t)
+            else:
+                substantive.setdefault(t, set()).add(ch)
+                per_no_hint.setdefault(t, {}).setdefault(ch, []).append(w)
             if ev.kind not in DICTIONARY_KINDS:
                 named.add(t)
             if ev.where == "image":
@@ -174,7 +186,8 @@ def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) ->
     inputs: dict[str, list[str]] = {}
     dict_cap = k.scoring.get("wordnet_only_cap", 0.6)
     food_cap = k.scoring.get("food_dictionary_cap", 0.45)
-    for label, chans in per.items():
+
+    def combine(label: str, chans: dict[str, list[float]]) -> tuple[float, dict[str, float]]:
         strength: dict[str, float] = {}
         for ch, ws in chans.items():
             top = max(ws)
@@ -186,8 +199,21 @@ def aggregate(evidence: list[Ev], k: Knowledge, symbol_is_name: bool = False) ->
         for v in strength.values():
             miss *= 1 - v
         conf = 1 - miss
-        agreeing = [ch for ch, v in strength.items() if v >= agree_floor]
-        conf = min(cap, conf + bonus * min(max(0, len(agreeing) - 1), 2))
+        agreeing = [
+            ch
+            for ch, v in strength.items()
+            if v >= agree_floor and ch in substantive.get(label, ())
+        ]
+        return min(cap, conf + bonus * min(max(0, len(agreeing) - 1), 2)), strength
+
+    for label, chans in per.items():
+        conf, strength = combine(label, chans)
+        if label in hinted:
+            # the account-size hint strengthens a theme the coin already has; it never
+            # lifts one over the reporting floor ("Speed" posted by @SportsCenter)
+            alone, _ = combine(label, per_no_hint.get(label, {}))
+            if alone < min_conf:
+                conf = alone
         if label not in named:
             # "ani is a bird" and "🐿" are dictionary senses, not knowledge of this coin: a
             # label they alone support never outranks one a named entity or coin supports

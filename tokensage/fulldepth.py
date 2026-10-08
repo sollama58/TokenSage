@@ -27,6 +27,7 @@ PROFILE_TTL = timedelta(hours=12)
 TWEET_RECHECK = timedelta(hours=6)
 DELETED_RETRY = timedelta(hours=1)
 NEWS_TTL = timedelta(hours=1)
+NEWS_WINDOW = timedelta(days=2)  # the window Google News is searched over (when:2d)
 BLUESKY_TTL = timedelta(hours=1)
 WIKI_TTL = timedelta(days=7)  # articles and their descriptions change slowly
 WIKI_EMPTY_TTL = timedelta(days=1)  # a name with no article may get one tomorrow
@@ -547,7 +548,17 @@ async def news_lookup(
         return NewsLookup(list(row["value"]), row["fetched_at"], stale=False)
     heads = await gnews.search(http, f'"{term}"' if exact else term)
     if heads is None:
-        return NewsLookup(list(row["value"]), row["fetched_at"], stale=True) if row else None
+        if not row:
+            return None
+        # an older cached list stands in for an outage, but only its headlines that are still
+        # inside the search window: a month-old story is not "in the news"
+        cutoff = datetime.now(UTC) - NEWS_WINDOW
+        recent = [
+            h
+            for h in row["value"]
+            if (trends._published(h) or row["fetched_at"]) >= cutoff  # undated: as of the fetch
+        ]
+        return NewsLookup(recent, row["fetched_at"], stale=True)
     value = [{"title": h.title, "source": h.source, "published": h.published} for h in heads]
     await conn.execute(
         """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
