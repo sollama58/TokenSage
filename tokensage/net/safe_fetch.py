@@ -171,6 +171,14 @@ async def _safe_get(
                     raise FetchError(f"http {r.status_code}", r.status_code, retryable=True)
                 if r.status_code != 200:
                     raise FetchError(f"http {r.status_code}", r.status_code, retryable=False)
+                # We asked for identity. A compressed answer would be inflated by httpx
+                # before the cap below sees it (a 64 KB gzip bomb is 66 MB in one chunk):
+                # a host that ignores Accept-Encoding is hostile or broken, so refuse it.
+                encoding = r.headers.get("content-encoding", "").strip().lower()
+                if encoding and encoding != "identity":
+                    raise FetchError(
+                        f"content-encoding not allowed: {encoding[:20]}", 200, retryable=False
+                    )
                 declared = r.headers.get("content-length")
                 if declared and declared.isdigit() and int(declared) > max_bytes:
                     raise FetchError(f"too large: {declared} bytes", 200, retryable=False)

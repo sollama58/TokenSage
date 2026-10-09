@@ -19,6 +19,16 @@ from tokensage.engine.context import Ev, ReferentCandidate
 from tokensage.engine.knowledge import Knowledge
 
 GENERIC_PREFIXES = ("list of", "deaths in", "main page", "special:", "wikipedia:", "portal:")
+# a title in a Wikipedia namespace ("Special:Search", "Category talk:Foo") names no subject;
+# a colon inside a title ("Dune: Part Two") is part of the name
+_NAMESPACE = re.compile(r"^([a-z]+)(?: talk)?:")
+_NAMESPACES = frozenset(
+    {
+        "special", "wikipedia", "portal", "file", "image", "help", "talk", "category",
+        "template", "user", "draft", "module", "mediawiki", "book", "timedtext", "project",
+        "media", "gadget", "gadget definition",
+    }
+)  # fmt: skip
 MIN_TERM_LEN = 4
 # a one-word name is looked up among the words of longer trending labels ("Leoncio" in
 # "Leoncio Gomez") only when it is at least this long, and only in labels of 2-4 words
@@ -121,6 +131,15 @@ class TrendIndex:
             if " " in s and len(c) >= MIN_COMPACT_LEN and c.isalnum() and c not in best:
                 if not gazetteer.is_common(c):
                     best[c] = t
+        # and a one-word label written in camelCase as the words normalize() reads a coin
+        # name into: "DeepSeek" against "DeepSeek Cat", whose name_tokens are "deep seek cat"
+        for t in terms:
+            title = re.sub(r"\s*\([^)]*\)\s*$", "", _fold(t.term).replace("_", " ")).strip()
+            if " " in title or not surfaces_for(t.term):
+                continue
+            split = _clean(_CAMEL.sub(" ", title))
+            if " " in split and split not in best:
+                best[split] = t
         for s, t in best.items():
             self._auto.add_word(" " + s + " ", (s, t))
             n += 1
@@ -182,7 +201,8 @@ def surfaces_for(title: str) -> list[str]:
     """'Peanut (squirrel)' -> ['peanut (squirrel)', 'peanut squirrel', 'peanut']"""
     t = _fold(title).replace("_", " ").strip()
     low = t.lower()
-    if low.startswith(GENERIC_PREFIXES) or ":" in low:
+    ns = _NAMESPACE.match(low)
+    if low.startswith(GENERIC_PREFIXES) or (ns and ns.group(1) in _NAMESPACES):
         return []
     if any(c.isalpha() and not c.isascii() for c in low):
         # another script ("Aぇヤンタン"): cleaning would leave a stray Latin letter or two

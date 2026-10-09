@@ -478,7 +478,7 @@ class XMatchField(_Model):
     score: float = Field(ge=0, le=1)
     how: str = Field(
         description="name: exact|normalized|segment|fuzzy|none; "
-        "ticker: cashtag|bare|hashtag|fuzzy|none"
+        "ticker: cashtag|bare|hashtag|fuzzy|contract|none"
     )
     detail: str
 
@@ -735,7 +735,7 @@ class Evidence(_Model):
     where: str | None = Field(
         default=None,
         description="Which input it came from: name, symbol, description, image, x, trend, "
-        "chain, db",
+        "chain, db, copy_of (inherited from the original this coin copies)",
     )
 
 

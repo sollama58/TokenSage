@@ -7,6 +7,7 @@ import asyncio
 import io
 import threading
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -16,6 +17,15 @@ _engine = None
 _failed: str | None = None
 MAX_SIDE = 640
 MIN_CONF = 0.6
+# A strip thinner than MIN_SIDE px, or longer than MAX_ASPECT times its height, after the
+# scaling to MAX_SIDE (a 10000x10 logo becomes 640x1) is not read: PP-OCR skips detection on
+# it and resizes the whole strip to 48 px high for the recogniser, tens of thousands of px
+# wide, which takes minutes and gigabytes.
+MIN_SIDE = 16
+MAX_ASPECT = 40
+# A second layer for shapes the guard does not catch: the engine runs on its own thread and
+# the read gives up after this many seconds (the engine thread finishes on its own).
+TIME_BUDGET_S = 30.0
 
 
 @dataclass
@@ -84,6 +94,27 @@ def read(data: bytes) -> tuple[list[OcrLine], str | None]:
         return _read(data)
 
 
+def _run_with_budget(eng: Any, arr: np.ndarray) -> Any:
+    """The engine's result, or TimeoutError after TIME_BUDGET_S: a pathological input must
+    not hold the OCR slot (and the job) for minutes."""
+    box: list[Any] = []
+
+    def run() -> None:
+        try:
+            box.append(eng(arr)[0])
+        except Exception as e:  # noqa: BLE001
+            box.append(e)
+
+    t = threading.Thread(target=run, name="ocr-engine", daemon=True)
+    t.start()
+    t.join(TIME_BUDGET_S)
+    if t.is_alive():
+        raise TimeoutError(f"OCR gave up after {TIME_BUDGET_S:.0f} s")
+    if isinstance(box[0], Exception):
+        raise box[0]
+    return box[0]
+
+
 def _read(data: bytes) -> tuple[list[OcrLine], str | None]:
     eng = _get_engine()
     if eng is None:
@@ -99,7 +130,10 @@ def _read(data: bytes) -> tuple[list[OcrLine], str | None]:
             except Exception:  # noqa: BLE001
                 pass
             arr = np.asarray(to_rgb(img, MAX_SIDE))
-        result, _elapsed = eng(arr)
+        h, w = int(arr.shape[0]), int(arr.shape[1])
+        if min(h, w) < MIN_SIDE or max(h, w) > MAX_ASPECT * max(1, min(h, w)):
+            return [], f"image too thin for OCR ({w}x{h} after scaling)"
+        result = _run_with_budget(eng, arr)
     except Exception as e:  # noqa: BLE001
         return [], f"{type(e).__name__}: {e}"[:160]
     lines: list[OcrLine] = []

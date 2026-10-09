@@ -33,7 +33,8 @@ def _count(status: str) -> int:
 
 
 async def _requeue(conn: asyncpg.Connection) -> int:
-    return await queue.requeue_expired(conn)
+    # a job with no attempts left is failed ("worker died") instead of being re-run for ever
+    return await queue.requeue_expired(conn, get_settings().job_max_attempts)
 
 
 async def _prune_jobs(conn: asyncpg.Connection) -> int:

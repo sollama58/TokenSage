@@ -107,7 +107,15 @@ def to_rgb(img: Image.Image, max_side: int = 512) -> Image.Image:
     if img.format == "JPEG":
         img.draft("RGB", (max_side, max_side))
     if img.mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
-        arr = np.asarray(img, dtype=np.float64)
+        # scaled down before the float conversion: a 6300x6300 16-bit PNG is 80 KB on the
+        # wire but 317 MB as a float64 frame (reduce() and thumbnail() reject I;16, so a
+        # nearest-neighbour resize)
+        if max(img.size) > 2 * max_side:
+            k = max(img.size) // (2 * max_side)
+            img = img.resize(
+                (max(1, img.size[0] // k), max(1, img.size[1] // k)), Image.Resampling.NEAREST
+            )
+        arr = np.asarray(img, dtype=np.float32)
         lo, hi = float(arr.min()), float(arr.max())
         scaled = (arr - lo) * (255.0 / (hi - lo)) if hi > lo else np.zeros_like(arr)
         img = Image.fromarray(scaled.astype(np.uint8))  # 2-D uint8 -> mode "L"

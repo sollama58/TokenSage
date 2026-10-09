@@ -215,11 +215,24 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
 Pass = tuple[str, str, float] | tuple[str, str, float, str, str]
 
 
+def _kept_coin_words(matches: list[known_coins.CopyMatch], n: Normalized) -> set[str]:
+    """Name words the known-coin stage reads as a coin ("hawk" of "Hawk" $HAWK: Hawk Tuah),
+    so the lexicon does not also read them as dictionary words."""
+    out: set[str] = set()
+    for m in matches:
+        if m.surface:
+            out.add(m.surface.lower())
+        coin_words = {w for s in m.coin.surfaces for w in s.lower().split()}
+        out.update(t for t in n.name_tokens if t in coin_words)
+    return out
+
+
 def _lexicon_evidence(
     n: Normalized,
     k: Knowledge,
     extra_passes: list[Pass] | None = None,
     gaz: Gazetteer | None = None,
+    coin_surfaces: frozenset[str] = frozenset(),
 ) -> list[Ev]:
     evs: list[Ev] = []
     name_text = " ".join(n.name_tokens)
@@ -261,7 +274,14 @@ def _lexicon_evidence(
                 continue
             if where == "name" and h.kind != "wordnet" and _tail_of_word(h.surface, written):
                 continue  # "iggy" in "Niggy": a name read out of the end of another word
-            if where == "name" and h.kind != "wordnet":
+            if where == "name" and (
+                h.kind not in ("wordnet", "coin")
+                or (h.kind == "coin" and h.surface.lower() in coin_surfaces)
+            ):
+                # a coin surface ("goat", "kitty") emits nothing here; when the known-coin
+                # stage keeps the match ("Hawk" $HAWK is Hawk Tuah) the word is named and
+                # its dictionary sense (a bird) is not the coin's; when that stage drops it
+                # ("Goat Farm", a dictionary word as a modifier) the dictionary sense stays
                 named_words.update(h.surface.split())
                 if head and h.kind == "entity" and head in h.surface.replace(" ", ""):
                     head_named = True
@@ -447,6 +467,7 @@ def _require_second_signal(evidence: list[Ev], k: Knowledge, symbol_is_name: boo
     factor = k.scoring.get("generic_single_word_factor", 0.25)
     weak: dict[int, ReferentCandidate] = {}  # referents only weakened rows support
     kept: set[int] = set()
+    weakened: list[Ev] = []
     for ev in evidence:
         if not ev.generic:
             if ev.referent is not None and ev.label != "referent":
@@ -468,6 +489,7 @@ def _require_second_signal(evidence: list[Ev], k: Knowledge, symbol_is_name: boo
         if not agrees:
             ev.weight = round(ev.weight * factor, 3)
             ev.detail += " (one everyday word, nothing else agrees: weak)"
+            weakened.append(ev)
             if ev.referent is not None:
                 weak[id(ev.referent)] = ev.referent
         elif ev.referent is not None:
@@ -479,6 +501,31 @@ def _require_second_signal(evidence: list[Ev], k: Knowledge, symbol_is_name: boo
     for ev in evidence:
         if ev.label == "referent" and ev.referent is not None and id(ev.referent) in weak:
             ev.weight = ev.referent.score
+    if symbol_is_name:
+        # a ticker that spells the name repeats its everyday word ("Speed Demon" $SPEED): two
+        # weakened rows for one word would add up inside the name channel and clear the floor
+        name_rows = {(ev.surface, ev.label) for ev in weakened if ev.where == "name"}
+        drop = {
+            id(ev)
+            for ev in weakened
+            if ev.where == "symbol" and (ev.surface, ev.label) in name_rows
+        }
+        if drop:
+            left = [ev for ev in evidence if id(ev) not in drop]
+            backed = {
+                id(ev.referent) for ev in left if ev.referent is not None and ev.label != "referent"
+            }
+            evidence[:] = [
+                ev
+                for ev in left
+                if not (
+                    ev.label == "referent"
+                    and ev.where == "symbol"
+                    and ev.referent is not None
+                    and id(ev.referent) in weak
+                    and id(ev.referent) not in backed
+                )
+            ]
 
 
 # Three-letter animals that stand for a mascot inside a fused word ("Catler", "Pigcoin").
@@ -555,9 +602,10 @@ def _domain_evidence(n: Normalized) -> list[Ev]:
 
 
 def _news_needs_a_date(evidence: list[Ev], k: Knowledge, created_at: datetime | None) -> list[Ev]:
-    """news_event from the lexicon ("Halloween", "election", "Squid Game") only when the coin
-    is in the news (a trend or headline hit), or the lexicon dates the event and the coin
-    launched near that date. A seasonal or year-old story is a theme, not news."""
+    """news_event from the lexicon ("Halloween", "election", "Squid Game") or inherited from
+    a known coin (PNUT, HAWK: 2024 stories) only when the coin is in the news (a trend or
+    headline hit), or the lexicon dates the event and the coin launched near that date. A
+    seasonal or year-old story is a theme, not news."""
     if any(ev.kind == "trend" for ev in evidence):
         return evidence
     when = _aware(created_at) if created_at else datetime.now(UTC)
@@ -573,7 +621,7 @@ def _news_needs_a_date(evidence: list[Ev], k: Knowledge, created_at: datetime | 
         for ev in evidence
         if not (
             ev.label == "news_event"
-            and ev.source.startswith(("entities:", "slang:", "wikidata:"))
+            and ev.source.startswith(("entities:", "slang:", "wikidata:", "known_coins:"))
             and not fresh(ev)
         )
     ]
@@ -907,13 +955,14 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                     extra_passes.append(("x", related.text, 0.7))
             extra_passes += _account_passes(xa)
     gaz = inp.ctx.gazetteer if inp.ctx.gazetteer is not None else gazetteer.packaged()
-    evidence += _lexicon_evidence(n, k, extra_passes, gaz)
+    matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
+    coin_words = frozenset(_kept_coin_words(matches, n))
+    evidence += _lexicon_evidence(n, k, extra_passes, gaz, coin_words)
     evidence += _compound_evidence(compound_parts(n, k, gaz), n, k)
     evidence += _domain_evidence(n)
     if depth == "full" and inp.wiki_refs:
         evidence += wikilookup.evidence(inp.wiki_refs)
 
-    matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
     is_famous = any(known_coins.is_self(m, n) for m in matches)
     evidence += known_coins.evidence_for(matches, n, k)
     self_symbols = {m.coin.symbol for m in matches if known_coins.is_self(m, n)}
@@ -935,6 +984,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 continue
         evidence.append(ev)
     evidence = _prune_baby_markers(evidence, n, matches, k)
+    evidence = _prune_lone_markers(evidence, n, matches, inp)
+    evidence = _prune_chain_alias(evidence)
     evidence = _prune_ticker_only_inherit(evidence, matches, n)
     head = _head_word(n)
     _weight_by_position(evidence, head)
@@ -1028,11 +1079,20 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
         # the coin's text may not spell the trend ("Elon", $PNUT): its referent can
+        shadowed: list[trends.TrendHit] = []
         for h in trends.referent_hits(evidence, inp.trend_index, k):
             if h.term.term not in seen_terms:
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
+            elif any(p.partial and p.term.term == h.term.term for p in trend_hits):
+                shadowed.append(h)
         trend_hits = trends.gate(trend_hits, support, k)
+        # a one-word name's partial hit that gate() dropped ("Trump" of "Donald Trump": an
+        # everyday word with nothing to support it) gives way to the referent-backed hit on
+        # the same term, which "Trump Dog" and $TRUMP get; a partial hit that survived stays
+        # partial
+        kept = {h.term.term for h in trend_hits}
+        trend_hits += [h for h in shadowed if h.term.term not in kept]
         for h in trend_hits:
             h.score = trends.score(h, inp.trend_index)
         evidence += trends.evidence(trend_hits, inp.trend_index)
@@ -1409,6 +1469,8 @@ _KIND_LABEL = {
 }
 # Themes whose matched word is itself a fair generic label ("frog", "beer", "brainrot").
 _WORD_LABELS = ("animal", "food_object_abstract", "meme_template")
+# How the generic referent's desc names a channel that is not one of the coin's own texts.
+_CHANNEL_WORD = {"db": "pair token", "copy_of": "original", "x": "X post", "trend": "trend hit"}
 # Engine and knowledge kinds as reported.
 REFERENT_KINDS = {
     "famous_animal", "meme", "person", "coin", "event", "concept", "place", "other",
@@ -1430,11 +1492,20 @@ class ReferentRead:
     generic: bool = False
 
 
+def own_categories(agg: Aggregated) -> list[tuple[str, float]]:
+    """The categories the coin's own inputs give it. What it only borrows from the token it
+    trades against (db-only labels) is context, not its theme, unless its name builds on
+    that token (derivative/pair_family), as _inherit already treats a copy's theme."""
+    if any(lbl == "derivative/pair_family" for lbl, _ in agg.categories):
+        return agg.categories
+    return [(lbl, c) for lbl, c in agg.categories if agg.inputs.get(lbl) != ["db"]]
+
+
 def _theme(agg: Aggregated, floor: float) -> tuple[str, str, float] | None:
     """The coin's strongest theme that names a kind: (top-level label, best label under it,
     top-level confidence)."""
     best: dict[str, tuple[str, float]] = {}
-    for lbl, conf in agg.categories:
+    for lbl, conf in own_categories(agg):
         top = lbl.split("/")[0]
         if top not in _CATEGORY_KIND or lbl in NO_PARENT or conf < floor:
             continue
@@ -1477,16 +1548,25 @@ def _theme_kind(labels: list[str]) -> str | None:
     return None
 
 
+# The bottom of the documented weak-guess band (docs/API.md: 0.3-0.49 a weak guess or a kind).
+WEAK_GUESS_MIN = 0.3
+
+
 def read_referent(agg: Aggregated, symbol_is_name: bool, k: Knowledge) -> ReferentRead | None:
     """The reported referent. A named one keeps its label and gets a confidence by how many
     independent inputs point at it: below 0.45 a weak guess as before, 0.5-0.69 from one
     input, 0.7+ from two or more. When nothing is named (or only a weak guess under 0.45)
     but the coin has a theme, the kind alone is reported with a generic label ("frog") at
-    0.3-0.49. Null only when the coin has no readable theme."""
+    0.3-0.49. Null when the coin has no readable theme (and no named guess at 0.3+)."""
     floor = float(k.scoring.get("generic_referent_min_category", 0.2))
     r = agg.referent
     theme = _theme(agg, floor)
     weakest = float(k.scoring.get("named_referent_min", 0.45))
+    if r is not None and not r.generic and r.score < WEAK_GUESS_MIN and theme is None:
+        # squashed below the weak-guess band ("Speed" -> iShowSpeed at 0.19): the summary
+        # says no clear reference was found, so the referent says so too (and gets no wave)
+        agg.caveats = [c for c in agg.caveats if c != "referent is a weak guess"]
+        return None
     if r is not None and not r.generic and (r.score >= weakest or theme is None):
         chans = [
             channel(ev, symbol_is_name)
@@ -1542,11 +1622,11 @@ def read_referent(agg: Aggregated, symbol_is_name: bool, k: Knowledge) -> Refere
     inputs = agg.inputs.get(leaf) or agg.inputs.get(top) or []
     what = _KIND_LABEL.get(key, top)
     article = "an" if what[0].lower() in "aeio" else "a"
+    by = " and ".join(_CHANNEL_WORD.get(ch, ch) for ch in inputs) or "own text"
     return ReferentRead(
         label=label,
         kind=_CATEGORY_KIND[key],
-        desc=f"{article} {what} coin by its {' and '.join(inputs) or 'own text'}; "
-        "nothing more specific identified",
+        desc=f"{article} {what} coin by its {by}; nothing more specific identified",
         source=f"category:{leaf}",
         confidence=round(min(0.49, 0.3 + 0.2 * conf), 3),
         supported_by=list(inputs),
@@ -1629,6 +1709,83 @@ def _prune_baby_markers(
     ]
 
 
+# Markers that say "a version of X" with nothing else: "Real Madrid" and "World War II" copy
+# no coin. Kept when a known coin, a recent namesake, a named entity or another derivative
+# row (a template family, the pair token) says what the name derives from.
+_LONE_MARKER_SOURCES = ("templates:marker:original-claim", "templates:version:roman",
+                        "templates:marker:ai-suffix", "slang:real", "slang:classic", "slang:og",
+                        "slang:original")  # fmt: skip
+
+
+def _prune_lone_markers(
+    evidence: list[Ev], n: Normalized, matches: list[known_coins.CopyMatch], inp: EngineInput
+) -> list[Ev]:
+    lone = [
+        ev
+        for ev in evidence
+        if ev.label.startswith("derivative/") and ev.source in _LONE_MARKER_SOURCES
+    ]
+    if not lone:
+        return evidence
+    if any(not known_coins.is_self(m, n) for m in matches):
+        return evidence
+    if any(
+        ev.referent is not None and ev.where == "name" and ev.kind == "entity" for ev in evidence
+    ):
+        return evidence
+    if any(
+        ev.label.startswith("derivative/") and ev.source not in _LONE_MARKER_SOURCES
+        for ev in evidence
+    ):
+        return evidence
+    if inp.ctx.same_name and any(
+        t.mint != inp.mint and _within_window(inp, t.created_at) is not None
+        for t in inp.ctx.same_name
+    ):
+        return evidence  # "Real Blorbo" after a recent Blorbo: the marker says which copy
+    gone = {id(ev) for ev in lone}
+    return [ev for ev in evidence if id(ev) not in gone]
+
+
+def _prune_chain_alias(evidence: list[Ev]) -> list[Ev]:
+    """The bare "sol" of "dog on sol" names the chain the coin is on, not what it is about:
+    the Solana referent it matched is dropped when the name has another named candidate or
+    a theme of its own, and never counts from the logo's text alone."""
+    sol = [
+        ev
+        for ev in evidence
+        if ev.kind == "entity"
+        and ev.referent is not None
+        and (ev.referent.surface or "").lower() == "sol"
+    ]
+    if not sol:
+        return evidence
+    gone = {id(ev) for ev in sol if ev.where == "image"}
+    in_name = [ev for ev in sol if ev.where == "name"]
+    if in_name:
+        labels = {ev.referent.label for ev in in_name if ev.referent is not None}
+        other_named = any(
+            ev.referent is not None
+            and ev.referent.label not in labels
+            and ev.kind in ("entity", "known_coin", "referent", "template_family")
+            and ev.where in ("name", "symbol")
+            for ev in evidence
+        )
+        own_theme = any(
+            is_theme(ev.label)
+            and ev.label.split("/")[0] != "crypto_native"
+            and ev.where in ("name", "symbol")
+            and ev.kind not in ("marker", "script")
+            for ev in evidence
+            if id(ev) not in {id(e) for e in sol}
+        )
+        if other_named or own_theme:
+            gone |= {id(ev) for ev in in_name}
+    if not gone:
+        return evidence
+    return [ev for ev in evidence if id(ev) not in gone]
+
+
 def _prune_ticker_only_inherit(
     evidence: list[Ev], matches: list[known_coins.CopyMatch], n: Normalized
 ) -> list[Ev]:
@@ -1668,6 +1825,20 @@ def _demote_description_only_referent(agg: Aggregated, head: str | None) -> None
         agg.caveats.append(
             f"'{r.label}' appears only in the description; the name itself is unresolved"
         )
+        ru = agg.referent_runner_up
+        weakest = float(load_knowledge().scoring.get("named_referent_min", 0.45))
+        if (
+            ru is not None
+            and ru.score >= weakest
+            and any(
+                ev.referent is not None and ev.referent.label == ru.label and ev.where == "name"
+                for ev in agg.evidence
+            )
+        ):
+            # the name's own entity ("Ohio" in "Ohio Dog") was the runner-up only because
+            # the description name-dropped someone more famous: it is the referent
+            agg.referent, agg.referent_runner_up = ru, r
+            agg.caveats = [c for c in agg.caveats if not c.startswith("referent is ambiguous")]
 
 
 def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
@@ -1690,14 +1861,8 @@ def _account_passes(xa: xsignals.XAssessment) -> list[Pass]:
     return out
 
 
-# Words that never carry a coin's subject on their own.
-_HEAD_STOP = {
-    "coin", "token", "sol", "solana", "inu", "hat", "cap", "beanie", "edition", "fun", "pump",
-    "meme", "official", "the", "a", "an", "of", "on", "x", "ai", "dao", "v2", "2", "cto", "army",
-    "gang", "club", "wif", "killer", "slayer", "season", "szn", "mode", "moon", "rocket",
-    "mania", "fever", "summer", "winter", "era", "vibes", "energy", "maxi", "king", "queen",
-    "god", "lord", "boss", "time", "life", "world", "nation", "party", "money", "cash", "bag",
-}  # fmt: skip
+# Words that never carry a coin's subject on their own (one list with the known-coin stage).
+_HEAD_STOP = known_coins.HEAD_STOP
 
 
 def _head_word(n: Normalized) -> str | None:
@@ -1834,7 +1999,8 @@ def _pair_who(
         return None
     kind = "itself a pump.fun coin" if pair.pumpfun else "a token"
     ref = pair.referent
-    if ref is not None and ref.score >= 0.45:
+    # a kind-only read of the pair token ("dog") is what it reads as, not what it is about
+    if ref is not None and ref.score >= 0.45 and not ref.generic:
         if agg.referent is not None and agg.referent.label == ref.label:
             # the coin's own referent is the pair's: the lead already says what it is
             return pair.label(), (kind if pair.pumpfun else None)
@@ -1917,6 +2083,7 @@ def _x_match(
         post_meaning,
         k,
         account_age_s,
+        mint=inp.mint,
     )
 
 

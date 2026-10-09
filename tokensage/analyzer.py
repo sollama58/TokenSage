@@ -1208,6 +1208,79 @@ async def _metadata_attempts(conn: asyncpg.Connection, mint: str) -> int:
     return await conn.fetchval("select attempts from token_metadata where mint=$1", mint) or 0
 
 
+async def _finalize_metadata(
+    conn: asyncpg.Connection, mint: str, m: md.Metadata, attempts: int
+) -> bool:
+    """Once the retry schedule is spent, unresolved metadata is final: the row (and the
+    document) say `invalid`, so the analysis is no longer `partial` (re-read every 60 s by
+    the API) and the normal max_age applies. The next analysis still tries the URI once.
+    Returns True when the state was made final."""
+    if m.status != "unresolved" or attempts <= len(md.RETRY_SCHEDULE_S):
+        return False
+    m.status = "invalid"
+    m.error = f"retries exhausted: {m.error or 'metadata could not be fetched'}"
+    await conn.execute(
+        "update token_metadata set status='invalid', next_retry_at=null where mint=$1", mint
+    )
+    log.info("metadata.exhausted", mint=mint, attempts=attempts)
+    return True
+
+
+# When the metadata is fine but its logo could not be fetched (a cold IPFS pin seconds after
+# launch, a gateway hiccup), the image is tried again on later analyses on this backoff: it
+# was not re-fetched at all before, which left the coin without hashes, OCR and labels for
+# good. The last interval repeats, so a dead logo costs one fetch a day, not one per read.
+IMAGE_RETRY_S = [60, 300, 1800, 3 * 3600, 24 * 3600]
+
+
+async def _note_image_failure(
+    conn: asyncpg.Connection, mint: str, m: md.Metadata, attempts: int
+) -> None:
+    """Record why the logo is missing (so the caveat is repeated until it arrives) and when
+    to try again."""
+    delay = IMAGE_RETRY_S[min(attempts, len(IMAGE_RETRY_S) - 1)]
+    await conn.execute(
+        """update token_metadata set image_error=$2, image_attempts=$3,
+             image_retry_at = now() + make_interval(secs => $4)
+           where mint=$1""",
+        mint,
+        (m.image_error or "image could not be fetched")[:300],
+        attempts + 1,
+        delay,
+    )
+
+
+async def _retry_cached_image(
+    conn: asyncpg.Connection, ctx: Context, mint: str, m: md.Metadata
+) -> bytes | None:
+    """A cached metadata row with an image_url but no image: fetch the logo again when its
+    retry is due (see IMAGE_RETRY_S), persist it, and keep the caveat while it is missing.
+    Returns the image bytes when the fetch succeeded."""
+    row = await conn.fetchrow(
+        "select image_error, image_attempts, image_retry_at from token_metadata where mint=$1",
+        mint,
+    )
+    m.image_error = (row["image_error"] if row else None) or "not fetched yet"
+    attempts = int(row["image_attempts"]) if row else 0
+    if row and row["image_retry_at"] is not None and row["image_retry_at"] > datetime.now(UTC):
+        return None
+    await md.attach_image(ctx.http, m, ctx.settings)
+    if not m.image_content_key:
+        await _note_image_failure(conn, mint, m, attempts)
+        log.info("image.retry_failed", mint=mint, attempts=attempts + 1, error=m.image_error)
+        return None
+    await md.persist_image_row(conn, m)
+    await conn.execute(
+        """update token_metadata set image_content_key=$2, image_error=null,
+             image_attempts=0, image_retry_at=null where mint=$1""",
+        mint,
+        m.image_content_key,
+    )
+    m.image_error = None
+    log.info("image.retry_ok", mint=mint, attempts=attempts + 1)
+    return m.image_bytes
+
+
 async def _schedule_retry(
     conn: asyncpg.Connection, mint: str, depth: str, own_job_id: int | None = None
 ) -> bool:
@@ -1382,13 +1455,27 @@ async def analyze(
             # stored (fetched) metadata wins over hints; only a creation-time hint still counts
             hint_use.fields = [f for f in hint_use.fields if f == "created_at"]
         if m is None:
+            # The attempt counter belongs to the background retry chain (retry_metadata,
+            # RETRY_SCHEDULE_S): a consumer-driven re-analysis fetches again but does not
+            # spend one of its slots (six polls a minute apart would end the chain); only
+            # the first failure counts, so the first retry is scheduled.
             attempts = await _metadata_attempts(conn, r.mint)
             m = await md.fetch_metadata(ctx.http, r.uri, ctx.settings)
-            await md.persist(conn, r.mint, m, attempts + (1 if m.status != "ok" else 0))
-            if m.status == "unresolved":
+            if m.status != "ok":
+                attempts = max(attempts, 1)  # the first failure is this one
+            await md.persist(conn, r.mint, m, attempts)
+            if m.status == "unresolved" and not await _finalize_metadata(conn, r.mint, m, attempts):
                 await _schedule_retry(conn, r.mint, depth)
+            elif m.status == "ok" and m.image_url and not m.image_content_key:
+                await _note_image_failure(conn, r.mint, m, 0)
             log.info("metadata.fetched", mint=r.mint, status=m.status, error=m.error)
             image_bytes = m.image_bytes
+        elif m.image_url and not m.image_content_key:
+            # the metadata was fine but the logo fetch failed on an earlier read (cold
+            # pins): try again on a backoff, so the coin is not logo-blind for good
+            image_bytes = await _retry_cached_image(conn, ctx, r.mint, m)
+            if m.image_content_key:
+                cached_feats = await _cached_image_features(conn, m.image_content_key)
         elif m.image_content_key:
             cached_feats = await _cached_image_features(conn, m.image_content_key)
             if cached_feats is None and m.image_url:
@@ -1646,6 +1733,12 @@ async def _queue_pair_analysis(conn: asyncpg.Connection, pair: pairing.PairInput
         log.info("pair.queue_failed", mint=pair.mint, error=str(e)[:120])
 
 
+# Post text handed to wikilookup.spans is capped: its capitalised-span regex is quadratic in
+# a long run of word characters, and the text comes from third-party mirrors (an X long
+# post is 4,000 characters; the names worth looking up are in the first lines anyway).
+WIKI_TEXT_MAX_CHARS = 4000
+
+
 async def _wiki_refs(
     conn: asyncpg.Connection, ctx: Context, inp: EngineInput
 ) -> list[wikilookup.WikiRef]:
@@ -1656,10 +1749,10 @@ async def _wiki_refs(
     texts: list[str] = []
     t = inp.tweet
     if t is not None and t.status == "ok":
-        texts.append(t.text or "")
+        texts.append((t.text or "")[:WIKI_TEXT_MAX_CHARS])
         for other in (t.quoted, t.replied_to):
             if other is not None and other.status == "ok":
-                texts.append(other.text or "")
+                texts.append((other.text or "")[:WIKI_TEXT_MAX_CHARS])
     try:
         n = normalize(inp.name, inp.symbol, None)
         spans = await asyncio.to_thread(
@@ -1816,8 +1909,13 @@ async def retry_metadata(
         return None
     attempts = await _metadata_attempts(conn, mint)
     m = await md.fetch_metadata(ctx.http, row["uri"], ctx.settings)
-    await md.persist(conn, mint, m, attempts + (1 if m.status != "ok" else 0))
+    attempts += 1 if m.status != "ok" else 0
+    await md.persist(conn, mint, m, attempts)
     if m.status == "ok":
+        return await analyze(conn, ctx, mint, depth)
+    if await _finalize_metadata(conn, mint, m, attempts):
+        # the state is final; the stored analysis says partial, so re-run it once to clear
+        # that (the API would otherwise keep re-analysing it every 60 s)
         return await analyze(conn, ctx, mint, depth)
     if m.status == "unresolved" and await _schedule_retry(conn, mint, depth, own_job_id=job_id):
         raise RetryRescheduled

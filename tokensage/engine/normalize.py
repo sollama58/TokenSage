@@ -7,21 +7,22 @@ import unicodedata
 
 import emoji as emoji_lib
 from anyascii import anyascii
-from confusable_homoglyphs import confusables
 
-from tokensage.engine import segment
+from tokensage.engine import gazetteer, segment
 from tokensage.engine.context import Marker, Normalized
 from tokensage.engine.knowledge import Knowledge, load_knowledge
 
-_ZW = re.compile(r"[​‌‎‏⁠﻿­⁡-⁤]")
+_ZW = re.compile(r"[​‌‍‎‏⁠﻿­⁡-⁤]")
 _PUNCT_TO_SPACE = re.compile(r"[^\w$#@&'+.\-]+")
 _DOLLAR = re.compile(r"\$([A-Za-z][A-Za-z0-9]{1,12})\b")
 # An all-caps run ending in a lone lowercase "x" (TSLAx, NVDAx: tokenized-stock tickers) is
 # one word, not "TSL" + "Ax".
+# A lone capital is a word of its own: "DogeX" is Doge + X, "PepeV2" is Pepe + V + 2.
 _CAMEL = re.compile(
-    r"[A-Z]{2,}x(?![a-z])|[A-Z]{2,}(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]{2,}|\d+(?:\.\d+)?"
+    r"[A-Z]{2,}x(?![a-z])|[A-Z]{2,}(?=[A-Z][a-z])|[A-Z](?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]{2,}"
+    r"|\d+(?:\.\d+)?|[A-Z]"
 )
-_REPEAT3 = re.compile(r"(.)\1{2,}")
+_REPEAT3 = re.compile(r"([a-z])\1{2,}")  # letters only: "1000x" is a number, not "looong"
 _LEET = str.maketrans(
     {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"}
 )
@@ -93,6 +94,18 @@ _SCRIPT_RANGES = {
     "Greek": (0x0370, 0x03FF),
     "Hebrew": (0x0590, 0x05FF),
 }
+
+
+_LOOKALIKE = re.compile(r"[\u0400-\u04ff\u0370-\u03ff]")
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def _mixed_word(s: str) -> bool:
+    """A word that mixes Latin letters with Cyrillic or Greek ones ("P\u0435pe" with a Cyrillic
+    \u0435): the look-alike spoof pattern. Whole words in another script next to Latin ones
+    ("Pepe \u0421\u043e\u0431\u0430\u043a\u0430", "\u67f4\u72ac\u30b3\u30a4\u30f3") are
+    bilingual names, not spoofs."""
+    return any(_LATIN.search(w) and _LOOKALIKE.search(w) for w in s.split())
 
 
 def _scripts(s: str) -> list[str]:
@@ -171,16 +184,45 @@ def translate_han(s: str, k: Knowledge) -> tuple[str, list[tuple[str, str]]]:
     return _HAN.sub(run, s), glosses
 
 
-def _split_camel(s: str) -> str:
+def _split_camel(s: str, k: Knowledge | None = None) -> str:
     """'AIAgentSupercycle' -> 'AI Agent Supercycle'. Leaves lowercase words alone."""
     out: list[str] = []
     for tok in s.split():
         if any(c.islower() for c in tok) and any(c.isupper() for c in tok[1:]):
             parts = _CAMEL.findall(tok)
+            if k is not None:
+                parts = _prefer_acronym(parts, k)
             out.append(" ".join(parts) if parts else tok)
         else:
             out.append(tok)
     return " ".join(out)
+
+
+def _prefer_acronym(parts: list[str], k: Knowledge) -> list[str]:
+    """The lone-capital split ("XDoge" -> X + Doge) cannot tell itself from a two-letter
+    acronym fused with a word ("AIdoge", "GMcoin"): keep it only when the word after the
+    capital is a word; when the word is only a word once the second capital joins the
+    acronym, split there instead (AI + doge)."""
+    words = segment._vocab(k)
+    out: list[str] = []
+    i = 0
+    while i < len(parts):
+        p = parts[i]
+        if len(p) == 1 and p.isupper() and i + 1 < len(parts):
+            nxt = parts[i + 1]
+            if (
+                len(nxt) >= 3
+                and nxt[0].isupper()
+                and nxt[1:].islower()
+                and nxt.lower() not in words
+                and (nxt[1:].lower() in words or gazetteer.is_common(nxt[1:].lower()))
+            ):
+                out += [p + nxt[0], nxt[1:]]
+                i += 2
+                continue
+        out.append(p)
+        i += 1
+    return out
 
 
 def _squeeze(s: str) -> tuple[str, bool]:
@@ -210,10 +252,14 @@ def _known_symbols(k: Knowledge) -> frozenset[str]:
 
 
 def ticker_base(ticker: str, k: Knowledge) -> tuple[str, list[str]]:
-    """Strip known affixes: BPNUT -> PNUT, PNUT2 -> PNUT, BABYDOGEINU -> DOGE."""
+    """Strip known affixes: BPNUT -> PNUT, PNUT2 -> PNUT, BABYDOGEINU -> DOGE. A ticker that
+    is an English word (BEAR, BLINK, APEX) is left whole."""
     t = ticker.upper()
     affixes: list[str] = []
     known = _known_symbols(k)
+    if t not in known and gazetteer.is_common(t.lower()):
+        # an English word is a whole ticker: BEAR is not B + EAR, APEX not APE + X
+        return t, affixes
     changed = True
     # stop as soon as the ticker is itself a known coin's symbol: BONK is not B + ONK,
     # and BBONK is B + BONK (not BB + ONK)
@@ -273,27 +319,28 @@ def normalize(
     n3 = _ZW.sub("", n2)
     if n3 != n2:
         obf.append("zero_width")
-    scripts = _scripts(n3)
-    # 4. homoglyphs, then fold to ASCII
-    try:
-        if confusables.is_mixed_script(n3) or confusables.is_dangerous(n3):
-            obf.append("homoglyph")
-    except Exception:  # noqa: BLE001 - library quirks on odd input must not break analysis
-        pass
-    if "homoglyph" in obf and any(c.isascii() and c.isalpha() for c in n3):
+    # 4. homoglyphs (look-alikes mixed into a Latin word), then fold to ASCII; the scripts
+    # are read after the look-alikes are put back, so a spoofed Latin name is not "Cyrillic"
+    if _mixed_word(n3):
+        obf.append("homoglyph")
         n3 = n3.translate(_CONFUSABLE)
+    scripts = _scripts(n3)
     # 4b. translate, not just transliterate, Han words (猫 -> cat, not mao)
     translated, cjk_gloss = translate_han(n3, k)
     # the pinyin reading stays available to the ticker step ($MAO for 猫)
     name_pinyin = (
-        _PUNCT_TO_SPACE.sub(" ", _split_camel(_fold(n3)).lower()).split() if cjk_gloss else []
+        _PUNCT_TO_SPACE.sub(" ", _split_camel(_fold(n3), k).lower()).split() if cjk_gloss else []
     )
     n3 = translated
     folded_name = _fold(n3)
-    # 5. markers BEFORE stripping punctuation
+    # 5. markers BEFORE stripping punctuation; the camelCase split ("PepeV2" -> "Pepe V 2")
+    # can expose a marker the written form hides
+    camel = _split_camel(folded_name, k)
     markers = _detect_markers(folded_name, k)
-    # 6. camelCase split before lowercasing
-    camel = _split_camel(folded_name)
+    if camel != folded_name:
+        seen_codes = {m.code for m in markers}
+        markers += [m for m in _detect_markers(camel, k) if m.code not in seen_codes]
+    # 6. camelCase split before lowercasing (done above)
     # 7. punctuation to spaces, keep version dots handled by markers already
     lowered = camel.lower()
     cleaned = _PUNCT_TO_SPACE.sub(" ", lowered)

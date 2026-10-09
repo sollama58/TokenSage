@@ -27,6 +27,20 @@ PARTIAL_MAX_AGE_S = 60
 # A failed analysis is reported as failed (no new job, no quota) for this long; a request
 # with refresh=true tries again at once.
 FAILED_COOLDOWN_S = 600
+# token_not_found is the one failure expected to heal by itself within seconds (a mint
+# seconds old is not visible on-chain yet; docs say "retry once after a few seconds"), so
+# it is held for a much shorter time.
+TOKEN_NOT_FOUND_COOLDOWN_S = 20
+# hint fields that carry metadata: with any of them the analyzer never answers token_not_found
+HINT_METADATA_FIELDS = (
+    "name",
+    "symbol",
+    "description",
+    "image_url",
+    "twitter",
+    "telegram",
+    "website",
+)
 # analyzer error_code -> (http status, api code)
 DEFINITIVE_CODES = {
     "token_not_found": (404, "token_not_found"),
@@ -93,9 +107,41 @@ async def _recent_failure(
     )
     if not row or row["status"] != "failed" or row["finished_at"] is None:
         return None
-    if (datetime.now(UTC) - row["finished_at"]).total_seconds() > FAILED_COOLDOWN_S:
+    cooldown = (
+        TOKEN_NOT_FOUND_COOLDOWN_S if row["error_code"] == "token_not_found" else FAILED_COOLDOWN_S
+    )
+    if (datetime.now(UTC) - row["finished_at"]).total_seconds() > cooldown:
         return None
     return row["id"], row["error_code"], row["last_error"]
+
+
+def _failed_response(
+    mint: str,
+    depth: str,
+    cached: tuple[dict[str, Any], int] | None,
+    job_id: int,
+    last_error: str | None,
+    request_id: str,
+) -> TokenResponse:
+    """status=failed, the same shape whether the failure happened while this request waited
+    or on an earlier one: the stale analysis (if any) and how the retry works."""
+    return TokenResponse(
+        ca=mint,
+        status="failed",
+        depth=depth,  # type: ignore[arg-type]
+        stale_analysis=stored_analysis(cached[0]) if cached else None,
+        errors=[
+            UpstreamError(
+                source="analyzer",
+                code="failed",
+                detail=(last_error or "analysis failed")
+                + f"; retried automatically after {FAILED_COOLDOWN_S} s, or now "
+                "with refresh=true",
+            )
+        ],
+        job_id=job_id,
+        request_id=request_id,
+    )
 
 
 def _freshness(doc: dict[str, Any], max_age_s: int, from_cache: bool) -> Freshness:
@@ -183,32 +229,19 @@ async def get_or_enqueue(
                     request_id=request_id,
                 )
 
+        # with metadata hints the analyzer never answers token_not_found (the mint is
+        # analysed from the hints), so an earlier hint-less 404 says nothing about this request
+        hinted = any(hints.get(f) for f in HINT_METADATA_FIELDS) if hints else False
         if not refresh:
             failed = await _recent_failure(conn, mint, depth)
-            if failed is not None:
+            if failed is not None and not (hinted and failed[1] == "token_not_found"):
                 fid, code, last_error = failed
                 if code in DEFINITIVE_CODES:
                     from tokensage.api import errors
 
                     status, api_code = DEFINITIVE_CODES[code]
                     raise errors.ApiError(status, api_code, last_error or api_code)
-                return TokenResponse(
-                    ca=mint,
-                    status="failed",
-                    depth=depth,  # type: ignore[arg-type]
-                    stale_analysis=stored_analysis(cached[0]) if cached else None,
-                    errors=[
-                        UpstreamError(
-                            source="analyzer",
-                            code="failed",
-                            detail=(last_error or "analysis failed")
-                            + f"; retried automatically after {FAILED_COOLDOWN_S} s, or now "
-                            "with refresh=true",
-                        )
-                    ],
-                    job_id=fid,
-                    request_id=request_id,
-                )
+                return _failed_response(mint, depth, cached, fid, last_error, request_id)
 
         async def charge(j: queue.Job) -> None:
             # Only a newly created job costs quota or counts against the queue limit.
@@ -223,19 +256,41 @@ async def get_or_enqueue(
             if key is not None:
                 await _enforce_quotas(conn, key, depth, refresh)
 
-        job = await queue.enqueue(
-            conn,
-            "analyze",
-            mint,
-            depth,
-            priority=priority,
-            requested_by=requested_by,
-            # a refresh always re-analyses; otherwise reuse a job that just finished
-            # (nor one whose result came from older rules)
-            reuse_done_within_s=0 if refresh or outdated else REUSE_DONE_WITHIN_S,
-            before_commit=charge,
-            payload={"hints": hints} if hints else None,
-        )
+        async def enqueue(reuse_s: float) -> queue.Job:
+            return await queue.enqueue(
+                conn,
+                "analyze",
+                mint,
+                depth,
+                priority=priority,
+                requested_by=requested_by,
+                reuse_done_within_s=reuse_s,
+                before_commit=charge,
+                payload={"hints": hints} if hints else None,
+            )
+
+        # a refresh always re-analyses; otherwise reuse a job that just finished
+        # (nor one whose result came from older rules)
+        job = await enqueue(0 if refresh or outdated else REUSE_DONE_WITHIN_S)
+        reused = job.status == "done"
+        if reused:
+            # The reused job's result must satisfy the caller's bound: it closes the race of
+            # a caller that missed the cache while the job committed, but it must not hand
+            # a short (or zero) max_age the document that bound already rejected.
+            fresh = await latest_analysis(conn, mint, depth)
+            if fresh is not None:
+                doc, _ = fresh
+                fr = _freshness(doc, max_age, from_cache=True)
+                if fr.age_s is not None and fr.age_s <= max_age:
+                    return TokenResponse(
+                        ca=mint,
+                        status=_status_for(doc),  # type: ignore[arg-type]
+                        depth=doc["depth"],
+                        analysis=stored_analysis(doc),
+                        freshness=fr,
+                        request_id=request_id,
+                    )
+            job = await enqueue(0)
         if callback_url and key is not None:
             from tokensage import callbacks
 
@@ -269,14 +324,7 @@ async def get_or_enqueue(
                 status, code = DEFINITIVE_CODES[j.error_code]
                 raise errors.ApiError(status, code, j.last_error or code)
             if j and j.status == "failed":
-                return TokenResponse(
-                    ca=mint,
-                    status="failed",
-                    depth=depth,  # type: ignore[arg-type]
-                    errors=[UpstreamError(source="analyzer", code="failed", detail=j.last_error)],
-                    job_id=job.id,
-                    request_id=request_id,
-                )
+                return _failed_response(mint, depth, cached, job.id, j.last_error, request_id)
         stale = cached[0] if cached else None
         return TokenResponse(
             ca=mint,

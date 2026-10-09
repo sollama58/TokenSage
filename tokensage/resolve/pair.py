@@ -108,6 +108,7 @@ async def _from_analysis(conn: asyncpg.Connection, pair: PairInput) -> None:
             desc=ref.get("desc"),
             source=f"analysis:{pair.mint}",
             score=float(ref.get("confidence") or 0.0),
+            generic=bool(ref.get("generic")),  # a kind-only read ("dog") stays kind-only
         )
     pair.categories = [
         (str(c["label"]), float(c.get("confidence") or 0.0))

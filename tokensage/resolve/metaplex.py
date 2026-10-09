@@ -19,7 +19,8 @@ def _borsh_string(data: bytes, offset: int) -> tuple[str, int]:
     (n,) = struct.unpack_from("<I", data, offset)
     offset += 4
     raw = data[offset : offset + n]
-    return raw.decode("utf-8", "replace").rstrip("\x00").strip(), offset + n
+    # NUL is padding at the end; anywhere else it is hostile (Postgres text rejects it)
+    return raw.decode("utf-8", "replace").replace("\x00", "").strip(), offset + n
 
 
 def decode_metadata(data: bytes) -> dict[str, str]:

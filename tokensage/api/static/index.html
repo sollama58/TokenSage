@@ -232,7 +232,7 @@
         if (resp.status === 429 || resp.status === 503) {
           const ra = parseInt(resp.headers.get("retry-after") || "5", 10);
           log(`${body?.error?.code || resp.status}: ${body?.error?.message || ""}; backing off ${ra}s`);
-          first = false;
+          // nothing was enqueued: retry the original URL (refresh / max_age included)
           await sleep(ra * 1000, abort.signal);
           continue;
         }

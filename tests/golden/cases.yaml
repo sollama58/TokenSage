@@ -37,7 +37,8 @@ cases:
   - name: Peanut the Squirrel
     symbol: PNUT
     description: "Justice for Peanut 🐿"
-    categories_include: [animal/squirrel, news_event]
+    categories_include: [animal/squirrel]
+    categories_exclude: [news_event]  # a 2024 story inherited from $PNUT: news only with a live trend hit
     referent: Peanut
     copy_of_excludes: [PNUT]
     flags_exclude: [copycat]
@@ -246,7 +247,8 @@ cases:
     referent: Kanye
   - name: Hawk Tuah
     symbol: HAWK
-    categories_include: [celebrity, news_event]
+    categories_include: [celebrity]
+    categories_exclude: [news_event]  # 2024 story inherited from $HAWK: not news without a trend hit
     referent: Hawk Tuah
   - name: Elon Musk
     symbol: ELON

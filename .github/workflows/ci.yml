@@ -23,6 +23,8 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://tokensage:tokensage@localhost:5432/tokensage
+      # the DB-backed tests skip when Postgres is unreachable; in CI that is a failure
+      TS_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

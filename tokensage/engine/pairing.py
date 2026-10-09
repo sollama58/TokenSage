@@ -259,6 +259,7 @@ def assess(
             source=src,
             score=round(min(REFERENT_BUILDS_ON, referent.score), 3),
             categories=list(referent.categories),
+            generic=referent.generic,  # the pair token's own kind-only read stays kind-only
         )
         a.evidence.append(
             Ev(

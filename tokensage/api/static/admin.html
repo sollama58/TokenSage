@@ -314,11 +314,11 @@ function renderHelius(h) {
     tile("Credits run out", exhaust == null ? "never" : exhaust === 0 ? "now" : `${exhaust.toFixed(1)} d`, `${c.days_left_in_cycle.toFixed(1)} d left in cycle`, exhaustCls),
     tile("Peak req/s (24 h)", num(k.peak_rps_24h), `limit ${p.rps_limit}/s (per process)`, k.peak_rps_24h >= p.rps_limit ? "bad" : k.peak_rps_24h >= p.rps_limit * 0.7 ? "warn" : "", { value: (100 * k.peak_rps_24h) / Math.max(1, p.rps_limit), warn: 70 }),
     tile("429s (24 h)", num(k.rate_limited_24h), `today ${num(k.rate_limited_today)}`, k.rate_limited_24h ? "bad" : "good"),
-    tile("Errors (24 h)", num(k.errors_24h), k.last_24h ? `${pct((100 * k.errors_24h) / k.last_24h, 2)} of ${num(k.last_24h)} calls` : "no calls", k.errors_24h ? "warn" : "good"),
+    tile("Errors (24 h)", num(k.errors_24h), k.last_24h ? `${pct((100 * k.errors_24h) / k.last_24h, 2)} of ${num(k.last_24h)} calls, 429s included` : "no calls", k.errors_24h ? "warn" : "good"),
     tile("Avg latency (24 h)", ms(k.avg_ms_24h)),
   ].join("");
   $("hHourly").innerHTML = bars(
-    h.hourly.map((p) => ({ ...p, values: [p.credits, p.rate_limited + p.errors] })),
+    h.hourly.map((p) => ({ ...p, values: [p.credits, p.errors] })),
     { stacks: ["b1", "b2"], labelEvery: 6, label: (p) => hhmm(p.hour), tip: (p) => `${hhmm(p.hour)} · ${num(p.credits)} credits · ${num(p.calls)} calls · ${p.errors} errors · ${p.rate_limited} 429s · peak ${p.peak_rps}/s` }
   );
   const budget = p.credits_per_cycle / cycleDays;

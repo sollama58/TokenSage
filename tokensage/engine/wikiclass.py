@@ -32,7 +32,9 @@ _RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ("ai_agent",),
     ),
     (
-        r"politician|president|prime minister|senator|congressman|congresswoman|governor|"
+        # "president" as a word: a "presidential election" is an event, not a person
+        r"politician|\bpresident\b|presidential candidate|prime minister|senator|congressman|"
+        r"congresswoman|governor|"
         r"political|activist|minister|monarch|king of|queen of|mayor|diplomat|party leader",
         "person",
         ("political",),

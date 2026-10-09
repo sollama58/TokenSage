@@ -131,8 +131,9 @@ def assess(
         gap_days = _days(token_created, tweet.created_at)
         big = (a.followers or 0) >= BIG_ACCOUNT or a.verified_type in ("business", "government")
         text_l = (tweet.text or "").lower()
+        # the cashtag as a whole: "$solana" does not name $SOL, nor "$PEPEX" $PEPE
         mentions = bool(ticker) and (
-            f"${ticker.lower()}" in text_l  # type: ignore[union-attr]
+            re.search(rf"\${re.escape(ticker.lower())}(?![a-z0-9])", text_l) is not None  # type: ignore[union-attr]
             or (len(mint) >= 32 and mint.lower() in text_l)
             or "pump.fun" in text_l
         )
@@ -255,12 +256,14 @@ def assess(
             )
         )
     age = _days(token_created, a.joined)
-    if age is not None and 0 <= age <= FRESH_DAYS and not (a.followers or 0) >= BIG_ACCOUNT:
+    # an account made after the token (age < 0) is the freshest there is
+    if age is not None and age <= FRESH_DAYS and not (a.followers or 0) >= BIG_ACCOUNT:
         a.flags.append(
             (
                 "fresh_x_account",
                 "info",
-                f"@{a.author_handle} was created {_fmt_days(age)} before the token",
+                f"@{a.author_handle} was created {_fmt_days(abs(age))} "
+                f"{'after' if age < 0 else 'before'} the token",
             )
         )
     return a

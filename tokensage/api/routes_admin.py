@@ -18,7 +18,7 @@ from pydantic import Field
 from tokensage import __version__, queue, recall
 from tokensage.api import errors, usage
 from tokensage.api.auth import ApiKey, KeyStore, new_raw_key, require_admin, sha256_hex
-from tokensage.api.schemas import Depth, _Model
+from tokensage.api.schemas import Depth, ErrorResponse, _Model
 from tokensage.versions import LEXICON_VERSION, RULES_VERSION
 
 log = structlog.get_logger("admin")
@@ -26,7 +26,16 @@ router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(req
 
 KeyName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")]
 Limit = Annotated[int, Field(ge=1, le=10_000_000)]
-ADMIN_RESPONSES: dict[int | str, dict] = {403: {"description": "forbidden (admin key required)"}}
+
+
+def err(description: str) -> dict:
+    """An error entry for a route's `responses`: every error answers with ErrorResponse."""
+    return {"model": ErrorResponse, "description": description}
+
+
+ADMIN_RESPONSES: dict[int | str, dict] = {403: err("forbidden (admin key required)")}
+# a job id is a bigint: anything outside is no job (and must not reach the database)
+MAX_JOB_ID = 2**63 - 1
 
 
 # ---------------------------------------------------------------- models
@@ -278,7 +287,7 @@ async def list_keys(request: Request, include_revoked: bool = False) -> KeyList:
     "/keys",
     response_model=KeySecret,
     status_code=201,
-    responses={**ADMIN_RESPONSES, 409: {"description": "key_exists"}},
+    responses={**ADMIN_RESPONSES, 409: err("key_exists")},
 )
 async def create_key(request: Request, response: Response, body: KeyCreate) -> KeySecret:
     """Create a consumer key. Limits default to the service defaults. The raw key is in the
@@ -315,8 +324,8 @@ async def create_key(request: Request, response: Response, body: KeyCreate) -> K
     response_model=KeyInfo,
     responses={
         **ADMIN_RESPONSES,
-        404: {"description": "key_not_found"},
-        409: {"description": "read_only"},
+        404: err("key_not_found"),
+        409: err("read_only"),
     },
 )
 async def update_key(request: Request, name: str, body: KeyUpdate) -> KeyInfo:
@@ -352,8 +361,8 @@ async def update_key(request: Request, name: str, body: KeyUpdate) -> KeyInfo:
     response_model=KeySecret,
     responses={
         **ADMIN_RESPONSES,
-        404: {"description": "key_not_found"},
-        409: {"description": "read_only"},
+        404: err("key_not_found"),
+        409: err("read_only"),
     },
 )
 async def rotate_key(request: Request, response: Response, name: str) -> KeySecret:
@@ -386,8 +395,8 @@ async def rotate_key(request: Request, response: Response, name: str) -> KeySecr
     response_model=KeyInfo,
     responses={
         **ADMIN_RESPONSES,
-        404: {"description": "key_not_found"},
-        409: {"description": "read_only"},
+        404: err("key_not_found"),
+        409: err("read_only"),
     },
 )
 async def revoke_key(request: Request, name: str) -> KeyInfo:
@@ -466,16 +475,20 @@ async def list_jobs(
     response_model=AdminJob,
     responses={
         **ADMIN_RESPONSES,
-        404: {"description": "job_not_found"},
-        409: {"description": "job_not_failed"},
+        404: err("job_not_found"),
+        409: err("job_not_failed"),
     },
 )
 async def retry_job(request: Request, job_id: int) -> AdminJob:
     """Enqueue a failed job again (same kind, mint, depth and hints). Returns the new job,
     or the already-open one for the same token and depth."""
     async with _pool(request).acquire() as conn:
-        old = await conn.fetchrow(
-            "select kind, mint, depth, status, payload from job where id=$1", job_id
+        old = (
+            await conn.fetchrow(
+                "select kind, mint, depth, status, payload from job where id=$1", job_id
+            )
+            if 0 < job_id <= MAX_JOB_ID
+            else None
         )
         if old is None:
             raise errors.not_found("job_not_found", f"no job {job_id}")

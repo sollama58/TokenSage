@@ -49,6 +49,25 @@ cases:
       flags_include: [x_content_mismatch, borrowed_narrative]
       flags_exclude: [x_image_match]
 
+  - id: post_carries_only_the_contract_address
+    # "CA: <mint>" and nothing else: the launch post, not a mismatch (audit 0.28 EC-2)
+    token: {name: "Zorblax", symbol: ZORB, logo: "img:31"}
+    link: tweet
+    tweet:
+      text: "CA: So11111111111111111111111111111111111111112"
+      author: zorbdev
+      followers: 40
+      hours_before_token: 1
+      media: []
+    expect:
+      verdict: about_this_coin
+      fit_min: 0.95
+      name_how: none
+      ticker_how: contract
+      basis_include: [post_text]
+      basis_exclude: [cashtag]
+      flags_exclude: [x_content_mismatch]
+
   - id: post_only_mentions_the_cashtag
     token: {name: "Zorblax", symbol: ZORB, logo: "img:31"}
     link: tweet

@@ -106,6 +106,26 @@ async def initial_real_token_reserves(rpc: SolanaRpc) -> int:
     return FALLBACK_INITIAL_REAL_TOKEN_RESERVES
 
 
+# on-chain strings are creator-controlled bytes: the same limits as the metadata JSON fields
+_META_LIMITS = {"name": 256, "symbol": 64, "uri": 2048}
+
+
+def _clean_onchain(meta: dict[str, str] | None) -> dict[str, str] | None:
+    """NUL, lone surrogates and other control characters out, length capped, so a hostile
+    name/symbol/uri cannot make persist() fail (Postgres rejects U+0000, asyncpg rejects
+    surrogates) and the coin unanalysable. Applies to every source (Token-2022, Metaplex, DAS)."""
+    if meta is None:
+        return None
+    out: dict[str, str] = {}
+    for k, limit in _META_LIMITS.items():
+        v = str(meta.get(k) or "").encode("utf-8", "replace").decode("utf-8")
+        # other control characters become spaces (a newline in a name keeps its word
+        # boundary, as it does when the same name comes from the metadata JSON)
+        v = "".join(ch if ord(ch) >= 0x20 and ord(ch) != 0x7F else " " for ch in v if ch != "\x00")
+        out[k] = " ".join(v.split())[:limit]
+    return out
+
+
 def _token2022_metadata(parsed_info: dict) -> dict[str, str] | None:
     for ext in parsed_info.get("extensions") or []:
         if ext.get("extension") == "tokenMetadata":
@@ -176,7 +196,7 @@ async def _onchain_metadata(
                 "uri": str(content.get("json_uri") or (meta or {}).get("uri") or "").strip(),
             }
             meta_source = "das"
-    return meta, meta_source
+    return _clean_onchain(meta), meta_source
 
 
 async def read_mint_metadata(rpc: SolanaRpc, mint: str) -> dict[str, str] | None:
@@ -199,9 +219,19 @@ async def read_pair_mint(rpc: SolanaRpc, mint: str) -> tuple[dict[str, str] | No
     parsed = acc.get("data") if isinstance(acc.get("data"), dict) else None
     if token_program is None or not parsed or parsed.get("parsed", {}).get("type") != "mint":
         return None, False
-    meta, _ = await _onchain_metadata(
-        rpc, mint, token_program, parsed["parsed"]["info"], metaplex_acc=md_acc, metaplex_read=True
-    )
+    try:
+        meta, _ = await _onchain_metadata(
+            rpc,
+            mint,
+            token_program,
+            parsed["parsed"]["info"],
+            metaplex_acc=md_acc,
+            metaplex_read=True,
+        )
+    except RpcError as e:
+        # the curve answer is already paid for: keep it when only the DAS read failed
+        log.info("resolve.pair_metadata_failed", mint=mint, error=str(e)[:120])
+        return None, pumpfun
     return meta, pumpfun
 
 
@@ -228,11 +258,12 @@ async def _created_from_frontend_api(
     if not isinstance(j, dict):
         return None, None
     ts = j.get("created_timestamp")
-    created = (
-        datetime.fromtimestamp(ts / 1000, tz=UTC)
-        if isinstance(ts, int | float) and ts > 0
-        else None
-    )
+    created = None
+    if isinstance(ts, int | float) and ts > 0:
+        try:
+            created = datetime.fromtimestamp(ts / 1000, tz=UTC)
+        except (OverflowError, ValueError, OSError):  # out of range for a datetime
+            created = None
     creator = j.get("creator") if isinstance(j.get("creator"), str) else None
     return created, creator
 

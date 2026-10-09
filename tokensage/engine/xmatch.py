@@ -36,11 +36,13 @@ NAME_STOP = {
     "coin", "token", "inu", "official", "sol", "solana", "pump", "fun", "ai", "x",
 }  # fmt: skip
 CASHTAG = re.compile(r"\$([A-Za-z][A-Za-z0-9]{0,14})\b")
+CONTRACT_MIN_LEN = 32  # a Solana mint is 32-44 base58 characters
 HASHTAG = re.compile(r"#([A-Za-z][A-Za-z0-9_]{0,30})\b")
 WORD = re.compile(r"[A-Za-z0-9]+")
 
 # Contribution of each agreeing signal to the noisy-OR fit.
 W_NAME, W_TICKER_CASH, W_IMAGE, W_REFERENT, W_CATEGORY = 0.85, 0.55, 0.9, 0.7, 0.35
+W_CONTRACT = 1.0  # the post carries the contract address: it is about this coin
 FIT_ABOUT, FIT_RELATED = 0.6, 0.2
 # A profile matched only by its own name, handle or avatar, on an account not a day older than
 # the token, is the coin's own profile: it matches perfectly and says nothing. Its fit is
@@ -183,16 +185,36 @@ def match_name(n: Normalized, text: str | None) -> FieldMatch:
 # ----------------------------------------------------------------- ticker
 
 
+def contract_in_post(mint: str | None, text: str | None) -> bool:
+    """The token's contract address in the post, bare ("CA: <mint>") or inside a
+    pump.fun/coin/<mint> or explorer URL: the one link between a post and a coin that can
+    mean nothing else."""
+    if not mint or len(mint) < CONTRACT_MIN_LEN or not text:
+        return False
+    return re.search(rf"(?<![A-Za-z0-9]){re.escape(mint)}(?![A-Za-z0-9])", text) is not None
+
+
 def match_ticker(
-    n: Normalized, text: str | None, k: Knowledge, handle: str | None = None
+    n: Normalized,
+    text: str | None,
+    k: Knowledge,
+    handle: str | None = None,
+    mint: str | None = None,
 ) -> FieldMatch:
     t = (n.ticker or "").upper()
+    cash = {c.upper() for c in CASHTAG.findall(text or "")}
+    if contract_in_post(mint, text):
+        return FieldMatch(
+            1.0,
+            "contract",
+            "the post carries the contract address"
+            + (f" and names ${t}" if t and t in cash else ""),
+        )
     if not t:
         return FieldMatch(0.0, "none", "token has no ticker")
     if not text and not handle:
         return FieldMatch(0.0, "none", "no post text to compare")
     text = text or ""
-    cash = {c.upper() for c in CASHTAG.findall(text)}
     if t in cash:
         return FieldMatch(1.0, "cashtag", f"the post names ${t}")
     if t in {h.upper() for h in HASHTAG.findall(text)}:
@@ -344,7 +366,10 @@ def combine(
     cat_agree: float,
     content_fetched: bool,
 ) -> tuple[float, str]:
-    ticker_w = W_TICKER_CASH if ticker.how in ("cashtag", "hashtag") else W_TICKER_CASH * 0.8
+    if ticker.how == "contract":
+        ticker_w = W_CONTRACT
+    else:
+        ticker_w = W_TICKER_CASH if ticker.how in ("cashtag", "hashtag") else W_TICKER_CASH * 0.8
     parts = [
         W_NAME * name.score,
         ticker_w * ticker.score,
@@ -389,10 +414,12 @@ def basis(
     referent: ReferentMatch,
     cat_agree: float,
     k: Knowledge,
+    mint: str | None = None,
 ) -> list[str]:
     """What the fit rests on. For a post: post_text, post_image, cashtag. For a profile link
     the header (display name and handle), the bio and the avatar/banner are told apart:
-    profile_name, profile_bio, profile_image (and cashtag)."""
+    profile_name, profile_bio, profile_image (and cashtag). The contract address in the
+    text counts as post_text (or profile_bio)."""
     out: list[str] = []
     meaning = bool(referent.agrees) or cat_agree > 0
     is_post = tweet is not None and tweet.status == "ok"
@@ -405,7 +432,7 @@ def basis(
             match_name(n, header).score > 0 or match_ticker(n, header, k, profile.handle).score > 0
         )
         bio = profile.description or None
-        in_bio = match_name(n, bio).score > 0 or match_ticker(n, bio, k).score > 0
+        in_bio = match_name(n, bio).score > 0 or match_ticker(n, bio, k, mint=mint).score > 0
         if in_header:
             out.append("profile_name")
         # what the profile is about counts for the bio only when the bio carries text
@@ -416,6 +443,12 @@ def basis(
             out.append("profile_name")
     if ticker.how == "cashtag" and ticker.score > 0:
         out.append("cashtag")
+    elif ticker.how == "contract" and n.ticker:
+        # the cashtag is still a basis of its own next to the contract address
+        if n.ticker.upper() in {
+            c.upper() for c in CASHTAG.findall(post_text(tweet, profile) or "")
+        }:
+            out.append("cashtag")
     if is_image_match(image, k):
         out.append("post_image" if is_post else "profile_image")
     return out
@@ -431,17 +464,19 @@ def assess(
     post_meaning: Aggregated | None,
     k: Knowledge,
     account_age_s: int | None = None,
+    mint: str | None = None,
 ) -> XMatch:
-    """`account_age_s`: seconds the linked account predates the token (profile links)."""
+    """`account_age_s`: seconds the linked account predates the token (profile links).
+    `mint`: the token's contract address; a post carrying it is about this coin."""
     text = post_text(tweet, profile)
     handle = profile.handle if profile is not None and profile.status == "ok" else None
     name = match_name(n, text)
-    ticker = match_ticker(n, text, k, handle)
+    ticker = match_ticker(n, text, k, handle, mint)
     image = match_image(logo, media, k)
     ref, x_cats, cat_agree = compare_meaning(token_meaning, post_meaning)
     fetched = bool(text) or image.media_checked > 0
     fit, verdict = combine(name, ticker, image, ref, cat_agree, fetched)
-    b = basis(n, tweet, profile, name, ticker, image, ref, cat_agree, k)
+    b = basis(n, tweet, profile, name, ticker, image, ref, cat_agree, k, mint)
     capped = False
     is_profile = (tweet is None or tweet.status != "ok") and handle is not None
     established = account_age_s is not None and account_age_s > PROFILE_PREDATES_S

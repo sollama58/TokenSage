@@ -22,8 +22,16 @@ DEX_SEARCH = "https://api.dexscreener.com/latest/dex/search"
 
 def _ts_ms(v: object) -> datetime | None:
     if isinstance(v, int | float) and v > 0:
-        return datetime.fromtimestamp(v / 1000, tz=UTC)
+        try:
+            return datetime.fromtimestamp(v / 1000, tz=UTC)
+        except (OverflowError, ValueError, OSError):
+            return None
     return None
+
+
+def _str_or_none(v: object) -> str | None:
+    """A name / symbol field: strings only (a number or list there is not a name)."""
+    return v if isinstance(v, str) and v else None
 
 
 async def pumpfun_search(
@@ -48,16 +56,21 @@ async def pumpfun_search(
         log.info("lookups.pumpfun_search_failed", error=str(e)[:120])
         return []
     breaker.success(src)
-    items = data if isinstance(data, list) else data.get("coins") or data.get("items") or []
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = data.get("coins") or data.get("items") or []
+    else:
+        items = []  # a JSON string / number body (an upstream error message)
     out: list[SameNameToken] = []
-    for it in items:
+    for it in items if isinstance(items, list) else []:
         if not isinstance(it, dict) or not it.get("mint"):
             continue
         out.append(
             SameNameToken(
                 mint=str(it["mint"]),
-                name=it.get("name"),
-                symbol=it.get("symbol"),
+                name=_str_or_none(it.get("name")),
+                symbol=_str_or_none(it.get("symbol")),
                 created_at=_ts_ms(it.get("created_timestamp")),
                 source="pumpfun_search",
             )
@@ -82,19 +95,22 @@ async def dexscreener_search(http: httpx.AsyncClient, term: str) -> list[SameNam
     breaker.success(src)
     out: list[SameNameToken] = []
     seen: set[str] = set()
-    for pair in (data or {}).get("pairs") or []:
-        if pair.get("chainId") != "solana":
+    pairs = data.get("pairs") if isinstance(data, dict) else None
+    for pair in pairs if isinstance(pairs, list) else []:
+        if not isinstance(pair, dict) or pair.get("chainId") != "solana":
             continue
-        base = pair.get("baseToken") or {}
+        base = pair.get("baseToken")
+        if not isinstance(base, dict):
+            continue
         addr = base.get("address")
-        if not addr or addr in seen:
+        if not addr or not isinstance(addr, str) or addr in seen:
             continue
         seen.add(addr)
         out.append(
             SameNameToken(
                 mint=str(addr),
-                name=base.get("name"),
-                symbol=base.get("symbol"),
+                name=_str_or_none(base.get("name")),
+                symbol=_str_or_none(base.get("symbol")),
                 created_at=_ts_ms(pair.get("pairCreatedAt")),
                 source="dexscreener",
             )

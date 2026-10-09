@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import asyncpg
 import httpx
@@ -185,6 +187,17 @@ async def refresh_top_volume(
     return {"stored": len(top), "pruned": int(pruned.split()[-1])}
 
 
+async def _step(name: str, coro: Coroutine[Any, Any, dict[str, int]]) -> dict[str, int] | None:
+    """Run one refresh step; a failure is logged and the next step still runs."""
+    try:
+        out = await coro
+    except Exception as e:  # noqa: BLE001 - the daily cron must finish its other steps
+        log.error(f"{name}.failed", error=f"{type(e).__name__}: {e}"[:300])
+        return None
+    log.info(name, **out)
+    return out
+
+
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -199,14 +212,11 @@ async def main() -> None:
     ) as http:
         try:
             async with pool.acquire() as conn:
-                t = await refresh_trends(conn, http)
-                log.info("knowledge.trends", **t)
-                c = await refresh_known_coins(conn, http, settings)
-                log.info("knowledge.known_coins", **c)
-                v = await refresh_top_volume(conn, http)
-                log.info("knowledge.top_volume", **v)
-                g = await refresh_gazetteer(conn, http)
-                log.info("knowledge.gazetteer", **g)
+                # each step on its own: one source's bad day must not cancel the others
+                await _step("knowledge.trends", refresh_trends(conn, http))
+                await _step("knowledge.known_coins", refresh_known_coins(conn, http, settings))
+                await _step("knowledge.top_volume", refresh_top_volume(conn, http))
+                await _step("knowledge.gazetteer", refresh_gazetteer(conn, http))
         finally:
             try:
                 async with pool.acquire() as conn:
