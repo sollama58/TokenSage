@@ -1019,6 +1019,7 @@ def build_document(
         market=Market(
             complete=r.complete,
             curve_progress=r.curve_progress,
+            graduated_pool=r.graduated_pool,
             creator=r.creator,
             creator_onchain=r.creator_onchain,
             creator_kind=r.creator_kind,  # type: ignore[arg-type]
@@ -1048,6 +1049,8 @@ def build_document(
             rules=RULES_VERSION,
             lexicon=LEXICON_VERSION,
             known_coins=load_knowledge().versions.get("known_coins"),
+            # the models whose output is in this document (the logo labels carry it too)
+            models={"vision": image.labels[0].model} if image.labels else {},
         ),
     )
     if partial:

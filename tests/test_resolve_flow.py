@@ -21,12 +21,15 @@ from tests.fixtures.chain import (
     USDC,
     WALLET,
     FakeChain,
+    acct,
+    b64,
     install_web,
     public_resolver,
 )
 from tokensage.api.schemas import TokenResponse
 from tokensage.config import Settings
 from tokensage.net import safe_fetch
+from tokensage.resolve.pump_ca import PUMP_AMM_PROGRAM, canonical_pool_pda
 
 pytestmark = needs_db
 META_URI = f"https://ipfs.io/ipfs/{CID_META}"
@@ -120,6 +123,30 @@ async def test_legacy_spl_pump_coin_uses_metaplex(
     # pump.fun Global account (read once per process) may still use getAccountInfo
     assert chain.calls.count("getMultipleAccounts") == 1
     assert chain.calls.count("getAccountInfo") <= 1 and "getAsset" not in chain.calls
+
+
+async def test_graduated_coin_reports_its_pumpswap_pool(
+    client: httpx.AsyncClient, chain: FakeChain, db: asyncpg.Connection
+) -> None:
+    pool = canonical_pool_pda(SPL_MINT)
+    chain.accounts[pool] = acct(PUMP_AMM_PROGRAM, b64(b"\0" * 8))
+    with respx.mock(assert_all_called=False) as router:
+        install_web(router, chain)
+        r = await _get(client, SPL_MINT)
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a and a.market.complete is True and a.market.graduated_pool == pool
+    # the pool rides the resolver's one batched read
+    assert chain.calls.count("getMultipleAccounts") == 1
+
+
+async def test_coin_graduated_before_pumpswap_has_no_pool(
+    client: httpx.AsyncClient, chain: FakeChain, db: asyncpg.Connection
+) -> None:
+    with respx.mock(assert_all_called=False) as router:
+        install_web(router, chain)
+        r = await _get(client, SPL_MINT)
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a and a.market.complete is True and a.market.graduated_pool is None
 
 
 async def test_non_pump_mint_is_best_effort_by_default(
