@@ -45,7 +45,12 @@ def category_phrase(label: str, categories: list[tuple[str, float]]) -> str:
 
 
 def _has_theme(agg: Aggregated) -> bool:
-    tp = main_category(agg.categories)
+    """The coin's own inputs give it a theme. Labels it only borrows from the token it trades
+    against (db-only) are context unless its name builds on that token."""
+    cats = agg.categories
+    if not any(lbl == "derivative/pair_family" for lbl, _ in cats):
+        cats = [(lbl, c) for lbl, c in cats if agg.inputs.get(lbl) != ["db"]]
+    tp = main_category(cats)
     return tp is not None and is_theme(tp[0])
 
 
@@ -80,7 +85,9 @@ def summarize(
     head = f"{name or '(unnamed)'} (${ticker or '?'})"
     parts: list[str] = []
     r = agg.referent
-    if r and r.score >= 0.45:
+    if r and r.score >= 0.45 and not r.generic:
+        # a kind-only referent ("dog", from the pair token or the coin this one copies) is
+        # what the coin reads as, not what it refers to: the category sentence says it
         desc = f" ({r.desc})" if r.desc else ""
         # the reported (banded) confidence, as referent.confidence says it
         score = referent_confidence if referent_confidence is not None else r.score
@@ -106,7 +113,7 @@ def summarize(
             )
             pair_who = None
         tp = main_category(agg.categories)
-        guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
+        guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 and not r.generic else ""
         if tp:
             parts.append(
                 f"Beyond that it reads as {category_phrase(tp[0], agg.categories)} "
@@ -116,7 +123,7 @@ def summarize(
             parts.append(f"No clear reference in the name{guess}.")
     else:
         tp = main_category(agg.categories)
-        guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 else ""
+        guess = f"; weak guess: {r.label}" if r and r.score >= 0.3 and not r.generic else ""
         if tp:
             phrase = category_phrase(tp[0], agg.categories)
             parts.append(f"{head} reads as {phrase} (confidence {tp[1]:.2f}){guess}.")

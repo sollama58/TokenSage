@@ -548,16 +548,19 @@ async def fetch_tweet(
 ) -> TweetData:
     """Walk the chain; first definitive answer wins (ok or deleted)."""
     deleted: TweetData | None = None
+    asked_syndication = False
     for fn in (fx_tweet, vx_tweet, syndication_tweet, oembed_tweet):
         try:
             t = await fn(http, tweet_id)
         except Exception as e:  # noqa: BLE001 - one broken mirror must not stop the chain
             log.info("x.fetch_tweet.error", fn=fn.__name__, error=str(e)[:120])
             t = None
+        asked_syndication = asked_syndication or fn is syndication_tweet
         if t is not None:
             # a deleted verdict from a mirror can be stale; keep walking for an "ok"
             if t.status == "ok":
-                if fn is not syndication_tweet:
+                # the syndication CDN was already asked in this walk: no second request
+                if not asked_syndication:
                     await _supplement_links(http, t)
                 return t
             deleted = t

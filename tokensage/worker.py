@@ -127,40 +127,61 @@ class Worker:
 
     async def _tick(self) -> bool:
         async with self.pool.acquire() as conn:
-            job = await queue.claim(conn, self.settings.job_lease_s)
+            job = await queue.claim(
+                conn, self.settings.job_lease_s, max_attempts=self.settings.job_max_attempts
+            )
             if job is None:
                 return False
             self.active_jobs.add(job.id)
-            heartbeat = asyncio.create_task(self._heartbeat(job.id))
+            # The job runs as its own task so the heartbeat can stop it: once the lease is
+            # lost (another slot, process or the maintenance requeue owns the job now) going
+            # on would analyse the coin twice, and every status write would miss anyway.
+            lost = asyncio.Event()
+            work = asyncio.create_task(self._process(conn, job))
+            heartbeat = asyncio.create_task(self._heartbeat(job, work, lost))
             try:
-                await self._process(conn, job)
+                await work
             except asyncio.CancelledError:
-                await self._release_quietly(job.id)
+                if lost.is_set():
+                    log.warning("worker.job_abandoned", job_id=job.id, kind=job.kind)
+                    return True
+                await self._release_quietly(job)
                 raise
             finally:
                 heartbeat.cancel()
                 self.active_jobs.discard(job.id)
             return True
 
-    async def _heartbeat(self, job_id: int) -> None:
+    async def _heartbeat(
+        self, job: queue.Job, work: asyncio.Task[None], lost: asyncio.Event
+    ) -> None:
         """Keep the lease alive while a (possibly slow, OCR-queued) job runs, so no other
-        slot or the maintenance job re-claims it and analyses the coin twice."""
+        slot or the maintenance job re-claims it and analyses the coin twice. When the
+        renewal says the lease is no longer ours, the job is stopped."""
         every = max(1.0, self.settings.job_lease_s / 3)
         while True:
             await asyncio.sleep(every)
             try:
                 async with self.pool.acquire() as c:
-                    await queue.renew_lease(c, job_id, self.settings.job_lease_s)
+                    ok = await queue.renew_lease(
+                        c, job.id, self.settings.job_lease_s, job.lease_token
+                    )
             except Exception as e:  # noqa: BLE001
-                log.warning("worker.heartbeat_failed", job_id=job_id, error=str(e)[:120])
+                log.warning("worker.heartbeat_failed", job_id=job.id, error=str(e)[:120])
+                continue
+            if not ok:
+                log.warning("worker.lease_lost", job_id=job.id, kind=job.kind)
+                lost.set()
+                work.cancel()
+                return
 
-    async def _release_quietly(self, job_id: int) -> None:
+    async def _release_quietly(self, job: queue.Job) -> None:
         try:
             async with self.pool.acquire() as c:
-                await queue.release(c, job_id)
-            log.info("worker.job_released", job_id=job_id)
+                await queue.release(c, job.id, job.lease_token)
+            log.info("worker.job_released", job_id=job.id)
         except Exception as e:  # noqa: BLE001
-            log.warning("worker.release_failed", job_id=job_id, error=str(e)[:120])
+            log.warning("worker.release_failed", job_id=job.id, error=str(e)[:120])
 
     async def _callback(self, conn: asyncpg.Connection, job: queue.Job) -> None:
         from tokensage import callbacks
@@ -174,7 +195,7 @@ class Worker:
         if target.status not in ("done", "failed"):
             # Not finished yet: wait for it without spending a delivery attempt. Finishing
             # the target releases this job straight away.
-            await queue.defer(conn, job.id, callbacks.CALLBACK_WAIT_S)
+            await queue.defer(conn, job.id, callbacks.CALLBACK_WAIT_S, job.lease_token)
             # the target may have finished between our read and the defer: if so, run again
             # now instead of waiting out CALLBACK_WAIT_S
             again = await queue.get(conn, target.id)
@@ -213,22 +234,24 @@ class Worker:
     async def _process(self, conn: asyncpg.Connection, job: queue.Job) -> None:
         bound = log.bind(job_id=job.id, kind=job.kind, mint=job.mint, depth=job.depth)
         if self.stop.is_set():
-            await queue.release(conn, job.id)
+            await queue.release(conn, job.id, job.lease_token)
             return
         try:
             if job.kind == "analyze":
                 assert job.mint and job.depth
                 hints = (job.payload or {}).get("hints") if job.payload else None
                 version = await analyze(conn, self.ctx, job.mint, job.depth, hints=hints)
-                await queue.complete(conn, job.id, version)
-                bound.info("job.done", version=version)
+                if await queue.complete(conn, job.id, version, job.lease_token):
+                    bound.info("job.done", version=version)
+                else:
+                    bound.warning("job.done_after_lease_lost", version=version)
             elif job.kind == "callback":
                 try:
                     await self._callback(conn, job)
                 except _Deferred:
                     bound.info("job.callback.waiting_for_target")
                     return
-                await queue.complete(conn, job.id, None)
+                await queue.complete(conn, job.id, None, job.lease_token)
                 bound.info("job.callback.done")
             elif job.kind == "retry_metadata":
                 assert job.mint and job.depth
@@ -237,14 +260,27 @@ class Worker:
                 except RetryRescheduled:
                     bound.info("job.retry_metadata.rescheduled")
                     return
-                await queue.complete(conn, job.id, rv)
+                await queue.complete(conn, job.id, rv, job.lease_token)
                 bound.info("job.retry_metadata.done", version=rv)
             else:
-                await queue.fail(conn, job.id, f"unknown job kind {job.kind}", max_attempts=1)
+                await queue.fail(
+                    conn,
+                    job.id,
+                    f"unknown job kind {job.kind}",
+                    max_attempts=1,
+                    lease_token=job.lease_token,
+                )
                 bound.warning("job.unknown_kind")
         except AnalyzeFailed as exc:
             bound.info("job.definitive_failure", code=exc.code, error=str(exc))
-            await queue.fail(conn, job.id, str(exc), max_attempts=1, error_code=exc.code)
+            await queue.fail(
+                conn,
+                job.id,
+                str(exc),
+                max_attempts=1,
+                error_code=exc.code,
+                lease_token=job.lease_token,
+            )
         except Exception as exc:  # noqa: BLE001 - a bad token must never kill the loop
             err = "".join(traceback.format_exception_only(type(exc), exc)).strip()
             bound.error("job.error", error=err, attempt=job.attempts)
@@ -257,9 +293,16 @@ class Worker:
                     err,
                     max_attempts=callbacks.CALLBACK_MAX_ATTEMPTS,
                     retry_in_s=callbacks.CALLBACK_RETRY_S,
+                    lease_token=job.lease_token,
                 )
             else:
-                await queue.fail(conn, job.id, err, max_attempts=self.settings.job_max_attempts)
+                await queue.fail(
+                    conn,
+                    job.id,
+                    err,
+                    max_attempts=self.settings.job_max_attempts,
+                    lease_token=job.lease_token,
+                )
 
 
 async def run_worker(

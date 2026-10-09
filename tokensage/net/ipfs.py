@@ -39,6 +39,11 @@ def parse_ipfs(url: str) -> IpfsRef | None:
     return None
 
 
+def _definitive(e: Exception) -> bool:
+    """A gateway error that no other gateway can answer differently."""
+    return isinstance(e, FetchError) and str(e).startswith("too large")
+
+
 def gateway_urls(ref: IpfsRef, gateways: Sequence[str]) -> list[str]:
     return [f"{g.rstrip('/')}/ipfs/{ref.cid}{ref.path}" for g in gateways]
 
@@ -84,6 +89,12 @@ async def fetch_ipfs(
                 except (FetchError, UnsafeUrl) as e:
                     errors.append(str(e))
                     # a definitive "not found" at one gateway is not definitive for IPFS
+                    # (the CID may not have propagated there yet), but the content itself
+                    # is immutable: a body over the cap is over it at every gateway
+                    if _definitive(e):
+                        raise FetchError(
+                            "all gateways failed: " + "; ".join(errors)[:500], retryable=False
+                        ) from e
         raise FetchError("all gateways failed: " + "; ".join(errors)[:500], retryable=True)
     finally:
         for t in tasks:

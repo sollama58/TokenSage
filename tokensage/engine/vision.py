@@ -210,15 +210,16 @@ def preprocess(data: bytes) -> np.ndarray:
         if img.format == "JPEG":
             img.draft("RGB", (SIZE * 2, SIZE * 2))
         img.seek(0)
-        if max(img.size) > 4 * SIZE:
-            img.thumbnail((4 * SIZE, 4 * SIZE))
         if img.mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
             # convert() clips 16-bit/float greyscale to near-white: scale to 8 bit as the
-            # image stage does (image.to_rgb)
+            # image stage does (image.to_rgb, which also scales a large frame down first:
+            # thumbnail() rejects I;16)
             from tokensage.engine.image import to_rgb
 
             rgba = to_rgb(img, max_side=4 * SIZE).convert("RGBA")
         else:
+            if max(img.size) > 4 * SIZE:
+                img.thumbnail((4 * SIZE, 4 * SIZE))
             rgba = img.convert("RGBA")
     bg = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
     bg.alpha_composite(rgba)

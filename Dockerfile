@@ -32,6 +32,12 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Nothing writes to /app at runtime (the venv, models and data are read-only and world-
+# readable; bytecode is precompiled), so every service runs unprivileged: a decoder or
+# ONNX/OCR bug on attacker-supplied bytes does not get root. Numeric uid: no passwd entry
+# needed, and no chown (it would copy the venv and the model into another layer).
+USER 10001
+
 # One entrypoint for every service; TOKENSAGE_ROLE picks api | worker | knowledge | maintenance.
 # Exec form with an absolute path: no shell, no PATH lookup, and SIGTERM reaches Python directly.
 CMD ["/app/.venv/bin/python", "-m", "tokensage.run"]

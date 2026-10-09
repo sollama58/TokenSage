@@ -1,5 +1,6 @@
 """Shared fixtures. Integration tests need a Postgres at TEST_DATABASE_URL (or DATABASE_URL);
-they are skipped when none is reachable."""
+they are skipped when none is reachable, unless TS_REQUIRE_DB=1 (CI), which then fails the
+run instead of passing on unit tests alone."""
 
 from __future__ import annotations
 
@@ -39,6 +40,16 @@ def _db_reachable() -> bool:
 
 DB_AVAILABLE = _db_reachable()
 needs_db = pytest.mark.skipif(not DB_AVAILABLE, reason="no test Postgres reachable")
+REQUIRE_DB = os.environ.get("TS_REQUIRE_DB", "") == "1"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    if REQUIRE_DB and not DB_AVAILABLE:
+        pytest.exit(
+            f"TS_REQUIRE_DB=1 but no Postgres is reachable at {TEST_DB}: the DB-backed tests "
+            "would be skipped",
+            returncode=1,
+        )
 
 
 @pytest.fixture(autouse=True)

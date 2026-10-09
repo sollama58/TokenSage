@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -38,6 +39,9 @@ class Job:
     payload: dict[str, Any] | None = None
     # True only when enqueue() created this row (not joined an open job or reused a done one)
     inserted: bool = False
+    # set by claim(): proves to complete/fail/renew_lease/defer/release that the caller still
+    # holds the lease (a re-claimed job carries a new token, so a stale holder's writes miss)
+    lease_token: str | None = None
 
     @classmethod
     def from_record(cls, r: asyncpg.Record) -> Job:
@@ -53,6 +57,7 @@ class Job:
             error_code=r["error_code"],
             payload=r["payload"] if "payload" in r.keys() else None,
             inserted=bool(r["inserted"]) if "inserted" in r.keys() else False,
+            lease_token=r["lease_token"] if "lease_token" in r.keys() else None,
         )
 
 
@@ -122,7 +127,12 @@ async def _enqueue_row(
           on conflict (kind, mint, depth) where status in ('pending','running')
           do update set priority = least(job.priority, excluded.priority),
                         -- a later caller's hints help a job that has none yet
-                        payload = coalesce(job.payload, excluded.payload)
+                        payload = coalesce(job.payload, excluded.payload),
+                        -- an interactive request joining a job parked for a retry does
+                        -- not wait out the park (a batch joiner does not lower priority)
+                        run_after = case when excluded.priority < job.priority
+                                         then least(job.run_after, now())
+                                         else job.run_after end
           returning *, (xmax = 0) as inserted
         )
         select * from ins
@@ -155,10 +165,23 @@ async def pending_count(conn: asyncpg.Connection) -> int:
     )
 
 
+# A running job whose lease expired with no attempts left: its worker died (OOM, a native
+# crash, a restart mid-job) as many times as a surviving worker may fail, so it is failed
+# instead of being re-run every lease period for ever.
+WORKER_DIED = "worker died"
+
+
 async def claim(
-    conn: asyncpg.Connection, lease_s: int, kinds: list[str] | None = None
+    conn: asyncpg.Connection,
+    lease_s: int,
+    kinds: list[str] | None = None,
+    max_attempts: int | None = None,
 ) -> Job | None:
-    """Atomically claim the most urgent runnable job. Expired leases are re-claimable."""
+    """Atomically claim the most urgent runnable job. Expired leases are re-claimable while
+    the job has attempts left (max_attempts; None = no ceiling); one that has none is
+    marked failed instead. The returned job carries the lease token the other calls need."""
+    if max_attempts is not None:
+        await _fail_exhausted(conn, max_attempts)
     row = await conn.fetchrow(
         """
         with next_job as (
@@ -166,22 +189,50 @@ async def claim(
           where (status = 'pending' or (status = 'running' and locked_until < now()))
             and run_after <= now()
             and ($2::text[] is null or kind = any($2))
+            and ($3::int is null or attempts < $3)
           order by priority, run_after
           for update skip locked
           limit 1
         )
         update job set status = 'running', attempts = attempts + 1, started_at = now(),
-               locked_until = now() + make_interval(secs => $1)
+               locked_until = now() + make_interval(secs => $1), lease_token = $4
         from next_job where job.id = next_job.id
         returning job.*
         """,
         lease_s,
         kinds,
+        max_attempts,
+        uuid.uuid4().hex,
     )
     return Job.from_record(row) if row else None
 
 
-async def complete(conn: asyncpg.Connection, job_id: int, result_version: int | None) -> None:
+async def _fail_exhausted(conn: asyncpg.Connection, max_attempts: int) -> list[int]:
+    """Fail every running job whose lease expired with no attempts left (its worker died
+    each time); waiters and callbacks are released as for any final failure."""
+    rows = await conn.fetch(
+        """update job set status='failed', finished_at=now(), locked_until=null,
+             lease_token=null, last_error=$2
+           where status='running' and locked_until < now() and attempts >= $1
+           returning id""",
+        max_attempts,
+        WORKER_DIED,
+    )
+    ids = [r["id"] for r in rows]
+    for job_id in ids:
+        await _release_callbacks(conn, job_id)
+        await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
+    return ids
+
+
+async def complete(
+    conn: asyncpg.Connection,
+    job_id: int,
+    result_version: int | None,
+    lease_token: str | None = None,
+) -> bool:
+    """Mark a running job done. With a lease_token (the one claim() handed out) the job is
+    only touched while that lease is still held: False means someone else owns it now."""
     async with conn.transaction():
         key = await conn.fetchrow("select kind, mint, depth from job where id=$1", job_id)
         if key is not None:
@@ -189,14 +240,24 @@ async def complete(conn: asyncpg.Connection, job_id: int, result_version: int | 
                 "select pg_advisory_xact_lock($1)",
                 _job_lock_key(key["kind"], key["mint"], key["depth"]),
             )
-        await conn.execute(
+        res = await conn.execute(
             """update job set status='done', finished_at=now(), locked_until=null,
-               result_version=$2, last_error=null where id=$1 and status='running'""",
+               lease_token=null, result_version=$2, last_error=null
+               where id=$1 and status='running'
+                 and ($3::text is null or lease_token = $3)""",
             job_id,
             result_version,
+            lease_token,
         )
+        if not _one_row(res):
+            return False
         await _release_callbacks(conn, job_id)
     await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
+    return True
+
+
+def _one_row(status: str) -> bool:
+    return status.endswith(" 1")
 
 
 async def fail(
@@ -206,9 +267,11 @@ async def fail(
     max_attempts: int,
     retry_in_s: int = 30,
     error_code: str | None = None,
-) -> None:
+    lease_token: str | None = None,
+) -> str | None:
     """Retry with a delay until max_attempts, then mark failed. An error_code marks a
-    definitive failure: no retry, and the API maps the code to a status."""
+    definitive failure: no retry, and the API maps the code to a status. Returns the new
+    status, or None when the job was not ours any more (see complete)."""
     status = await conn.fetchval(
         """
         update job set
@@ -216,10 +279,11 @@ async def fail(
                         then 'failed' else 'pending' end,
           run_after = now() + make_interval(secs => $4),
           locked_until = null,
+          lease_token = null,
           last_error = left($2, 2000),
           error_code = $5,
           finished_at = case when attempts >= $3 or $5::text is not null then now() else null end
-        where id = $1 and status = 'running'
+        where id = $1 and status = 'running' and ($6::text is null or lease_token = $6)
         returning status
         """,
         job_id,
@@ -227,12 +291,14 @@ async def fail(
         max_attempts,
         retry_in_s,
         error_code,
+        lease_token,
     )
     if status == "failed":
         await _release_callbacks(conn, job_id)
         # only a final failure is "done" for waiters; a retry leaves the job pending, and
         # waking requests then would just hand them an early 202
         await conn.execute("select pg_notify($1, $2)", CHANNEL_DONE, str(job_id))
+    return status
 
 
 async def _release_callbacks(conn: asyncpg.Connection, target_job_id: int) -> None:
@@ -250,44 +316,61 @@ async def _release_callbacks(conn: asyncpg.Connection, target_job_id: int) -> No
         await conn.execute("select pg_notify($1, '0')", CHANNEL_NEW)
 
 
-async def defer(conn: asyncpg.Connection, job_id: int, seconds: float) -> None:
+async def defer(
+    conn: asyncpg.Connection, job_id: int, seconds: float, lease_token: str | None = None
+) -> bool:
     """Put a claimed job back for later without spending one of its attempts."""
-    await conn.execute(
-        """update job set status='pending', locked_until=null,
+    res = await conn.execute(
+        """update job set status='pending', locked_until=null, lease_token=null,
              attempts = greatest(attempts - 1, 0),
              run_after = now() + make_interval(secs => $2)
-           where id=$1 and status='running'""",
+           where id=$1 and status='running' and ($3::text is null or lease_token = $3)""",
         job_id,
         float(seconds),
+        lease_token,
     )
+    return _one_row(res)
 
 
-async def renew_lease(conn: asyncpg.Connection, job_id: int, lease_s: int) -> bool:
-    """Extend a running job's lease (worker heartbeat). False if the job is no longer ours."""
+async def renew_lease(
+    conn: asyncpg.Connection, job_id: int, lease_s: int, lease_token: str | None = None
+) -> bool:
+    """Extend a running job's lease (worker heartbeat). False if the job is no longer ours:
+    it finished, or its lease expired and another worker (or the maintenance requeue)
+    took it, in which case the caller must stop working on it."""
     r = await conn.execute(
         """update job set locked_until = now() + make_interval(secs => $2)
-           where id=$1 and status='running'""",
+           where id=$1 and status='running' and ($3::text is null or lease_token = $3)""",
         job_id,
         lease_s,
+        lease_token,
     )
-    return r.endswith(" 1")
+    return _one_row(r)
 
 
-async def release(conn: asyncpg.Connection, job_id: int) -> None:
+async def release(conn: asyncpg.Connection, job_id: int, lease_token: str | None = None) -> bool:
     """Hand a claimed job back untouched (used on SIGTERM)."""
-    await conn.execute(
-        """update job set status='pending', attempts=greatest(attempts-1,0), locked_until=null
-           where id=$1 and status='running'""",
-        job_id,
-    )
-
-
-async def requeue_expired(conn: asyncpg.Connection) -> int:
-    """Maintenance: return jobs whose lease expired to pending (the claim query already
-    treats them as runnable; this keeps status honest for /readyz)."""
     res = await conn.execute(
-        """update job set status='pending', locked_until=null
-           where status='running' and locked_until < now()"""
+        """update job set status='pending', attempts=greatest(attempts-1,0), locked_until=null,
+             lease_token=null
+           where id=$1 and status='running' and ($2::text is null or lease_token = $2)""",
+        job_id,
+        lease_token,
+    )
+    return _one_row(res)
+
+
+async def requeue_expired(conn: asyncpg.Connection, max_attempts: int | None = None) -> int:
+    """Maintenance: return jobs whose lease expired to pending (the claim query already
+    treats them as runnable; this keeps status honest for /readyz). With max_attempts, a
+    job with no attempts left is failed ("worker died") instead; it is not counted."""
+    if max_attempts is not None:
+        await _fail_exhausted(conn, max_attempts)
+    res = await conn.execute(
+        """update job set status='pending', locked_until=null, lease_token=null
+           where status='running' and locked_until < now()
+             and ($1::int is null or attempts < $1)""",
+        max_attempts,
     )
     return int(res.split()[-1])
 

@@ -35,14 +35,22 @@ async def top_articles(http: httpx.AsyncClient, day: date) -> dict[str, int] | N
     breaker.success(src)
     try:
         items = r.json()["items"][0]["articles"]
-    except (ValueError, KeyError, IndexError):
+    except (ValueError, KeyError, IndexError, TypeError):
+        return None
+    if not isinstance(items, list):
         return None
     out: dict[str, int] = {}
     for it in items:
-        a = it.get("article") or ""
-        if not a or a.startswith(SKIP):
+        if not isinstance(it, dict):
             continue
-        out[a.replace("_", " ")] = int(it.get("views") or 0)
+        a = it.get("article") or ""
+        if not isinstance(a, str) or not a or a.startswith(SKIP):
+            continue
+        try:
+            views = int(it.get("views") or 0)
+        except (TypeError, ValueError):
+            views = 0
+        out[a.replace("_", " ")] = views
     return out
 
 

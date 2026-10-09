@@ -57,17 +57,22 @@ async def top_pools(http: httpx.AsyncClient, dex: str, page: int = 1) -> list[To
         doc = r.json()
     except ValueError:
         return None
-    tokens = {
-        str(i.get("id")): i.get("attributes") or {}
-        for i in doc.get("included") or []
-        if i.get("type") == "token"
-    }
+    if not isinstance(doc, dict):
+        log.info("geckoterminal.bad_body", dex=dex, type=type(doc).__name__)
+        return None
+    included = doc.get("included")
+    tokens: dict[str, dict] = {}
+    for i in included if isinstance(included, list) else []:
+        if isinstance(i, dict) and i.get("type") == "token":
+            attrs = i.get("attributes")
+            tokens[str(i.get("id"))] = attrs if isinstance(attrs, dict) else {}
     out: list[TopToken] = []
-    for pool in doc.get("data") or []:
+    pools = doc.get("data")
+    for pool in pools if isinstance(pools, list) else []:
         try:
             base_id = pool["relationships"]["base_token"]["data"]["id"]
             vol = float(pool["attributes"]["volume_usd"]["h24"] or 0)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, IndexError):
             continue
         t = tokens.get(str(base_id)) or {}
         mint = str(t.get("address") or str(base_id).removeprefix("solana_"))

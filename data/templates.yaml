@@ -11,7 +11,7 @@ markers:
   - {pattern: '(?i)\b(?:mother of|father of|king of|queen of|god of)\b', code: "marker:parent", kind: template_family, weight: 0.35}
   - {pattern: '(?i)\b(?:on sol|on solana|sol edition|solana edition)\b', code: "marker:on-sol", kind: copycat, weight: 0.4}
   - {pattern: '(?i)\b(?:cto|community takeover)\b', code: "marker:cto", kind: null, weight: 0.0}
-  - {pattern: '(?i)\b(?:ai|agent)\b$', code: "marker:ai-suffix", kind: template_family, weight: 0.3}
+  - {pattern: '(?i)\b(?:ai|agent)\b\W*$', code: "marker:ai-suffix", kind: template_family, weight: 0.3}  # trailing space/emoji/punctuation allowed
   - {pattern: '(?i)\b(?:inu)\b', code: "marker:inu", kind: template_family, weight: 0.45}
   - {pattern: '(?i)\b(?:wif)\b', code: "marker:wif", kind: template_family, weight: 0.5}
   # the name sets itself against its subject ("Doge Killer", "Anti Pepe", "Not Peanut")

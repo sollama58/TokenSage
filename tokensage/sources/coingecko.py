@@ -66,17 +66,25 @@ async def category_markets(
         items = r.json()
     except ValueError:
         return None
+    if not isinstance(items, list):
+        log.info("coingecko.bad_body", category=category, type=type(items).__name__)
+        return None  # e.g. a {"status": {...}} error envelope with HTTP 200
     out: list[GeckoCoin] = []
-    for it in items or []:
-        if not it.get("id") or not it.get("symbol"):
+    for it in items:
+        if not isinstance(it, dict) or not it.get("id") or not it.get("symbol"):
             continue
         out.append(
             GeckoCoin(
                 id=str(it["id"]),
                 symbol=str(it["symbol"]).upper()[:20],
                 name=str(it.get("name") or it["id"])[:120],
-                image=it.get("image"),
-                market_cap_rank=it.get("market_cap_rank"),
+                image=it.get("image") if isinstance(it.get("image"), str) else None,
+                market_cap_rank=(
+                    it.get("market_cap_rank")
+                    if isinstance(it.get("market_cap_rank"), int)
+                    and not isinstance(it.get("market_cap_rank"), bool)
+                    else None
+                ),
                 categories=list(CATEGORY_LABELS.get(category, [])),
             )
         )

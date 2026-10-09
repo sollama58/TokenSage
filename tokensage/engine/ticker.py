@@ -69,7 +69,10 @@ def _explain(n: Normalized, k: Knowledge) -> TickerExplanation:
         return TickerExplanation(
             "known_coin", f"${n.ticker} = ticker of {c.name} ({c.referent_label}){suffix_note}", 0.9
         )
-    # 2. equals a token or the compact name
+    # 2. equals a token or the compact name; the full ticker first, so $BEAR for "Bear" is
+    # the name itself, not "EAR" (its affix-stripped base) resembling part of it
+    if full == compact or full in tokens:
+        return TickerExplanation("equals_token", f"${n.ticker} is the name itself", 0.95)
     if t == compact or t in tokens:
         return TickerExplanation(
             "equals_token", f"${n.ticker} is the name itself{suffix_note}", 0.95
@@ -121,8 +124,6 @@ def _explain(n: Normalized, k: Knowledge) -> TickerExplanation:
         return TickerExplanation(
             "fuzzy", f"${n.ticker} resembles part of '{compact}' ({pr:.0f}%)", 0.6
         )
-    if full != t and (full == compact or full in tokens):
-        return TickerExplanation("equals_token", f"${n.ticker} is the name itself", 0.9)
     return TickerExplanation(
         "unrelated", f"${n.ticker} does not come from the name '{n.name_clean}'", 0.4
     )

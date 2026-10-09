@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tokensage import __version__, queue
 from tokensage.api import errors
@@ -123,7 +124,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return resp
 
     app.add_exception_handler(errors.ApiError, errors.api_error_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(HTTPException, errors.http_error_handler)  # type: ignore[arg-type]
+    # Starlette's router raises its own HTTPException (the parent of FastAPI's) for an
+    # unknown route or method; registering the parent covers both, so a 404/405 answers in
+    # the one error shape instead of FastAPI's {"detail": ...}
+    app.add_exception_handler(StarletteHTTPException, errors.http_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, errors.unhandled_error_handler)
 
     @app.get("/healthz", include_in_schema=False)

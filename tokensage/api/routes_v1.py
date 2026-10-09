@@ -16,6 +16,7 @@ from tokensage.api.schemas import (
     BatchRequestItem,
     BatchResponse,
     Depth,
+    ErrorResponse,
     FlagEntry,
     JobResponse,
     MetaResponse,
@@ -51,15 +52,31 @@ INCLUDE_DOC = (
     "comma list of optional parts to keep: evidence, raw. Omit to get everything; "
     "a part left out of the list is dropped (evidence -> [], raw -> empty)"
 )
+
+
+def err(description: str) -> dict:
+    """An error entry for a route's `responses`: every error answers with ErrorResponse."""
+    return {"model": ErrorResponse, "description": description}
+
+
 TOKEN_RESPONSES: dict[int | str, dict] = {
     202: {"model": TokenResponse, "description": "Analysis pending; poll again."},
-    400: {"description": "invalid_ca"},
-    401: {"description": "unauthorized"},
-    404: {"description": "token_not_found (never when hints with metadata were given)"},
-    422: {"description": "not_a_token_mint | not_pumpfun"},
-    429: {"description": "rate_limited | quota_exceeded"},
-    503: {"description": "overloaded"},
+    400: err("invalid_ca"),
+    401: err("unauthorized"),
+    404: err("token_not_found (never when hints with metadata were given)"),
+    422: err("not_a_token_mint | not_pumpfun"),
+    429: err("rate_limited | quota_exceeded"),
+    503: err("overloaded"),
 }
+BATCH_RESPONSES: dict[int | str, dict] = {
+    400: err("invalid_callback_url"),
+    401: err("unauthorized"),
+    422: err("validation_error"),
+    429: err("rate_limited"),
+}
+JOB_RESPONSES: dict[int | str, dict] = {401: err("unauthorized"), 404: err("job_not_found")}
+# a job id is a bigint: anything outside is no job (and must not reach the database)
+MAX_JOB_ID = 2**63 - 1
 
 
 @router.get(
@@ -175,7 +192,12 @@ def _apply_include(res: TokenResponse, include: str | None) -> None:
             a.raw = RawFields()
 
 
-@router.post("/tokens:batch", response_model=BatchResponse, summary="Prefetch up to 50 CAs")
+@router.post(
+    "/tokens:batch",
+    response_model=BatchResponse,
+    responses=BATCH_RESPONSES,
+    summary="Prefetch up to 50 CAs",
+)
 async def batch(
     request: Request,
     response: Response,
@@ -249,7 +271,12 @@ async def batch(
     return BatchResponse(items=items, request_id=request.state.request_id)
 
 
-@router.get("/jobs/{job_id}", response_model=JobResponse, summary="Poll an analysis job")
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobResponse,
+    responses=JOB_RESPONSES,
+    summary="Poll an analysis job",
+)
 async def get_job(
     request: Request,
     job_id: int,
@@ -257,6 +284,8 @@ async def get_job(
 ) -> JobResponse:
     pool = request.app.state.pool
     rid = request.state.request_id
+    if not 0 < job_id <= MAX_JOB_ID:
+        raise errors.not_found("job_not_found", "no such job")
     async with pool.acquire() as conn:
         job = await queue.get(conn, job_id)
         if job is None:
@@ -286,7 +315,12 @@ async def get_job(
     )
 
 
-@router.get("/meta", response_model=MetaResponse, summary="Versions, taxonomy and flag codes")
+@router.get(
+    "/meta",
+    response_model=MetaResponse,
+    responses={401: err("unauthorized")},
+    summary="Versions, taxonomy and flag codes",
+)
 async def meta(key: Annotated[ApiKey, Depends(require_api_key)]) -> MetaResponse:
     tax = load_taxonomy()
     depths: list[Literal["basic", "full"]] = ["basic", "full"]

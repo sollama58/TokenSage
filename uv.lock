@@ -153,15 +153,6 @@ wheels = [
 ]
 
 [[package]]
-name = "confusable-homoglyphs"
-version = "3.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0d/10/1358fca1ee2d97d4f2877df9ffbe6d124da666fef3b2f75e771a4c1afee6/confusable_homoglyphs-3.3.1.tar.gz", hash = "sha256:b995001c9b2e1b4cea0cf5f3840a7c79188a8cbbad053d693572bd8c1c1ec460", size = 325480, upload-time = "2024-01-30T10:10:27.47Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/6e/c0fcbb7d341a46cf4241a6aa9e6a737734f0657521fc1bcd074953fe4eea/confusable_homoglyphs-3.3.1-py2.py3-none-any.whl", hash = "sha256:84c92cb79dc7f55aa290d0762b2349abd8dee4c16fbe6f99eac978d394e2e6a1", size = 144755, upload-time = "2024-01-30T10:10:24.857Z" },
-]
-
-[[package]]
 name = "defusedxml"
 version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -965,7 +956,6 @@ dependencies = [
     { name = "alembic" },
     { name = "anyascii" },
     { name = "asyncpg" },
-    { name = "confusable-homoglyphs" },
     { name = "emoji" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -1007,7 +997,6 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "anyascii", specifier = ">=0.3.3" },
     { name = "asyncpg", specifier = ">=0.29" },
-    { name = "confusable-homoglyphs", specifier = ">=3.3.1" },
     { name = "emoji", specifier = ">=2.16.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },

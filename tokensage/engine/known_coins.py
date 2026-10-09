@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz
 
+from tokensage.engine import segment
 from tokensage.engine.context import Ev, Normalized, ReferentCandidate
 from tokensage.engine.knowledge import Knowledge, KnownCoin
 
@@ -37,6 +38,36 @@ def _distinctive(surface: str, k: Knowledge) -> bool:
     return not any(w in words for words in k.wordnet.values())
 
 
+# Words that never carry a coin's subject on their own (shared with the pipeline's head word).
+HEAD_STOP = {
+    "coin", "token", "sol", "solana", "inu", "hat", "cap", "beanie", "edition", "fun", "pump",
+    "meme", "official", "the", "a", "an", "of", "on", "x", "ai", "dao", "v2", "2", "cto", "army",
+    "gang", "club", "wif", "killer", "slayer", "season", "szn", "mode", "moon", "rocket",
+    "mania", "fever", "summer", "winter", "era", "vibes", "energy", "maxi", "king", "queen",
+    "god", "lord", "boss", "time", "life", "world", "nation", "party", "money", "cash", "bag",
+}  # fmt: skip
+
+
+def head_word(n: Normalized) -> str | None:
+    """The head of the name: in "Elon's Cat" it is "cat" (the coin is a cat), in "Trump Dog"
+    "dog". The last content word, by English compound order."""
+    for t in reversed(n.name_tokens):
+        if len(t) >= 3 and t not in HEAD_STOP and t.isalpha():
+            return t
+    return None
+
+
+def _everyday_modifier(surface: str, n: Normalized, k: Knowledge) -> bool:
+    """A one-word surface that is an everyday word ("mother", "house", "pump", "andy": among
+    the 20k most frequent) used as a modifier of something else ("Mother Earth", "House
+    Cat", "Andy Warhol"): there it keeps its everyday sense and does not name the coin. As
+    the name's head word ("Justice for Peanut", "Peanut Army", "Not Peanut") it does."""
+    w = surface.lower().strip()
+    if " " in w or w not in segment.common_words(k):
+        return False
+    return head_word(n) != w
+
+
 def match_known(
     n: Normalized, k: Knowledge, extra: list[KnownCoin] | None = None
 ) -> list[CopyMatch]:
@@ -54,6 +85,7 @@ def match_known(
     tb = n.ticker_base.upper()
     tfull = n.ticker.upper()
     compact = n.name_compact
+    needs_support: set[str] = set()  # an everyday-word name match: not strong on its own
     for c in coins:
         sym = c.symbol.upper()
         if tfull and tfull == sym:
@@ -83,10 +115,17 @@ def match_known(
             out[c.symbol + "|" + c.name].surface = best[3]
             if best[1] == "name_contains" and best[3].lower() in TEMPLATE_SURFACES:
                 out[c.symbol + "|" + c.name].via_template_surface = True
+            if best[1] in ("name_word", "name_contains") and _everyday_modifier(best[3], n, k):
+                needs_support.add(c.symbol + "|" + c.name)
     matches = sorted(out.values(), key=lambda m: -m.score)
     has_marker = any(mk.kind for mk in n.markers)
     strong: list[CopyMatch] = []
     for m in matches:
+        key = m.coin.symbol + "|" + m.coin.name
+        if key in needs_support and not ({"ticker", "ticker_base"} & set(m.signals)):
+            continue  # "House Cat" is a cat, not Housecoin, unless the ticker says so too
+        if m.signals == ["ticker_base"]:
+            continue  # an affix-stripped ticker alone ($BPNUT on "Zorp") is a hint, not a copy
         if (
             m.score >= 0.7
             or len(m.signals) >= 2

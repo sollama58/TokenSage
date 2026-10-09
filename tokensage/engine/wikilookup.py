@@ -22,6 +22,9 @@ from tokensage.sources.wikipedia import WikiPage
 
 MAX_LOOKUPS = 4
 MAX_SPAN_WORDS = 5
+# Post text comes from third-party mirrors: each text is cut here before the capitalised-name
+# scan (the names worth looking up are in the first lines anyway).
+MAX_POST_CHARS = 4000
 
 # Words that are never part of the name of what a coin is about: they split a name into
 # runs ("Peanut Coin" -> "peanut").
@@ -38,9 +41,12 @@ _SOFT = {
     "gang", "club",
 }  # fmt: skip
 _EDGE_KEEP = {"the", "baby", "big", "little", "super", "mr", "mrs", "lil", "real"}
+# A capitalised word with a lowercase letter in it, at most 41 characters: the bounded
+# quantifiers keep the scan linear (two unbounded runs around the lowercase letter made a
+# long mixed-case token quadratic).
+_CAP_WORD = r"(?=[\w'’.-]{0,39}[a-z])[A-Z][\w'’.-]{0,40}"
 _CAP_SPAN = re.compile(
-    r"\b[A-Z][\w'’.-]*[a-z][\w'’.-]*(?:\s+(?:(?:of|the|de|da|van|von|la|del)\s+)?"
-    r"[A-Z][\w'’.-]*[a-z][\w'’.-]*){1,4}"
+    rf"\b{_CAP_WORD}(?:\s+(?:(?:of|the|de|da|van|von|la|del)\s+)?{_CAP_WORD}){{1,4}}"
 )
 _DISAMBIG = ("disambiguation", "topics referred to by the same term", "list of")
 
@@ -132,7 +138,7 @@ def spans(n: Normalized, post_texts: list[str], k: Knowledge, gaz: Gazetteer | N
             if len(run) >= 3:
                 add(run[1:], "name")
     for raw in post_texts:
-        for m in _CAP_SPAN.finditer(raw or ""):
+        for m in _CAP_SPAN.finditer((raw or "")[:MAX_POST_CHARS]):
             phrase = surface_form(m.group(0))
             if not phrase or _covered(phrase, k, gaz, False):
                 continue

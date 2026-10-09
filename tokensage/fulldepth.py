@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -26,6 +28,7 @@ log = structlog.get_logger("fulldepth")
 PROFILE_TTL = timedelta(hours=12)
 TWEET_RECHECK = timedelta(hours=6)
 DELETED_RETRY = timedelta(hours=1)
+OEMBED_UPGRADE_RETRY = timedelta(minutes=30)  # how often the richer mirrors are asked again
 NEWS_TTL = timedelta(hours=1)
 NEWS_WINDOW = timedelta(days=2)  # the window Google News is searched over (when:2d)
 BLUESKY_TTL = timedelta(hours=1)
@@ -33,6 +36,29 @@ WIKI_TTL = timedelta(days=7)  # articles and their descriptions change slowly
 WIKI_EMPTY_TTL = timedelta(days=1)  # a name with no article may get one tomorrow
 TREND_INDEX_TTL_S = 600
 MAX_NEWS_LOOKUPS = 2
+
+
+# ----------------------------------------------------------------- single flight
+
+_inflight_locks: dict[str, asyncio.Lock] = {}
+_inflight_refs: dict[str, int] = {}
+
+
+@asynccontextmanager
+async def _single_flight(key: str) -> AsyncIterator[None]:
+    """Serialise the read-fetch-upsert of one cache key inside this process: the 8 worker
+    slots analysing a copycat wave all want the same tweet / profile / search at once, and
+    only the first should fetch (and pay); the others then find it in the cache."""
+    lock = _inflight_locks.setdefault(key, asyncio.Lock())
+    _inflight_refs[key] = _inflight_refs.get(key, 0) + 1
+    try:
+        async with lock:
+            yield
+    finally:
+        _inflight_refs[key] -= 1
+        if _inflight_refs[key] <= 0:
+            _inflight_refs.pop(key, None)
+            _inflight_locks.pop(key, None)
 
 
 # ----------------------------------------------------------------- X content with caching
@@ -53,7 +79,16 @@ async def tweet_cached(
 ) -> TweetData:
     """The tweet, cached. The first good copy is the record (tweets are immutable apart from
     edits), but it is re-checked every TWEET_RECHECK so a deletion is noticed, and a sparse
-    oEmbed copy is upgraded when a richer source answers."""
+    oEmbed copy is upgraded when a richer source answers (asked again at most every
+    OEMBED_UPGRADE_RETRY). A deletion confirmed by the paid API is final: deleted tweets do
+    not come back, and the free mirrors' stale verdicts are what the paid call corrects."""
+    async with _single_flight(f"tweet:{tweet_id}"):
+        return await _tweet_cached(conn, http, settings, tweet_id)
+
+
+async def _tweet_cached(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, tweet_id: str
+) -> TweetData:
     row = await conn.fetchrow(
         "select first_snapshot, latest, status, source, fetched_at from x_tweet where tweet_id=$1",
         tweet_id,
@@ -66,8 +101,11 @@ async def tweet_cached(
             # a copy cached before reply support has no reply fields: re-check it now
             # rather than serve it for up to TWEET_RECHECK without them
             current = "replying_to_id" in row["first_snapshot"]
-            if age is not None and age < TWEET_RECHECK and row["source"] != "oembed" and current:
+            sparse = row["source"] == "oembed" and age is not None and age >= OEMBED_UPGRADE_RETRY
+            if age is not None and age < TWEET_RECHECK and not sparse and current:
                 return record
+        elif row["status"] == "deleted" and row["source"] == "twitterapi_io":
+            return TweetData(id=tweet_id, status="deleted", source=row["source"])
         elif row["status"] in ("deleted", "failed") and age is not None and age < DELETED_RETRY:
             return TweetData(id=tweet_id, status=row["status"], source=row["source"])
     paid_ok = await _paid_x_allowed(conn, settings)
@@ -121,6 +159,13 @@ def _fill_missing(record: TweetData, fresh: TweetData) -> None:
 
 
 async def profile_cached(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, handle: str
+) -> ProfileData:
+    async with _single_flight(f"profile:{handle.lower()}"):
+        return await _profile_cached(conn, http, handle)
+
+
+async def _profile_cached(
     conn: asyncpg.Connection, http: httpx.AsyncClient, handle: str
 ) -> ProfileData:
     row = await conn.fetchrow(
@@ -562,6 +607,13 @@ async def news_lookup(
     exact: search the quoted phrase, so "le chonk" does not return stories about "le" and
     "chonk" separately. None when Google News failed and nothing is cached."""
     key = f"gnews:{'q:' if exact else ''}{term.lower()}"
+    async with _single_flight(key):
+        return await _news_lookup(conn, http, key, term, exact)
+
+
+async def _news_lookup(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, key: str, term: str, exact: bool
+) -> NewsLookup | None:
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and datetime.now(UTC) - row["fetched_at"] < NEWS_TTL:
         return NewsLookup(list(row["value"]), row["fetched_at"], stale=False)
@@ -609,6 +661,13 @@ async def bsky_for(
     """The newest Bluesky posts with the quoted phrase (cached an hour), with when they were
     fetched. A stale copy beats nothing when Bluesky is down; None when nothing is cached."""
     key = f"bsky:q:{phrase.lower()}"
+    async with _single_flight(key):
+        return await _bsky_for(conn, http, key, phrase)
+
+
+async def _bsky_for(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, key: str, phrase: str
+) -> BlueskyLookup | None:
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and datetime.now(UTC) - row["fetched_at"] < BLUESKY_TTL:
         return BlueskyLookup(list(row["value"]), row["fetched_at"], stale=False)
@@ -644,6 +703,13 @@ async def wiki_search(
     """Wikipedia's top articles for a name, cached in lookup_cache (a week; a day when
     nothing was found). A stale copy beats nothing when Wikipedia is down."""
     key = f"wiki:{query.lower()}"
+    async with _single_flight(key):
+        return await _wiki_search(conn, http, key, query)
+
+
+async def _wiki_search(
+    conn: asyncpg.Connection, http: httpx.AsyncClient, key: str, query: str
+) -> list[wikipedia.WikiPage] | None:
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row is not None:
         cached = [wikipedia.WikiPage.from_json(d) for d in row["value"] or []]

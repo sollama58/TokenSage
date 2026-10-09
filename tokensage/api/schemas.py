@@ -735,7 +735,7 @@ class Evidence(_Model):
     where: str | None = Field(
         default=None,
         description="Which input it came from: name, symbol, description, image, x, trend, "
-        "chain, db",
+        "chain, db, copy_of (inherited from the original this coin copies)",
     )
 
 

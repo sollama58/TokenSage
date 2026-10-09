@@ -28,7 +28,8 @@ ALLOWED_LINK_HOSTS_X = {
     "www.twitter.com",
     "mobile.twitter.com",
 }
-RETRY_SCHEDULE_S = [30, 120, 300, 900, 1800, 3600]  # ~1.3 h total, then unresolved
+# seconds until the n-th retry after the n-th failed fetch (~1.9 h in all), then unresolved
+RETRY_SCHEDULE_S = [30, 120, 300, 900, 1800, 3600]
 IMAGE_MAGIC = {
     b"\x89PNG\r\n\x1a\n": "image/png",
     b"\xff\xd8\xff": "image/jpeg",
@@ -93,32 +94,47 @@ def _scrub(v: Any, depth: int = 0) -> Any:
 
 
 def _clean_str(v: Any, limit: int) -> str | None:
+    """A string field of untrusted JSON: strings and numbers only (a list or object in a
+    string field is malformed metadata, not a name), NUL/surrogates dropped, length capped."""
     if v is None or isinstance(v, bool):
         return None
-    if not isinstance(v, str):
+    if isinstance(v, int | float):
         v = str(v)
+    if not isinstance(v, str):
+        return None
     v = _safe_text(v).strip()
     return v[:limit] if v else None
 
 
+def _has_control_chars(s: str) -> bool:
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in s)
+
+
 def clean_url(v: Any) -> str | None:
-    """Only https URLs survive. Everything else (javascript:, data:, garbage) becomes None."""
+    """Only https URLs survive. Everything else (javascript:, data:, garbage, a URL with
+    control characters or credentials, one urlsplit cannot parse) becomes None. Never raises."""
     s = _clean_str(v, 2048)
-    if not s:
+    if not s or _has_control_chars(s):
         return None
     if "://" not in s and s.lower().startswith(("x.com/", "twitter.com/", "t.me/", "www.")):
         s = "https://" + s
     if s.lower().startswith("http://"):
         s = "https://" + s[7:]
-    parts = urlsplit(s)
-    if parts.scheme != "https" or not parts.hostname:
+    try:
+        parts = urlsplit(s)
+        if parts.scheme != "https" or not parts.hostname:
+            return None
+        if parts.username is not None or parts.password is not None:
+            return None
+    except ValueError:  # unbalanced '[', fullwidth '/' or '@' in the netloc, ...
         return None
     return s
 
 
 def clean_social(v: Any) -> str | None:
-    """pump.fun socials may be a bare handle; keep a sanitised string, URL or not."""
-    s = _clean_str(v, 512)
+    """pump.fun socials may be a bare handle; keep a sanitised string, URL or not. A
+    non-string value (a number, a list) is not a handle: absent."""
+    s = _clean_str(v, 512) if isinstance(v, str) else None
     if not s:
         return None
     if "://" in s or "/" in s or "." in s:
@@ -223,7 +239,14 @@ async def fetch_metadata(client: httpx.AsyncClient, uri: str, settings: Settings
         return Metadata(status="unresolved" if e.retryable else "invalid", error=str(e))
     except Exception as e:  # noqa: BLE001 - "never raises": a bad uri must not fail the job
         return Metadata(status="invalid", error=f"{type(e).__name__}: {e}"[:300])
-    m = build(uri, f.body)
+    try:
+        m = build(uri, f.body)
+    except Exception as e:  # noqa: BLE001 - hostile JSON must not fail the job either
+        return Metadata(
+            status="invalid",
+            error=f"bad metadata: {type(e).__name__}: {e}"[:300],
+            content_key=content_key_for(uri, f.body),
+        )
     if m.status != "ok" or not m.image_url:
         return m
     await attach_image(client, m, settings)
@@ -301,9 +324,10 @@ async def load_cached(conn: asyncpg.Connection, mint: str) -> Metadata | None:
 
 
 async def persist(conn: asyncpg.Connection, mint: str, m: Metadata, attempts: int) -> None:
+    # `attempts` counts this failure: the n-th failure schedules the n-th step
     next_retry = None
-    if m.status == "unresolved" and attempts < len(RETRY_SCHEDULE_S):
-        next_retry = RETRY_SCHEDULE_S[attempts]
+    if m.status == "unresolved" and 0 < attempts <= len(RETRY_SCHEDULE_S):
+        next_retry = RETRY_SCHEDULE_S[attempts - 1]
     await conn.execute(
         """
         insert into token_metadata (mint, status, content_key, description, image_url, twitter,
