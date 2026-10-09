@@ -16,6 +16,8 @@ import struct
 from tokensage.resolve.pump_event import b58encode
 
 PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+PUMP_AMM_PROGRAM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"  # PumpSwap
+WSOL_MINT = "So11111111111111111111111111111111111111112"
 BONDING_CURVE_DISC = bytes([23, 183, 248, 55, 96, 216, 172, 96])
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _B58_IDX = {c: i for i, c in enumerate(_B58)}
@@ -74,6 +76,16 @@ def find_program_address(seeds: list[bytes], program_id: str) -> tuple[str, int]
 
 def bonding_curve_pda(mint: str) -> str:
     return find_program_address([b"bonding-curve", b58decode(mint)], PUMP_PROGRAM)[0]
+
+
+def canonical_pool_pda(mint: str, quote_mint: str = WSOL_MINT) -> str:
+    """The PumpSwap pool a completed curve migrates into: seeds ["pool", index 0 (u16 LE),
+    the pump program's pool-authority PDA for the mint, base mint, quote mint]."""
+    authority = find_program_address([b"pool-authority", b58decode(mint)], PUMP_PROGRAM)[0]
+    seeds = [b"pool", (0).to_bytes(2, "little"), b58decode(authority)]
+    return find_program_address([*seeds, b58decode(mint), b58decode(quote_mint)], PUMP_AMM_PROGRAM)[
+        0
+    ]
 
 
 _BC_FIELDS = [

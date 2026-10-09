@@ -100,6 +100,7 @@ entities:
   - {label: Studio Ghibli, kind: concept, aliases: [ghibli, ghiblification], categories: [ai_agent, news_event, meme_template/other], desc: "AI image-style craze, Mar 2025", popularity: 0.5, event_date: 2025-03-26}
   - {label: Minecraft, kind: concept, aliases: [minecraft], categories: [pop_culture], desc: "video game", popularity: 0.4}
   - {label: Fortnite, kind: concept, aliases: [fortnite], categories: [pop_culture], desc: "video game", popularity: 0.4}
+  - {label: Call of Duty, kind: concept, aliases: [call of duty, callofduty], categories: [pop_culture], desc: "video game franchise", popularity: 0.4}
   - {label: Pokémon, kind: concept, aliases: [pokemon, pikachu], categories: [pop_culture, meme_template/other], desc: "franchise", popularity: 0.5}
   - {label: SpongeBob, kind: concept, aliases: [spongebob, patrick star], categories: [pop_culture, meme_template/other], desc: "cartoon", popularity: 0.5}
   - {label: Shrek, kind: concept, aliases: [shrek], categories: [pop_culture, meme_template/other], desc: "film character meme", popularity: 0.4}

@@ -289,6 +289,8 @@ def _lexicon_evidence(
                 continue  # a dictionary word inside a named match ("HAWK" of Hawk Tuah)
             if where == "symbol" and h.kind == "wordnet" and h.surface in n.name_tokens:
                 continue  # the ticker repeats a name word: the same dictionary sense twice
+            if where == "symbol" and h.kind == "wordnet" and _ticker_is_initials(n):
+                continue  # $COD for "Call Of Duty" spells initials, not the fish
             if where == "symbol" and h.kind in ("entity", "slang") and head_named:
                 continue  # the name says what it is; a punning ticker ($DOGE) is secondary
             hk = (where, h.surface, h.kind)
@@ -434,6 +436,16 @@ GENERIC_LABELS = ("celebrity", "ai_agent", "political", "pop_culture")
 _NAME_PREFIXES = {"i", "e", "x", "a", "mr", "my", "dr", "st", "lil"}
 
 
+def _ticker_is_initials(n: Normalized) -> bool:
+    """The ticker is the initials of a multi-word name (with or without its stop words)."""
+    tokens = [t for t in n.name_tokens if t]
+    if len(tokens) < 2:
+        return False
+    t = n.ticker.lower()
+    main = [tok for tok in tokens if tok not in ("the", "a", "of", "in", "and")]
+    return t in ("".join(tok[0] for tok in tokens), "".join(tok[0] for tok in main))
+
+
 def _generic(surface: str, label: str) -> bool:
     """A one-word match on an everyday word (the 20k most frequent), for a label that word
     alone cannot carry (see GENERIC_LABELS)."""
@@ -537,8 +549,9 @@ def compound_parts(n: Normalized, k: Knowledge, gaz: Gazetteer | None) -> list[t
     lamb, "nintendoge" -> doge, "catler" -> cat, "frogman" -> frog. (piece, word) pairs.
 
     A word nothing knows may hide any such piece at its start or end. A dictionary word
-    ("cowboy", "category") only splits into a four-letter-plus piece and an everyday word
-    ("frog" + "man"), since most dictionary compounds are not about the animal."""
+    ("cowboy", "category") only splits into a four-letter-plus piece and an everyday word of
+    three letters or more ("frog" + "man"; never "fren" + "ch"), since most dictionary
+    compounds are not about the animal."""
     animals, slang = _word_sets(k)["animals"], _word_sets(k)["slang"]
     everyday = segment.common_words(k)
     out: list[tuple[str, str]] = []
@@ -553,8 +566,12 @@ def compound_parts(n: Normalized, k: Knowledge, gaz: Gazetteer | None) -> list[t
                     continue
                 if piece in lexicon.WORDNET_STOP or (piece not in animals and piece not in slang):
                     continue
-                if len(rest) < 2 or common and (len(piece) < 4 or rest not in everyday):
-                    continue
+                if (
+                    len(rest) < 2
+                    or common
+                    and (len(piece) < 4 or len(rest) < 3 or rest not in everyday)
+                ):
+                    continue  # "french" is not "fren" + "ch": a 2-letter rest is no word
                 if best is None or len(piece) > len(best):
                     best = piece
         if best:

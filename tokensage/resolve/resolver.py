@@ -24,8 +24,10 @@ from tokensage.config import Settings
 from tokensage.resolve import metaplex
 from tokensage.resolve.fees import CreatorFee, resolve_creator_fee, sharing_config_pda
 from tokensage.resolve.pump_ca import (
+    PUMP_AMM_PROGRAM,
     PUMP_PROGRAM,
     bonding_curve_pda,
+    canonical_pool_pda,
     decode_bonding_curve,
     find_program_address,
     parse_ca,
@@ -75,6 +77,7 @@ class Resolved:
     creator_onchain: str | None = None
     creator_kind: str | None = None  # wallet | sharing_config | holder_rewards_pda | unknown
     creator_fee: CreatorFee | None = None
+    graduated_pool: str | None = None  # the PumpSwap pool, once the curve completed
 
 
 # ----------------------------------------------------------------- helpers
@@ -321,11 +324,13 @@ async def resolve(
     API and the (RPC-expensive) signature-history lookup when nothing better is stored."""
     mint = parse_ca(raw_ca)
 
-    # 1. mint, bonding curve, Metaplex PDA and the pump-fees sharing config in one call
-    # (1 RPC credit instead of 2-4). Accounts with no jsonParsed parser come back base64.
+    # 1. mint, bonding curve, Metaplex PDA, the pump-fees sharing config and the SOL
+    # PumpSwap pool a completed curve migrates into, in one call (1 RPC credit instead of
+    # 2-5). Accounts with no jsonParsed parser come back base64.
     curve_addr = bonding_curve_pda(mint)
-    acc, curve_acc, md_acc, sharing_acc = await rpc.get_multiple_accounts(
-        [mint, curve_addr, metaplex.metadata_pda(mint), sharing_config_pda(mint)],
+    sol_pool = canonical_pool_pda(mint)
+    acc, curve_acc, md_acc, sharing_acc, pool_acc = await rpc.get_multiple_accounts(
+        [mint, curve_addr, metaplex.metadata_pda(mint), sharing_config_pda(mint), sol_pool],
         encoding="jsonParsed",
     )
     if acc is None:
@@ -353,6 +358,7 @@ async def resolve(
         raise ResolveError("not_pumpfun", "mint has no pump.fun bonding curve")
 
     complete = curve_progress = creator = quote_mint = is_mayhem = None
+    graduated_pool: str | None = None
     creator_onchain = creator_kind = None
     creator_fee: CreatorFee | None = None
     if curve:
@@ -363,6 +369,8 @@ async def resolve(
         creator_onchain = creator
         is_mayhem = curve.get("is_mayhem_mode")
         quote_mint = _quote_label(curve.get("quote_mint")) or "SOL"
+        if complete:
+            graduated_pool = await _graduated_pool(rpc, mint, curve, sol_pool, pool_acc)
         # where the creator fee goes; the curve's creator may be a PDA rather than a wallet
         creator_fee = await resolve_creator_fee(
             mint,
@@ -429,6 +437,7 @@ async def resolve(
         bonding_curve=curve_addr if is_pumpfun else None,
         complete=complete,
         curve_progress=curve_progress,
+        graduated_pool=graduated_pool,
         is_mayhem=is_mayhem,
         quote_mint=quote_mint,
         created_at=created,
@@ -440,6 +449,25 @@ async def resolve(
     )
     await persist(conn, res)
     return res
+
+
+async def _graduated_pool(
+    rpc: SolanaRpc, mint: str, curve: dict, sol_pool: str, sol_pool_acc: dict | None
+) -> str | None:
+    """The canonical PumpSwap pool of a completed curve, when it exists on-chain. Coins that
+    graduated before PumpSwap (to Raydium) have none. A SOL pair was read in the batch; a coin
+    quoted in another token costs one more read."""
+    quote = _quote_label(curve.get("quote_mint"))
+    if quote is None or quote == "SOL":
+        pool, acc = sol_pool, sol_pool_acc
+    else:
+        pool = canonical_pool_pda(mint, quote)
+        try:
+            acc = await rpc.get_account_info(pool, encoding="base64")
+        except RpcError as e:
+            log.info("resolve.pool_failed", mint=mint, error=str(e)[:120])
+            return None
+    return pool if acc and acc.get("owner") == PUMP_AMM_PROGRAM else None
 
 
 async def _curve_state(rpc: SolanaRpc, curve: dict) -> tuple[bool, float | None]:

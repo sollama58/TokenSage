@@ -261,6 +261,7 @@ async def test_full_depth_labels_the_logo_once(
     assert a is not None and a.depth == "full"
     assert a.image.labels and a.image.labels[0].label == "dog"
     assert a.image.labels[0].model == vision.load_config().model
+    assert a.versions.models == {"vision": vision.load_config().model}
     assert any(e.kind == "vision" and e.label == "animal/dog" for e in a.evidence)
     assert enc.calls == 1
     stored = await db.fetchval("select labels from image where content_key=$1", f"ipfs:{CID_IMG}")
