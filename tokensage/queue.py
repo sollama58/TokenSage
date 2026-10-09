@@ -179,17 +179,20 @@ async def claim(
 ) -> Job | None:
     """Atomically claim the most urgent runnable job. Expired leases are re-claimable while
     the job has attempts left (max_attempts; None = no ceiling); one that has none is
-    marked failed instead. The returned job carries the lease token the other calls need."""
+    marked failed instead. A pending job is always claimable: fail() alone decides its
+    retry budget (callbacks and other kinds have their own ceilings). The returned job
+    carries the lease token the other calls need."""
     if max_attempts is not None:
         await _fail_exhausted(conn, max_attempts)
     row = await conn.fetchrow(
         """
         with next_job as (
           select id from job
-          where (status = 'pending' or (status = 'running' and locked_until < now()))
+          where (status = 'pending'
+                 or (status = 'running' and locked_until < now()
+                     and ($3::int is null or attempts < $3)))
             and run_after <= now()
             and ($2::text[] is null or kind = any($2))
-            and ($3::int is null or attempts < $3)
           order by priority, run_after
           for update skip locked
           limit 1

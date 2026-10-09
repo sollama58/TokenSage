@@ -191,7 +191,7 @@ def contract_in_post(mint: str | None, text: str | None) -> bool:
     mean nothing else."""
     if not mint or len(mint) < CONTRACT_MIN_LEN or not text:
         return False
-    return re.search(rf"(?<![A-Za-z0-9]){re.escape(mint)}(?![A-Za-z0-9])", text, re.I) is not None
+    return re.search(rf"(?<![A-Za-z0-9]){re.escape(mint)}(?![A-Za-z0-9])", text) is not None
 
 
 def match_ticker(

@@ -119,8 +119,10 @@ def _clean_onchain(meta: dict[str, str] | None) -> dict[str, str] | None:
     out: dict[str, str] = {}
     for k, limit in _META_LIMITS.items():
         v = str(meta.get(k) or "").encode("utf-8", "replace").decode("utf-8")
-        v = "".join(ch for ch in v if ord(ch) >= 0x20 and ord(ch) != 0x7F)
-        out[k] = v.strip()[:limit]
+        # other control characters become spaces (a newline in a name keeps its word
+        # boundary, as it does when the same name comes from the metadata JSON)
+        v = "".join(ch if ord(ch) >= 0x20 and ord(ch) != 0x7F else " " for ch in v if ch != "\x00")
+        out[k] = " ".join(v.split())[:limit]
     return out
 
 

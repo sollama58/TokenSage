@@ -64,14 +64,16 @@ TOKEN_RESPONSES: dict[int | str, dict] = {
     400: err("invalid_ca"),
     401: err("unauthorized"),
     404: err("token_not_found (never when hints with metadata were given)"),
-    422: err("not_a_token_mint | not_pumpfun"),
+    # 422 is also FastAPI's own validation shape ({"detail": [...]}) for a bad query
+    # parameter, so the error model is not declared on it (an accepted contract gap)
+    422: {"description": "not_a_token_mint | not_pumpfun"},
     429: err("rate_limited | quota_exceeded"),
     503: err("overloaded"),
 }
 BATCH_RESPONSES: dict[int | str, dict] = {
     400: err("invalid_callback_url"),
     401: err("unauthorized"),
-    422: err("validation_error"),
+    422: {"description": "validation_error (FastAPI's validation shape, not ErrorResponse)"},
     429: err("rate_limited"),
 }
 JOB_RESPONSES: dict[int | str, dict] = {401: err("unauthorized"), 404: err("job_not_found")}

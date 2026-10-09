@@ -478,7 +478,7 @@ class XMatchField(_Model):
     score: float = Field(ge=0, le=1)
     how: str = Field(
         description="name: exact|normalized|segment|fuzzy|none; "
-        "ticker: cashtag|bare|hashtag|fuzzy|none"
+        "ticker: cashtag|bare|hashtag|fuzzy|contract|none"
     )
     detail: str
 

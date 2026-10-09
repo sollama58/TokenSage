@@ -73,6 +73,15 @@ def test_an_affix_stripped_ticker_alone_is_not_a_copy() -> None:
     assert out.copy_of == [] and out.agg.referent is None
     # with the name agreeing it still is
     assert [c["ticker"] for c in _run("Baby PNUT", "BPNUT").copy_of] == ["PNUT"]
+    # a name with no Latin word, or a word that is the coin's theme, does not disagree
+    for name, sym in (
+        ("\U0001f43f\ufe0f", "BPNUT"),
+        ("ピーナッツ", "PNUT2"),
+        ("Squirrel", "PNUT2"),
+    ):
+        out = _run(name, sym)
+        assert [c["ticker"] for c in out.copy_of] == ["PNUT"], name
+        assert out.agg.referent and out.agg.referent.label.startswith("Peanut"), name
 
 
 def test_the_full_ticker_explains_the_name_before_its_base() -> None:
@@ -127,6 +136,11 @@ def test_the_same_word_as_the_head_of_the_name_still_names_the_coin() -> None:
 def test_a_coin_surface_keeps_its_dictionary_sense_in_a_longer_name() -> None:
     assert "animal/other" in dict(_run("Goat Farm", "GOATF").agg.categories)
     assert "animal/cat" in dict(_run("Kitty Litter", "KLIT").agg.categories)
+    # but when the known-coin stage keeps the match, the word is the coin, not a bird
+    hawk = _run("Hawk", "HAWK")
+    assert hawk.agg.referent and hawk.agg.referent.label.startswith("Hawk Tuah")
+    assert "animal/bird" not in dict(hawk.agg.categories)
+    assert "animal/cat" not in dict(_run("Kitty", "KITTY").agg.categories)
 
 
 # ----------------------------------------------------------------- ET-5 / ET-6 / ET-7 / ET-8
@@ -140,11 +154,17 @@ def test_digit_runs_are_not_squeezed() -> None:
 
 
 def test_camel_case_keeps_a_lone_capital() -> None:
-    assert _split_camel("DogeX") == "Doge X"
-    assert _split_camel("XDoge") == "X Doge"
-    assert _split_camel("PepeV2") == "Pepe V 2"
-    assert _split_camel("AIAgentSupercycle") == "AI Agent Supercycle"
-    assert _split_camel("TSLAx") == "TSLAx"
+    assert _split_camel("DogeX", K) == "Doge X"
+    assert _split_camel("XDoge", K) == "X Doge"
+    assert _split_camel("PepeV2", K) == "Pepe V 2"
+    assert _split_camel("AIAgentSupercycle", K) == "AI Agent Supercycle"
+    assert _split_camel("TSLAx", K) == "TSLAx"
+    # a two-letter acronym fused with a word is not a lone capital (review of ET-6)
+    for fused, want in (("AIdoge", "AI doge"), ("GMcoin", "GM coin"), ("OGpepe", "OG pepe")):
+        assert _split_camel(fused, K) == want, fused
+    out = _run("AIdoge", "AIDOGE")
+    assert out.normalized.name_tokens == ["ai", "doge"]
+    assert [c["ticker"] for c in out.copy_of] == ["DOGE"]
     n = normalize("DogeX", "DOGEX", None)
     assert n.name_tokens == ["doge", "x"] and n.name_compact == "dogex"
     assert lineage.match_inputs(n, "Doge", "DOGE") == []
@@ -167,6 +187,12 @@ def test_a_zero_width_joiner_is_zero_width_not_a_homoglyph() -> None:
     assert "obfuscated_text" in flags and "homoglyph_ticker" not in flags
     assert "derivative/homoglyph_spoof" not in dict(out.agg.categories)
     assert normalize("Frog \U0001f438‍\U0001f680", "FROG", None).obfuscation == []
+    # a name that needed invisible characters stripped to equal Pepe is a copy, not Pepe
+    for padded in ("Pe‍pe", "Pe​pe"):
+        out = _run(padded, "PEPE")
+        assert [c["ticker"] for c in out.copy_of] == ["PEPE"], repr(padded)
+        assert "references_known_coin" in {f.code for f in out.flags}
+    assert _run("Pepe", "PEPE").copy_of == []
 
 
 # ----------------------------------------------------------------- ET-9 / EC-1

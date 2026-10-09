@@ -5024,7 +5024,7 @@
             "type": "string"
           },
           "how": {
-            "description": "name: exact|normalized|segment|fuzzy|none; ticker: cashtag|bare|hashtag|fuzzy|none",
+            "description": "name: exact|normalized|segment|fuzzy|none; ticker: cashtag|bare|hashtag|fuzzy|contract|none",
             "title": "How",
             "type": "string"
           },
@@ -6579,13 +6579,6 @@
             "description": "token_not_found (never when hints with metadata were given)"
           },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
             "description": "not_a_token_mint | not_pumpfun"
           },
           "429": {
@@ -6786,13 +6779,6 @@
             "description": "token_not_found (never when hints with metadata were given)"
           },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
             "description": "not_a_token_mint | not_pumpfun"
           },
           "429": {
@@ -6872,14 +6858,7 @@
             "description": "unauthorized"
           },
           "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "validation_error"
+            "description": "validation_error (FastAPI's validation shape, not ErrorResponse)"
           },
           "429": {
             "content": {

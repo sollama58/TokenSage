@@ -184,16 +184,45 @@ def translate_han(s: str, k: Knowledge) -> tuple[str, list[tuple[str, str]]]:
     return _HAN.sub(run, s), glosses
 
 
-def _split_camel(s: str) -> str:
+def _split_camel(s: str, k: Knowledge | None = None) -> str:
     """'AIAgentSupercycle' -> 'AI Agent Supercycle'. Leaves lowercase words alone."""
     out: list[str] = []
     for tok in s.split():
         if any(c.islower() for c in tok) and any(c.isupper() for c in tok[1:]):
             parts = _CAMEL.findall(tok)
+            if k is not None:
+                parts = _prefer_acronym(parts, k)
             out.append(" ".join(parts) if parts else tok)
         else:
             out.append(tok)
     return " ".join(out)
+
+
+def _prefer_acronym(parts: list[str], k: Knowledge) -> list[str]:
+    """The lone-capital split ("XDoge" -> X + Doge) cannot tell itself from a two-letter
+    acronym fused with a word ("AIdoge", "GMcoin"): keep it only when the word after the
+    capital is a word; when the word is only a word once the second capital joins the
+    acronym, split there instead (AI + doge)."""
+    words = segment._vocab(k)
+    out: list[str] = []
+    i = 0
+    while i < len(parts):
+        p = parts[i]
+        if len(p) == 1 and p.isupper() and i + 1 < len(parts):
+            nxt = parts[i + 1]
+            if (
+                len(nxt) >= 3
+                and nxt[0].isupper()
+                and nxt[1:].islower()
+                and nxt.lower() not in words
+                and (nxt[1:].lower() in words or gazetteer.is_common(nxt[1:].lower()))
+            ):
+                out += [p + nxt[0], nxt[1:]]
+                i += 2
+                continue
+        out.append(p)
+        i += 1
+    return out
 
 
 def _squeeze(s: str) -> tuple[str, bool]:
@@ -300,13 +329,13 @@ def normalize(
     translated, cjk_gloss = translate_han(n3, k)
     # the pinyin reading stays available to the ticker step ($MAO for 猫)
     name_pinyin = (
-        _PUNCT_TO_SPACE.sub(" ", _split_camel(_fold(n3)).lower()).split() if cjk_gloss else []
+        _PUNCT_TO_SPACE.sub(" ", _split_camel(_fold(n3), k).lower()).split() if cjk_gloss else []
     )
     n3 = translated
     folded_name = _fold(n3)
     # 5. markers BEFORE stripping punctuation; the camelCase split ("PepeV2" -> "Pepe V 2")
     # can expose a marker the written form hides
-    camel = _split_camel(folded_name)
+    camel = _split_camel(folded_name, k)
     markers = _detect_markers(folded_name, k)
     if camel != folded_name:
         seen_codes = {m.code for m in markers}

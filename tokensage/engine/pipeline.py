@@ -215,11 +215,24 @@ def _normalization_evidence(n: Normalized, k: Knowledge) -> list[Ev]:
 Pass = tuple[str, str, float] | tuple[str, str, float, str, str]
 
 
+def _kept_coin_words(matches: list[known_coins.CopyMatch], n: Normalized) -> set[str]:
+    """Name words the known-coin stage reads as a coin ("hawk" of "Hawk" $HAWK: Hawk Tuah),
+    so the lexicon does not also read them as dictionary words."""
+    out: set[str] = set()
+    for m in matches:
+        if m.surface:
+            out.add(m.surface.lower())
+        coin_words = {w for s in m.coin.surfaces for w in s.lower().split()}
+        out.update(t for t in n.name_tokens if t in coin_words)
+    return out
+
+
 def _lexicon_evidence(
     n: Normalized,
     k: Knowledge,
     extra_passes: list[Pass] | None = None,
     gaz: Gazetteer | None = None,
+    coin_surfaces: frozenset[str] = frozenset(),
 ) -> list[Ev]:
     evs: list[Ev] = []
     name_text = " ".join(n.name_tokens)
@@ -261,9 +274,14 @@ def _lexicon_evidence(
                 continue
             if where == "name" and h.kind != "wordnet" and _tail_of_word(h.surface, written):
                 continue  # "iggy" in "Niggy": a name read out of the end of another word
-            if where == "name" and h.kind not in ("wordnet", "coin"):
-                # a coin surface ("goat", "kitty") emits nothing here and the known-coin
-                # stage ignores it when it is a dictionary word: the dictionary sense stays
+            if where == "name" and (
+                h.kind not in ("wordnet", "coin")
+                or (h.kind == "coin" and h.surface.lower() in coin_surfaces)
+            ):
+                # a coin surface ("goat", "kitty") emits nothing here; when the known-coin
+                # stage keeps the match ("Hawk" $HAWK is Hawk Tuah) the word is named and
+                # its dictionary sense (a bird) is not the coin's; when that stage drops it
+                # ("Goat Farm", a dictionary word as a modifier) the dictionary sense stays
                 named_words.update(h.surface.split())
                 if head and h.kind == "entity" and head in h.surface.replace(" ", ""):
                     head_named = True
@@ -937,13 +955,14 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
                     extra_passes.append(("x", related.text, 0.7))
             extra_passes += _account_passes(xa)
     gaz = inp.ctx.gazetteer if inp.ctx.gazetteer is not None else gazetteer.packaged()
-    evidence += _lexicon_evidence(n, k, extra_passes, gaz)
+    matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
+    coin_words = frozenset(_kept_coin_words(matches, n))
+    evidence += _lexicon_evidence(n, k, extra_passes, gaz, coin_words)
     evidence += _compound_evidence(compound_parts(n, k, gaz), n, k)
     evidence += _domain_evidence(n)
     if depth == "full" and inp.wiki_refs:
         evidence += wikilookup.evidence(inp.wiki_refs)
 
-    matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
     is_famous = any(known_coins.is_self(m, n) for m in matches)
     evidence += known_coins.evidence_for(matches, n, k)
     self_symbols = {m.coin.symbol for m in matches if known_coins.is_self(m, n)}

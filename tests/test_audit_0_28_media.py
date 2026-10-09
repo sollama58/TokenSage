@@ -46,8 +46,9 @@ def test_ocr_skips_degenerate_shapes_without_the_engine(monkeypatch: pytest.Monk
         assert lines == [] and err is not None and "too thin" in err, (size, err)
     assert calls == []  # never reached the recogniser
     assert ocr.read(_png((640, 40))) == ([], None)  # 16:1 is still read
+    assert ocr.read(_png((1024, 32))) == ([], None)  # a wide wordmark (32:1) too
     assert ocr.read(_png((300, 300))) == ([], None)
-    assert calls == [(40, 640, 3), (300, 300, 3)]
+    assert calls == [(40, 640, 3), (20, 640, 3), (300, 300, 3)]
 
 
 @pytest.mark.skipif(not ocr.available(), reason="rapidocr not installed")
@@ -308,4 +309,4 @@ def test_post_with_the_contract_address_matches_the_token() -> None:
     assert "x_content_mismatch" in {f.code for f in out.flags}
     assert not xmatch.contract_in_post(MINT, f"x{MINT}")
     assert not xmatch.contract_in_post(MINT[:20], MINT)
-    assert xmatch.contract_in_post(MINT, f"ca: {MINT.lower()}!")
+    assert not xmatch.contract_in_post(MINT, f"ca: {MINT.lower()}!")  # mints are case-sensitive

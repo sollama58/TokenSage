@@ -170,10 +170,22 @@ class Worker:
                 log.warning("worker.heartbeat_failed", job_id=job.id, error=str(e)[:120])
                 continue
             if not ok:
+                if work.done() or await self._finished(job):
+                    return  # the job wrote its final status; nothing to abandon
                 log.warning("worker.lease_lost", job_id=job.id, kind=job.kind)
                 lost.set()
                 work.cancel()
                 return
+
+    async def _finished(self, job: queue.Job) -> bool:
+        """The renewal missed because the job just finished (its final status is written
+        a moment before the notify and callback release), not because the lease was lost."""
+        try:
+            async with self.pool.acquire() as c:
+                row = await queue.get(c, job.id)
+        except Exception:  # noqa: BLE001
+            return False
+        return row is not None and row.status in ("done", "failed")
 
     async def _release_quietly(self, job: queue.Job) -> None:
         try:

@@ -210,9 +210,13 @@ def test_borsh_string_drops_interior_nul() -> None:
 
 def test_onchain_metadata_is_sanitised_for_every_source() -> None:
     out = resolver._clean_onchain(
-        {"name": "a\udc80b\x00c\n", "symbol": "S" * 100, "uri": "https://a/\x01b"}
+        {"name": "a\udc80b\x00c\n", "symbol": "S" * 100, "uri": "https://a/b\x01"}
     )
     assert out == {"name": "a?bc", "symbol": "S" * 64, "uri": "https://a/b"}
+    # a newline keeps its word boundary, as it does from the metadata JSON
+    assert resolver._clean_onchain({"name": "Pepe\nCoin\t!", "symbol": "", "uri": ""})["name"] == (
+        "Pepe Coin !"
+    )
     assert resolver._clean_onchain(None) is None
 
 

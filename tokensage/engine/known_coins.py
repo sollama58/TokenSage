@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz
@@ -124,7 +125,7 @@ def match_known(
         key = m.coin.symbol + "|" + m.coin.name
         if key in needs_support and not ({"ticker", "ticker_base"} & set(m.signals)):
             continue  # "House Cat" is a cat, not Housecoin, unless the ticker says so too
-        if m.signals == ["ticker_base"]:
+        if m.signals == ["ticker_base"] and not _name_agrees(m.coin, n):
             continue  # an affix-stripped ticker alone ($BPNUT on "Zorp") is a hint, not a copy
         if (
             m.score >= 0.7
@@ -135,6 +136,19 @@ def match_known(
         ):
             strong.append(m)
     return strong[:5]
+
+
+def _name_agrees(c: KnownCoin, n: Normalized) -> bool:
+    """A name that says nothing against the coin the ticker base names: no Latin word at
+    all (an emoji or a CJK name: "\U0001f43f\ufe0f" $BPNUT) or a word that is the coin's own
+    theme ("Squirrel" $PNUT2)."""
+    words = [t for t in n.name_tokens if len(t) >= 3 and t.isalpha() and t.isascii()]
+    if not words or not any(ch.isascii() and ch.isalpha() for ch in n.name_raw):
+        # a romanised CJK name says nothing either
+        return True
+    themes = {cat.rsplit("/", 1)[-1] for cat in c.categories}
+    desc = set(re.findall(r"[a-z]+", (c.referent_desc or "").lower()))
+    return any(w in themes or w in desc for w in words)
 
 
 def is_self(match: CopyMatch, n: Normalized) -> bool:
@@ -148,6 +162,7 @@ def is_self(match: CopyMatch, n: Normalized) -> bool:
         and _compact(n.name_clean) in surfaces
         and not foreign_markers
         and "homoglyph" not in n.obfuscation
+        and "zero_width" not in n.obfuscation  # "Pe<ZWJ>pe" is a copy of Pepe, not Pepe
     )
 
 

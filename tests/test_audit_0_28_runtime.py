@@ -141,6 +141,19 @@ async def test_claim_fails_a_job_whose_worker_died_too_often(
 
 
 @needs_db
+async def test_a_pending_job_at_the_ceiling_is_still_claimed(conn: asyncpg.Connection) -> None:
+    """Review of RT-4: the attempts ceiling applies to expired leases only. A pending job
+    whose own ceiling is higher (callbacks retry 3 times) is not stranded by a lower
+    JOB_MAX_ATTEMPTS; fail() alone decides a pending job's retry budget."""
+    j = await queue.enqueue(conn, "analyze", T22_MINT, "basic")
+    await conn.execute("update job set attempts = 2 where id=$1", j.id)
+    c = await queue.claim(conn, lease_s=60, kinds=["analyze"], max_attempts=2)
+    assert c is not None and c.id == j.id and c.attempts == 3
+    row = await conn.fetchrow("select status from job where id=$1", j.id)
+    assert row and row["status"] == "running"
+
+
+@needs_db
 async def test_requeue_expired_respects_the_attempt_ceiling(conn: asyncpg.Connection) -> None:
     """RT-4: maintenance returns an expired lease to pending only while attempts are left."""
     fresh = await queue.enqueue(conn, "analyze", T22_MINT, "basic")
@@ -423,8 +436,10 @@ def test_openapi_declares_error_bodies() -> None:
     assert "ErrorResponse" in o["components"]["schemas"]
     ref = {"$ref": "#/components/schemas/ErrorResponse"}
     get = o["paths"]["/v1/tokens/{ca}"]["get"]["responses"]
-    for code in ("400", "401", "404", "422", "429", "503"):
+    for code in ("400", "401", "404", "429", "503"):
         assert get[code]["content"]["application/json"]["schema"] == ref, code
+    # 422 is FastAPI's own validation shape, so it is described but not given ErrorResponse
+    assert get["422"]["description"] and "content" not in get["422"]
     batch = o["paths"]["/v1/tokens:batch"]["post"]["responses"]
     assert {"400", "401", "422", "429"} <= set(batch)
     assert batch["400"]["content"]["application/json"]["schema"] == ref

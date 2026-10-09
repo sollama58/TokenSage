@@ -22,7 +22,7 @@ MIN_CONF = 0.6
 # it and resizes the whole strip to 48 px high for the recogniser, tens of thousands of px
 # wide, which takes minutes and gigabytes.
 MIN_SIDE = 16
-MAX_ASPECT = 20
+MAX_ASPECT = 40
 # A second layer for shapes the guard does not catch: the engine runs on its own thread and
 # the read gives up after this many seconds (the engine thread finishes on its own).
 TIME_BUDGET_S = 30.0
