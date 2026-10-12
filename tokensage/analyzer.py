@@ -79,7 +79,7 @@ from tokensage.engine import (
 )
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
-from tokensage.engine.context import ReferentCandidate
+from tokensage.engine.context import Normalized, ReferentCandidate
 from tokensage.engine.knowledge import KnownCoin, load_knowledge
 from tokensage.engine.meta import MetaCounts, MetaWord, TopVolume
 from tokensage.engine.pipeline import (
@@ -281,6 +281,7 @@ async def _db_context(
     name_compact: str,
     meta_words: list[str] | None = None,
     logo: image_stage.ImageFeatures | None = None,
+    normalized: Normalized | None = None,
 ) -> DbContext:
     # The external searches only need the name and ticker: they run while the database
     # queries below do, instead of adding their round trip after them.
@@ -291,7 +292,7 @@ async def _db_context(
     )
     try:
         return await _db_context_queries(
-            conn, ctx, r, x, ticker, name_compact, meta_words, logo, ext_task
+            conn, ctx, r, x, ticker, name_compact, meta_words, logo, ext_task, normalized
         )
     finally:
         if ext_task is not None and not ext_task.done():
@@ -308,6 +309,7 @@ async def _db_context_queries(
     meta_words: list[str] | None,
     logo: image_stage.ImageFeatures | None,
     ext_task: asyncio.Task[list[SameNameToken]] | None,
+    normalized: Normalized | None = None,
 ) -> DbContext:
     dbc = DbContext()
     if x is not None:
@@ -494,6 +496,11 @@ async def _db_context_queries(
                 if (ticker and t.symbol.upper() == ticker.upper())
                 or (name_compact and _compact(t.name) == name_compact)
             ],
+            agrees=(
+                (lambda nm: lineage_stage.name_agrees(normalized, nm, load_knowledge()))
+                if normalized is not None
+                else None
+            ),
         ),
     )
     return dbc
@@ -1090,6 +1097,7 @@ def _lineage_out(lin: lineage_stage.Lineage | None) -> Lineage | None:
         siblings_24h=lin.siblings_24h,
         logo_reuse_24h=lin.logo_reuse_24h,
         logo_first_seen_at=lin.logo_first_seen_at,
+        same_ticker=lin.same_ticker,
     )
 
 
@@ -1521,6 +1529,7 @@ async def analyze(
         n0.name_compact,
         meta.candidate_words(n0, load_knowledge()),
         logo=logo_feats,
+        normalized=n0,
     )
     inp = EngineInput(
         mint=r.mint,

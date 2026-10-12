@@ -321,8 +321,10 @@ async def test_referent_and_category_waves_count_recent_reads(
 
 def test_a_namesake_from_two_minutes_earlier_is_a_sibling_not_the_original() -> None:
     out = _run("Blorbo", "BLORBO", DbContext(same_name=_names([2 / 60])))
-    assert out.lineage is not None and out.lineage.kind == "original"
+    assert out.lineage is not None and out.lineage.original is None
     assert out.lineage.siblings_1h == 2
+    # since rules 0.30.0 the 2nd of 2 is not "original" either: its kind follows the rank
+    assert out.lineage.kind == "early_copy" and out.lineage.rank == 2
 
 
 def test_a_copy_of_a_top_volume_coin_names_it_as_the_original() -> None:

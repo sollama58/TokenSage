@@ -341,7 +341,9 @@ class Lineage(_Model):
         "window. early_copy: rank <= 3 and the original launched less than 6 h earlier. "
         "late_copy: rank > 10, or the original launched more than 24 h earlier. copy: any "
         "other copy. reference: builds on an established coin (copy_of recent false). "
-        "unknown: no launch time"
+        "unknown: no launch time. Since rules 0.30.0 the original must share the name (or a "
+        "near-identical one) or the logo, never the ticker alone; a coin with no original "
+        "but rank > 1 is never original: its kind follows the rank alone (of_* null)"
     )
     of_mint: str | None = None
     of_name: str | None = None
@@ -372,6 +374,13 @@ class Lineage(_Model):
         default=None,
         description="Launch time of the first coin TokenSage saw with this logo (any "
         "near-duplicate), within the logo scan window (7 d)",
+    )
+    same_ticker: int | None = Field(
+        default=None,
+        description="Since rules 0.30.0: earlier coins in the copycat window that share only "
+        "the ticker (another name, another logo): ticker collisions, counted in siblings and "
+        "rank but never the original (flag ticker_collision). null when there is no launch "
+        "time",
     )
 
 

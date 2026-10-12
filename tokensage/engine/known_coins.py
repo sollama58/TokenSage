@@ -19,6 +19,9 @@ class CopyMatch:
     score: float = 0.0  # 0..1
     via_template_surface: bool = False
     surface: str | None = None  # the name surface that matched, if any
+    # matched by the ticker alone while the name says something else ("Pit Fighting" $PIT
+    # and Pitbull): a ticker collision, kept as a weak reference with nothing inherited
+    ticker_only: bool = False
 
 
 def _compact(s: str) -> str:
@@ -135,7 +138,30 @@ def match_known(
             or (has_marker and "name_contains" in m.signals)
         ):
             strong.append(m)
+    for m in strong:
+        if set(m.signals) <= {"ticker", "ticker_base"} and _collides(m.coin, n):
+            m.ticker_only = True
     return strong[:5]
+
+
+def _collides(c: KnownCoin, n: Normalized) -> bool:
+    """A ticker-only match whose name says something else: the name has content words (not
+    filler such as "coin" or "the") and none of them is a word of the coin's name, aliases,
+    referent, description or themes ("Social Intelligence" $SI against Super Inu). An emoji,
+    CJK or filler-only name says nothing against it."""
+    words = {
+        t
+        for t in [*n.name_tokens, *re.findall(r"[a-z]+", n.name_clean)]
+        if len(t) >= 3 and t.isalpha() and t.isascii() and t not in HEAD_STOP
+    }
+    if not words or not any(ch.isascii() and ch.isalpha() for ch in n.name_raw):
+        return False  # a romanised CJK name says nothing either
+    vocab: set[str] = set()
+    for text in (c.name, c.referent_label, c.referent_desc or "", *c.surfaces):
+        vocab |= set(re.findall(r"[a-z]+", text.lower()))
+    vocab |= {cat.rsplit("/", 1)[-1] for cat in c.categories}
+    vocab -= HEAD_STOP
+    return not (words & vocab)
 
 
 def _name_agrees(c: KnownCoin, n: Normalized) -> bool:
@@ -171,6 +197,21 @@ def evidence_for(matches: list[CopyMatch], n: Normalized, k: Knowledge) -> list[
     for m in matches:
         c = m.coin
         self_coin = is_self(m, n)
+        if m.ticker_only and not self_coin:
+            # since rules 0.30.0: a ticker collision is a weak reference; the coin's referent
+            # and categories are not this one's
+            evs.append(
+                Ev(
+                    kind="known_coin",
+                    label="derivative/reference",
+                    weight=min(k.scoring.get("known_coin_ticker_only_weight", 0.3), m.score),
+                    detail=f"shares the ticker ${c.symbol} with {c.name} but not its name: a "
+                    "ticker collision, nothing inherited",
+                    source=f"known_coins:{c.symbol}",
+                    where="symbol",
+                )
+            )
+            continue
         derivative_markers = [mk for mk in n.markers if mk.kind]
         # an established coin's name/ticker is a reference; "copycat" is kept for copies
         # of coins launched recently (see pipeline._same_name_evidence)

@@ -665,10 +665,13 @@ def _within_window(inp: EngineInput, other: datetime | None) -> float | None:
 
 
 def _same_name_evidence(
-    inp: EngineInput, n: Normalized, is_famous: bool
+    inp: EngineInput, n: Normalized, is_famous: bool, k: Knowledge
 ) -> tuple[list[Ev], list[dict], list[RecentCopy]]:
     """Earlier tokens with this name or ticker. Only those launched within the copycat
-    window count: a namesake from months ago is not the live coin this one copies."""
+    window count: a namesake from months ago is not the live coin this one copies. Since
+    rules 0.30.0 only a namesake whose name agrees (lineage.name_agrees) is a copy; one that
+    shares only the ticker is a ticker collision: a weak `same_ticker` fact (no category, no
+    copy_of entry, nothing inherited)."""
     evs: list[Ev] = []
     copies: list[dict] = []
     recent: list[RecentCopy] = []
@@ -682,16 +685,36 @@ def _same_name_evidence(
     if not in_window:
         return evs, copies, recent
     in_window.sort(key=lambda tg: -tg[1])  # earliest launch first
-    first, gap = in_window[0]
     days = inp.ctx.copycat_window_days
+    named = [(t, g) for t, g in in_window if lineage_stage.name_agrees(n, t.name, k)]
+    if not named:
+        if not is_famous:
+            first, gap = in_window[0]
+            evs.append(
+                Ev(
+                    kind="same_ticker",
+                    label=meta.CORPUS_LABEL,
+                    weight=float(lineage_stage.config(k).get("same_ticker_weight", 0.3)),
+                    detail=(
+                        f"{len(in_window)} token(s) with this ticker but another name launched "
+                        f"in the {days} d before it; the earliest (${first.symbol or '?'} "
+                        f"'{first.name or '?'}', {first.source}) {_dur(gap)} earlier: a "
+                        "ticker collision, not a copy"
+                    ),
+                    source=f"same_ticker:{first.source}",
+                    where="db",
+                )
+            )
+        return evs, copies, recent
+    first, gap = named[0]
     if not is_famous:
         evs.append(
             Ev(
                 kind="same_name",
                 label="derivative/copycat",
-                weight=min(0.75, 0.45 + 0.05 * len(in_window)),
+                weight=min(0.75, 0.45 + 0.05 * len(named)),
                 detail=(
-                    f"{len(in_window)} token(s) with this name/ticker launched in the {days} d "
+                    f"{len(named)} token(s) with this name launched in the {days} d "
                     f"before it; the earliest (${first.symbol or '?'}, {first.source}) "
                     f"{_dur(gap)} earlier"
                 ),
@@ -705,7 +728,7 @@ def _same_name_evidence(
             "ticker": first.symbol,
             "name": first.name,
             "mint": first.mint,
-            "signals": ["same_name_recent", f"recent_count:{len(in_window)}"],
+            "signals": ["same_name_recent", f"recent_count:{len(named)}"],
             "created_at": first.created_at,
             "recent": True,
         }
@@ -818,7 +841,7 @@ def _flags(
                 f"earlier (within {days} d)",
             )
         )
-    established = [m for m in known or [] if not known_coins.is_self(m, n)]
+    established = [m for m in known or [] if not known_coins.is_self(m, n) and not m.ticker_only]
     if established and not is_famous:
         top = established[0].coin
         flags.append(
@@ -1028,7 +1051,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     if pair is not None:
         evidence += pair.evidence
 
-    same_evs, copies, recent_names = _same_name_evidence(inp, n, is_famous)
+    same_evs, copies, recent_names = _same_name_evidence(inp, n, is_famous, k)
     evidence += same_evs
     recent_copies = (recent_names + recent_copies) if not is_famous else []
     for m in matches:
@@ -1145,12 +1168,12 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         window_days=inp.ctx.copycat_window_days,
         rank=(mt.rank.rank, mt.rank.of, mt.rank.window_hours) if mt.rank else None,
         self_coins=_self_coins(matches, n, inp.ctx.extra_coins),
-        references=[m.coin for m in matches if not known_coins.is_self(m, n)],
+        references=[m.coin for m in matches if not known_coins.is_self(m, n) and not m.ticker_only],
         has_logo=img.features is not None,
         top=inp.ctx.top_volume,
     )
     if not is_famous:
-        _enrich_copies(copies, lin, n, inp, logo_near)
+        _enrich_copies(copies, lin, n, inp, logo_near, k)
 
     evidence = _news_needs_a_date(evidence, k, inp.created_at)
     symbol_is_name = _symbol_is_name(n)
@@ -1181,6 +1204,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     referent_read = read_referent(agg, symbol_is_name, k)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     flags += _lineage_flags(lin, k)
+    if not is_famous:
+        flags += _ticker_collision_flag(lin, n, [m.coin for m in matches if m.ticker_only])
     if pair is not None and pair.meaningful:
         flags.append(
             FlagOut(
@@ -1300,6 +1325,7 @@ def _enrich_copies(
     n: Normalized,
     inp: EngineInput,
     logo_near: list[image_stage.NearDup],
+    k: Knowledge,
 ) -> None:
     """Each recent copy relation carries its lineage facts (age of the original, which inputs
     match, logo distance); a coin copied by logo alone gets its own copy_of entry."""
@@ -1313,7 +1339,7 @@ def _enrich_copies(
         when = c.get("created_at")
         if when is not None and inp.created_at is not None:
             c["original_age_s"] = int((_aware(inp.created_at) - _aware(when)).total_seconds())
-        c["match"] = lineage_stage.match_inputs(n, c.get("name"), c.get("ticker"))
+        c["match"] = lineage_stage.match_inputs(n, c.get("name"), c.get("ticker"), k)
         if c["mint"] in dist:
             c["match"].append("image")
             c["image_distance"] = dist[c["mint"]]
@@ -1350,6 +1376,16 @@ def _lineage_flags(lin: lineage_stage.Lineage, k: Knowledge) -> list[FlagOut]:
                 f"a late copy of {what}: {rank}launched {_dur(o.age_s or 0)} after it",
             )
         )
+    elif lin.kind == "late_copy" and lin.rank is not None:
+        # no original (siblings within 5 min, or ticker collisions), but late by its rank
+        out.append(
+            FlagOut(
+                "late_copy",
+                "warn",
+                f"a late launch: #{lin.rank} of {lin.rank_of} coins with its name or ticker "
+                f"within {lin.window_hours} h",
+            )
+        )
     floor = int(lineage_stage.config(k).get("logo_reused_min", 3))
     if lin.logo_reuse_24h is not None and lin.logo_reuse_24h >= floor:
         out.append(
@@ -1361,6 +1397,33 @@ def _lineage_flags(lin: lineage_stage.Lineage, k: Knowledge) -> list[FlagOut]:
             )
         )
     return out
+
+
+def _ticker_collision_flag(
+    lin: lineage_stage.Lineage, n: Normalized, coins: list[KnownCoin]
+) -> list[FlagOut]:
+    """Since rules 0.30.0: the ticker is shared with earlier coins (or an established one)
+    of another name and logo. Counted, never the original, nothing inherited."""
+    parts: list[str] = []
+    first = lin.same_ticker_first
+    if lin.same_ticker and first is not None:
+        parts.append(
+            f"{lin.same_ticker} earlier coin(s) of another name (the earliest "
+            f"'{first.name or '?'}', {_dur(first.age_s or 0)} earlier)"
+        )
+    if coins:
+        parts.append(f"the established coin {coins[0].name}")
+    if not parts:
+        return []
+    tick = f"${n.ticker}" if n.ticker else "its ticker"
+    return [
+        FlagOut(
+            "ticker_collision",
+            "info",
+            f"{tick} is also the ticker of {' and '.join(parts)}: a ticker collision, not "
+            "counted as a copy",
+        )
+    ]
 
 
 def _inherit(
