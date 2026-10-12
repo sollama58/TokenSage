@@ -4,8 +4,11 @@ Pure: the same-name tokens and the logo near-duplicates come in from the databas
 (pipeline.DbContext), so golden tests run it without a database.
 
 - The original is the earliest coin, launched within the copycat window before this one,
-  with the same name or ticker (same_name) or a near-identical logo (logo near-duplicates).
-  A coin sharing both wins over one sharing only one of them.
+  whose name agrees with this one's (name_agrees) or whose logo is a near-duplicate (logo
+  near-duplicates). A coin sharing name or ticker and logo wins over one sharing only one.
+  Since rules 0.30.0 a shared ticker alone is a collision, not a copy ("Pit Fighting" $PIT
+  is not a copy of "The Pit" $PIT): it is counted (same_ticker, siblings, rank) but never
+  becomes the original, so nothing is inherited from it.
 - rank / rank_of are the existing same-name copy rank (meta.copy_rank, either side of the
   launch). A logo-only copy is ranked among the earlier coins with a near-identical logo.
 - siblings_*h count the coins with the same name, ticker or a near-identical logo launched
@@ -14,19 +17,26 @@ Pure: the same-name tokens and the logo near-duplicates come in from the databas
 - Kinds (thresholds in data/meta.yaml, `lineage`): early_copy = rank <= 3 and the original
   launched less than 6 h earlier; late_copy = rank > 10 or the original launched more than
   24 h earlier; copy = any other copy; reference = builds on an established coin only;
-  original = none of the above; unknown = no launch time.
+  original = none of the above; unknown = no launch time. Since rules 0.30.0 a coin with no
+  original but with earlier coins of its name or ticker in the rank window (rank > 1: a
+  namesake launched within 5 min, or a ticker collision) is never "original": its kind
+  follows the rank alone.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from rapidfuzz import fuzz
+
+from tokensage.engine import segment
 from tokensage.engine.context import Normalized
 from tokensage.engine.image import NearDup
-from tokensage.engine.knowledge import Knowledge, KnownCoin
+from tokensage.engine.knowledge import Knowledge, KnownCoin, load_knowledge
 from tokensage.engine.normalize import clean_ticker
 
 
@@ -62,6 +72,10 @@ class Lineage:
     logo_reuse_24h: int | None = None
     logo_first_seen_at: datetime | None = None
     reference: KnownCoin | None = None  # the established coin, for kind "reference"
+    # earlier coins in the window that share only the ticker (another name, another logo):
+    # a ticker collision, counted in siblings and rank but never the original
+    same_ticker: int | None = None
+    same_ticker_first: Original | None = None  # the earliest of them
 
 
 MIN_GAP_S = 300
@@ -83,13 +97,81 @@ def _gap(me: datetime, other: datetime | None) -> float | None:
     return None if other is None else (me - _aware(other)).total_seconds()
 
 
-def match_inputs(n: Normalized, name: str | None, symbol: str | None) -> list[str]:
+def _words(s: str | None) -> list[str]:
+    return re.findall(r"[^\W_]+", (s or "").casefold())
+
+
+def _core(words: Sequence[str], filler: set[str]) -> str:
+    """The name without its filler words ("coin", "the", "official"), compacted."""
+    kept = [w for w in words if w not in filler]
+    return "".join(kept or words)
+
+
+def _distinct_ticker(n: Normalized, k: Knowledge) -> bool:
+    """The ticker is specific enough that sharing it means sharing the idea: at least
+    name_word_min_len letters and not an everyday English word."""
+    sym = (n.ticker_base or n.ticker or "").lower()
+    min_len = int(config(k).get("name_word_min_len", 4))
+    return len(sym) >= min_len and sym.isalpha() and sym not in segment.common_words(k)
+
+
+def name_agrees(n: Normalized, name: str | None, k: Knowledge) -> bool:
+    """Does another coin's name agree with this one's? The same compact name; the same name
+    once filler words are dropped ("Animal" / "Animal Coin"); a close spelling (rapidfuzz
+    ratio >= name_fuzzy_min, both at least name_fuzzy_min_len long); or a shared distinctive
+    word, one that is not an everyday English word and has at least name_word_min_len
+    letters ("Blorbo Frog" / "Blorbo"). Words are taken as written: a fused name ("DogeX")
+    is not the word inside it ("Doge"). A shared ticker is not enough: "Social
+    Intelligence" $SI is not "Super Inu" $SI."""
+    if not name or not name.strip():
+        return False
+    theirs = _compact(name)
+    if n.name_compact and theirs == n.name_compact:
+        return True
+    if not theirs or not n.name_compact:
+        # an emoji or symbol name: only the same text agrees
+        return name.strip().casefold() == n.name_raw.strip().casefold()
+    cfg = config(k)
+    filler = {str(w).lower() for w in cfg.get("name_filler_words") or []}
+    their_words = _words(name)
+    my_words = _words(n.name_raw)
+    a, b = _core(my_words, filler), _core(their_words, filler)
+    if a and a == b:
+        return True
+    long_enough = min(len(a), len(b)) >= int(cfg.get("name_fuzzy_min_len", 6))
+    if long_enough and fuzz.ratio(a, b) >= float(cfg.get("name_fuzzy_min", 85)):
+        return True
+    min_len = int(cfg.get("name_word_min_len", 4))
+    everyday = segment.common_words(k)
+    shared = set(my_words) & set(their_words)
+    return any(
+        len(w) >= min_len and w.isalpha() and w not in filler and w not in everyday for w in shared
+    )
+
+
+def match_inputs(
+    n: Normalized, name: str | None, symbol: str | None, k: Knowledge | None = None
+) -> list[str]:
+    """Which of this coin's inputs match another coin: "name" when the names agree
+    (name_agrees), "ticker" when the tickers are the same."""
     out: list[str] = []
-    if n.name_compact and _compact(name) == n.name_compact:
+    if name_agrees(n, name, k or load_knowledge()):
         out.append("name")
     if n.ticker and clean_ticker(symbol or "").upper() == n.ticker.upper():
         out.append("ticker")
     return out
+
+
+def _kind(rank: int | None, age: float | None, cfg: dict[str, Any]) -> str:
+    early_rank = int(cfg.get("early_max_rank", 3))
+    early_age = float(cfg.get("early_max_original_age_h", 6)) * 3600
+    late_rank = int(cfg.get("late_min_rank", 11))
+    late_age = float(cfg.get("late_min_original_age_h", 24)) * 3600
+    if (rank is not None and rank >= late_rank) or (age is not None and age > late_age):
+        return "late_copy"
+    if (rank is None or rank <= early_rank) and (age is None or age < early_age):
+        return "early_copy"
+    return "copy"
 
 
 def assess(
@@ -111,17 +193,17 @@ def assess(
     coins this token is by name and ticker (known_coins.is_self). references: the
     established coins it builds on. has_logo: its logo was hashed (logo counts apply)."""
     cfg = config(k)
-    early_rank = int(cfg.get("early_max_rank", 3))
-    early_age = float(cfg.get("early_max_original_age_h", 6)) * 3600
-    late_rank = int(cfg.get("late_min_rank", 11))
-    late_age = float(cfg.get("late_min_original_age_h", 24)) * 3600
 
     if created_at is None:
         ref = self_coins[0] if self_coins else (references[0] if references else None)
         return Lineage(kind="reference" if ref else "unknown", reference=ref)
     me = _aware(created_at)
     window = window_days * 86400
-    top_match = next((t for t in top if t.mint != mint and match_inputs(n, t.name, t.symbol)), None)
+    # a top coin is an original only when its name agrees, not by its ticker alone
+    top_match = next(
+        (t for t in top if t.mint != mint and "name" in match_inputs(n, t.name, t.symbol, k)),
+        None,
+    )
 
     # every coin sharing a name/ticker or logo, launched before this one (and the gap)
     names: dict[str, tuple[_Launch, float]] = {}
@@ -129,6 +211,7 @@ def assess(
         g = _gap(me, t.created_at)
         if t.mint != mint and g is not None and 0 <= g <= window:
             names.setdefault(t.mint, (t, g))
+    agreeing = {m for m, (t, _) in names.items() if name_agrees(n, t.name, k)}
     logos: dict[str, tuple[NearDup, float]] = {}
     first_logo: datetime | None = me if has_logo else None
     for nd in logo_near:
@@ -150,14 +233,6 @@ def assess(
         sib |= {m for m, (_, g) in logos.items() if g <= hours * 3600}
         setattr(out, f"siblings_{hours}h", len(sib) + 1)
 
-    if self_coins:
-        # a launch with a famous coin's exact name and ticker is that coin only when the
-        # mint agrees (or no mint is known for it); otherwise it is a clone of it
-        known = [c for c in self_coins if c.mint]
-        if known and not any(c.mint == mint for c in known):
-            out.kind, out.reference = "reference", known[0]
-        return out
-
     def original(mint_: str) -> Original:
         t = names.get(mint_)
         nd = logos.get(mint_)
@@ -171,19 +246,37 @@ def assess(
             ticker=src_sym,
             created_at=when,
             age_s=int(gap) if gap is not None else None,
-            match=match_inputs(n, src_name, src_sym),
+            match=match_inputs(n, src_name, src_sym, k),
         )
         if nd:
             o.match.append("image")
             o.image_distance = nd[0].distance
         return o
 
+    # the ticker collisions: earlier coins sharing the ticker but neither name nor logo
+    collisions = sorted(
+        (g, m) for m, (_, g) in names.items() if m not in agreeing and m not in logos and g > 0
+    )
+    out.same_ticker = len(collisions)
+    if collisions:
+        out.same_ticker_first = original(collisions[-1][1])
+
+    if self_coins:
+        # a launch with a famous coin's exact name and ticker is that coin only when the
+        # mint agrees (or no mint is known for it); otherwise it is a clone of it
+        known = [c for c in self_coins if c.mint]
+        if known and not any(c.mint == mint for c in known):
+            out.kind, out.reference = "reference", known[0]
+        return out
+
     # strictly earlier than this coin: a same-second launch is a sibling, not a source
     # launched more than 5 min earlier (as the copycat rule): a near-simultaneous launch is
-    # a sibling on the same idea, not its source
-    earlier_names = sorted((g, m) for m, (_, g) in names.items() if g > MIN_GAP_S)
+    # a sibling on the same idea, not its source. A namesake is a source only when its
+    # name agrees (or its logo, then it is in `both`): never by the ticker alone.
+    earlier_all = sorted((g, m) for m, (_, g) in names.items() if g > MIN_GAP_S)
+    earlier_names = [(g, m) for g, m in earlier_all if m in agreeing]
     earlier_logos = sorted((g, m) for m, (_, g) in logos.items() if g > MIN_GAP_S)
-    both = sorted((g, m) for g, m in earlier_names if m in logos)
+    both = [(g, m) for g, m in earlier_all if m in logos]
     chosen: str | None = None
     if both:
         chosen = both[-1][1]
@@ -194,20 +287,30 @@ def assess(
     if earlier_logos and earlier_logos[-1][1] != chosen:
         out.logo_original = original(earlier_logos[-1][1])
     if chosen is None and top_match is not None and top_match.mint != mint:
-        # no earlier namesake in our corpus, but it shares its name or ticker with one of
-        # today's most-traded coins: a copy of a running coin of unknown age
+        # no earlier namesake in our corpus, but it shares its name with one of today's
+        # most-traded coins: a copy of a running coin of unknown age
         out.original = Original(
             mint=top_match.mint,
             name=top_match.name or None,
             ticker=top_match.symbol or None,
             created_at=None,
             age_s=None,
-            match=match_inputs(n, top_match.name, top_match.symbol),
+            match=match_inputs(n, top_match.name, top_match.symbol, k),
         )
         out.kind = "copy"
         return out
     if chosen is None:
-        if references:
+        namesake_earlier = any(
+            g > 0 and (m in agreeing or m in logos) for m, (_, g) in names.items()
+        )
+        if rank is not None and rank[0] > 1 and (namesake_earlier or _distinct_ticker(n, k)):
+            # earlier namesakes (name or logo agreeing, e.g. within 5 min) or coins sharing a
+            # distinctive ticker ($NEPENTHES) within the rank window: the 13th of 15 is not
+            # an original. A shared everyday-word ticker ($CHERRY, $LUNA) alone does not
+            # make a coin a copy of anything.
+            out.rank, out.rank_of, out.window_hours = rank
+            out.kind = _kind(rank[0], None, cfg)
+        elif references:
             out.kind, out.reference = "reference", references[0]
         return out
 
@@ -219,13 +322,7 @@ def assess(
         # a logo-only copy: its place among the earlier same-logo coins of the last day
         before = sum(1 for g, _ in earlier_logos if g <= 86400)
         out.rank, out.rank_of, out.window_hours = before + 1, before + 1, 24
-    age = o.age_s or 0
-    if (out.rank is not None and out.rank >= late_rank) or age > late_age:
-        out.kind = "late_copy"
-    elif (out.rank is None or out.rank <= early_rank) and age < early_age:
-        out.kind = "early_copy"
-    else:
-        out.kind = "copy"
+    out.kind = _kind(out.rank, o.age_s or 0, cfg)
     return out
 
 
@@ -237,11 +334,15 @@ def candidate_mints(
     window_days: int,
     per_kind: int = 5,
     top_mints: Sequence[str] = (),
+    agrees: Callable[[str | None], bool] | None = None,
 ) -> list[str]:
     """The coins assess() may pick as this one's original: the earliest namesakes, the
     earliest same-logo coins and the earliest coin sharing both, launched within the window
     before it, plus top-volume coins sharing its name or ticker. The analyzer loads their
-    stored reads for pipeline._inherit."""
+    stored reads for pipeline._inherit (assess() still decides which, if any, is the
+    original: a ticker-only namesake never is). agrees(name): whether a namesake's name
+    agrees with this coin's (name_agrees); when given, only those fill the namesake slots,
+    so hundreds of ticker collisions do not crowd the real original out."""
     out: list[str] = [m for m in top_mints if m != mint]
     if created_at is None:
         return out
@@ -261,6 +362,9 @@ def candidate_mints(
     logos = earlier(list(logo_mints))
     logo_set = {m for _, m in logos}
     both = [x for x in names if x[1] in logo_set][:1]
+    if agrees is not None:
+        ok = {t.mint for t in same_name if agrees(t.name)}
+        names = [x for x in names if x[1] in ok]
     for lst in (both, names[:per_kind], logos[:per_kind]):
         for _, m in lst:
             if m not in out:

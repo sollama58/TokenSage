@@ -186,7 +186,7 @@ flags:
     description: The "twitter" field is a search or hashtag link, not an account.
   - code: copycat
     severity: warn
-    description: Copies the name, ticker or logo of a coin launched in the 30 days before it.
+    description: Copies the name or logo of a coin launched in the 30 days before it (since rules 0.30.0 a shared ticker alone is a ticker_collision, not a copy).
   - code: serial_creator
     severity: info
     description: The creator wallet has launched many coins.
@@ -204,7 +204,10 @@ flags:
     description: Three or more other coins used a near-identical logo in the 24 h before it.
   - code: earlier_same_name
     severity: warn
-    description: Another token with the same name or ticker launched in the 30 days before this one.
+    description: Another token with the same name (or a near-identical one) launched in the 30 days before this one.
+  - code: ticker_collision
+    severity: info
+    description: Earlier coins (or an established coin) share this coin's ticker but not its name or logo; counted in lineage.same_ticker, siblings and rank, never taken as the coin it copies (since rules 0.30.0).
   - code: regional_script
     severity: info
     description: Name is written in a non-Latin script (regional / language meta).

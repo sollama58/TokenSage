@@ -57,6 +57,9 @@ scoring:
   min_category_confidence: 0.2
   known_coin_exact_weight: 0.9
   known_coin_fuzzy_weight: 0.7
+  # since rules 0.30.0: an established coin matched by the ticker alone while the name says
+  # something else is a ticker collision: a weak reference, no referent, nothing inherited
+  known_coin_ticker_only_weight: 0.3
   fuzzy_threshold: 86
   logo_phash_same: 8
   logo_phash_edited: 14

@@ -55,3 +55,13 @@ lineage:
   logo_scan_days: 7               # logo near-duplicates are searched this far back
   logo_reused_min: 3              # flag logo_reused at this many other coins in 24 h
   inherit_factor: 0.8             # a copy with no theme of its own inherits the original's
+  # Since rules 0.30.0 a namesake is a copy (copy_of, the lineage original, inheritance) only
+  # when its name agrees or its logo is a near-duplicate (pHash distance <= scoring
+  # logo_phash_edited). A shared ticker alone is a collision: counted (siblings, rank,
+  # lineage.same_ticker), never the original, nothing inherited.
+  name_fuzzy_min: 85              # rapidfuzz ratio of the two names, filler words dropped ...
+  name_fuzzy_min_len: 6           # ... both at least this long ("DogeX" is not "Doge")
+  name_word_min_len: 4            # a shared word agrees at this length, if not an everyday word
+  name_filler_words: [coin, token, the, official, real, on, sol, solana, of, a, an, inu,
+                      pump, fun, meme, cto, ca]
+  same_ticker_weight: 0.3         # weight of the same_ticker fact (launch_meta: no category)
