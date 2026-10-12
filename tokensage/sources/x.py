@@ -19,6 +19,7 @@ import structlog
 
 from tokensage.engine.xref import syndication_token
 from tokensage.net.breaker import breaker
+from tokensage.resolve.metadata import clean_url
 
 log = structlog.get_logger("x")
 
@@ -50,6 +51,14 @@ class TweetData:
     replies: int | None = None
     reposts: int | None = None
     views: int | None = None
+    quotes: int | None = None
+    bookmarks: int | None = None
+    # the post's media in order, each {"type": photo|video|gif|unknown, "url",
+    # "thumbnail_url"} (https only; at most MAX_MEDIA). media_urls above is what is compared
+    # with the logo
+    media: list[dict[str, str | None]] = field(default_factory=list)
+    # when this copy (and so its engagement counts) was fetched; set by the cache layer
+    fetched_at: datetime | None = None
     community: dict[str, Any] | None = None
     possibly_sensitive: bool | None = None
     # The tweet this one quotes, when the source returns it inline (one level only).
@@ -63,7 +72,7 @@ class TweetData:
 
     def to_json(self) -> dict[str, Any]:
         d = {k: v for k, v in self.__dict__.items() if k not in ("raw", "quoted", "replied_to")}
-        for k in ("created_at", "author_joined"):
+        for k in ("created_at", "author_joined", "fetched_at"):
             if d.get(k) is not None:
                 d[k] = d[k].isoformat()
         if self.quoted is not None:
@@ -75,9 +84,12 @@ class TweetData:
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> TweetData:
         d = dict(d)
-        for k in ("created_at", "author_joined"):
+        for k in ("created_at", "author_joined", "fetched_at"):
             if d.get(k):
-                d[k] = _utc(datetime.fromisoformat(d[k]))
+                try:
+                    d[k] = _utc(datetime.fromisoformat(d[k]))
+                except (TypeError, ValueError):
+                    d[k] = None
         q = d.get("quoted")
         d["quoted"] = cls.from_json(q) if isinstance(q, dict) else None
         rt = d.get("replied_to")
@@ -242,6 +254,79 @@ def _synd_media(j: dict[str, Any]) -> list[str]:
     return _uniq([_https(m.get("media_url_https")) for m in j.get("mediaDetails") or []])
 
 
+_MEDIA_TYPES = {
+    "photo": "photo",
+    "image": "photo",
+    "video": "video",
+    "gif": "gif",
+    "animated_gif": "gif",
+}
+
+
+def _media_item(kind: Any, url: Any, thumb: Any) -> dict[str, str | None] | None:
+    """One media entry: its type and https URLs only (through the metadata URL sanitiser);
+    None when the item has no usable URL."""
+    t = _MEDIA_TYPES.get(str(kind or "").lower(), "unknown")
+    u = clean_url(url) if isinstance(url, str) else None
+    th = clean_url(thumb) if isinstance(thumb, str) else None
+    if t == "photo":
+        u, th = u or th, None
+    if not (u or th):
+        return None
+    return {"type": t, "url": u, "thumbnail_url": th}
+
+
+def _media_list(items: list[dict[str, str | None] | None]) -> list[dict[str, str | None]]:
+    out: list[dict[str, str | None]] = []
+    seen: set[str | None] = set()
+    for it in items:
+        if it is None or (it["url"] or it["thumbnail_url"]) in seen:
+            continue
+        seen.add(it["url"] or it["thumbnail_url"])
+        out.append(it)
+    return out[:MAX_MEDIA]
+
+
+def _dicts(v: Any) -> list[dict[str, Any]]:
+    return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+
+def _fx_media_items(st: dict[str, Any]) -> list[dict[str, str | None]]:
+    media: dict[str, Any] = st["media"] if isinstance(st.get("media"), dict) else {}
+    every = _dicts(media.get("all"))
+    if every:
+        items = [_media_item(m.get("type"), m.get("url"), m.get("thumbnail_url")) for m in every]
+    else:
+        items = [_media_item("photo", p.get("url"), None) for p in _dicts(media.get("photos"))]
+        items += [
+            _media_item(v.get("type") or "video", v.get("url"), v.get("thumbnail_url"))
+            for v in _dicts(media.get("videos"))
+        ]
+    return _media_list(items)
+
+
+def _vx_media_items(j: dict[str, Any]) -> list[dict[str, str | None]]:
+    return _media_list(
+        [
+            _media_item(m.get("type"), m.get("url"), m.get("thumbnail_url"))
+            for m in _dicts(j.get("media_extended"))
+        ]
+    )
+
+
+def _synd_media_items(j: dict[str, Any]) -> list[dict[str, str | None]]:
+    items: list[dict[str, str | None] | None] = []
+    for m in _dicts(j.get("mediaDetails")):
+        info: dict[str, Any] = m["video_info"] if isinstance(m.get("video_info"), dict) else {}
+        mp4 = [v for v in _dicts(info.get("variants")) if v.get("content_type") == "video/mp4"]
+        video = max(mp4, key=lambda v: _int(v.get("bitrate")) or 0).get("url") if mp4 else None
+        if m.get("type") == "photo":
+            items.append(_media_item("photo", m.get("media_url_https"), None))
+        else:
+            items.append(_media_item(m.get("type"), video, m.get("media_url_https")))
+    return _media_list(items)
+
+
 async def _get(
     http: httpx.AsyncClient, source: str, url: str, **kw: Any
 ) -> tuple[httpx.Response | None, str | None]:
@@ -304,11 +389,14 @@ def _fx_status(st: dict[str, Any], tweet_id: str) -> TweetData:
         author_joined=_dt(au.get("joined")),
         media_count=len(media.get("photos") or []) + len(media.get("videos") or []),
         media_urls=_fx_media(st),
+        media=_fx_media_items(st),
         quoted_tweet_id=str(quote.get("id")) if quote.get("id") else None,
         likes=_int(st.get("likes")),
         replies=_int(st.get("replies")),
-        reposts=_int(st.get("reposts")),
+        reposts=_int(st.get("reposts") if st.get("reposts") is not None else st.get("retweets")),
         views=_int(st.get("views")),
+        quotes=_int(st.get("quotes")),
+        bookmarks=_int(st.get("bookmarks")),
         community=st.get("community") if isinstance(st.get("community"), dict) else None,
         possibly_sensitive=st.get("possibly_sensitive"),
         replying_to_id=_fx_reply(st)[0],
@@ -349,6 +437,7 @@ def _vx_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         author_name=j.get("user_name"),
         media_count=len(j.get("mediaURLs") or []),
         media_urls=_vx_media(j),
+        media=_vx_media_items(j),
         quoted_tweet_id=(j.get("qrt") or {}).get("tweetID")
         if isinstance(j.get("qrt"), dict)
         else None,
@@ -411,6 +500,7 @@ def _synd_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         verified_type=vt,
         media_count=len(j.get("mediaDetails") or []),
         media_urls=_synd_media(j),
+        media=_synd_media_items(j),
         quoted_tweet_id=q.get("id_str"),
         likes=_int(j.get("favorite_count")),
         replies=_int(j.get("conversation_count")),
@@ -515,6 +605,8 @@ def _paid_status(t: dict[str, Any], tweet_id: str) -> TweetData:
         replies=_int(t.get("replyCount")),
         reposts=_int(t.get("retweetCount")),
         views=_int(t.get("viewCount")),
+        quotes=_int(t.get("quoteCount")),
+        bookmarks=_int(t.get("bookmarkCount")),
         replying_to_id=_id(t.get("inReplyToId")),
         replying_to_handle=_handle(t.get("inReplyToUsername")),
         raw=t,
@@ -541,6 +633,8 @@ async def _supplement_links(http: httpx.AsyncClient, t: TweetData) -> None:
     t.quoted = s.quoted
     if s.media_urls and not t.media_urls:
         t.media_urls = s.media_urls
+    if s.media and not t.media:
+        t.media = s.media
 
 
 async def fetch_tweet(

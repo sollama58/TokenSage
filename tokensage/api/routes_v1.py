@@ -302,6 +302,7 @@ async def get_job(
                     status=service._status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
                     analysis=stored_analysis(doc),
+                    errors=service.doc_errors(doc),
                     request_id=rid,
                 )
     return JobResponse(

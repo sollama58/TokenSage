@@ -289,10 +289,17 @@ class Referent(_Model):
         description="Only the kind is known: the name, ticker, image or description make it "
         "plain what sort of coin this is, but no specific entity was identified",
     )
+    post_id: str | None = Field(
+        default=None,
+        description="Since rules 0.30.0: when the referent is the subject of an X post "
+        '(`source` "x"), the id of that post; `desc` then quotes it ("@author: <first '
+        'characters>") and the wave counts the coins launched on that post. Null otherwise',
+    )
     wave: ReferentWave | None = Field(
         default=None,
         description="Launch counts on this referent, by TokenSage's normalised referent "
-        "(coins TokenSage has analysed only)",
+        "(coins TokenSage has analysed only); since rules 0.30.0, for the subject of an X "
+        "post, by that post",
     )
 
 
@@ -536,6 +543,37 @@ class XMatch(_Model):
     )
 
 
+class XEngagement(_Model):
+    """A post's public counts (full depth, since rules 0.30.0). null when the source that
+    answered does not report that count (the mirrors differ: views, quotes and bookmarks
+    are often missing)."""
+
+    likes: int | None = None
+    reposts: int | None = None
+    replies: int | None = None
+    quotes: int | None = None
+    bookmarks: int | None = None
+    views: int | None = None
+    as_of: datetime | None = Field(
+        default=None,
+        description="When the copy these counts come from was fetched. For coins younger "
+        "than X_ENGAGEMENT_YOUNG_S (default 2 h) the post is fetched again once this is "
+        "X_ENGAGEMENT_REFRESH_S (default 300 s) old; older coins keep their cached copy. "
+        "null for posts cached before rules 0.30.0",
+    )
+
+
+class XMedia(_Model):
+    """A photo, video or GIF attached to a post (full depth, since rules 0.30.0). https URLs
+    only, as the source gave them."""
+
+    type: Literal["photo", "video", "gif", "unknown"]
+    url: str | None = Field(
+        default=None, description="The photo, or the video / GIF file when the source gives it"
+    )
+    thumbnail_url: str | None = Field(default=None, description="Video / GIF preview image")
+
+
 class XQuoted(_Model):
     """A tweet the linked tweet points at (full depth): the one it quotes (x.quoted) or the
     one it replies to (x.replied_to). Often the real narrative: a launch post that quotes
@@ -549,6 +587,12 @@ class XQuoted(_Model):
     created_at: datetime | None = None
     predates_token_by_s: int | None = Field(
         default=None, description="Seconds the post predates the token; negative if after"
+    )
+    engagement: XEngagement | None = Field(
+        default=None, description="Likes, reposts, ... of this post (since rules 0.30.0)"
+    )
+    media: list[XMedia] = Field(
+        default=[], description="This post's photos and videos (since rules 0.30.0)"
     )
 
 
@@ -588,10 +632,26 @@ class XLinkAccount(_Model):
 
 class XInfo(_Model):
     ref: XRef
-    object_time: datetime | None = None
+    object_time: datetime | None = Field(
+        default=None, description="When the linked post or community was made, read from its id"
+    )
     predates_token_by_s: int | None = None
     author: XAuthor | None = None
     text: str | None = None
+    created_at: datetime | None = Field(
+        default=None,
+        description="The linked post's creation time as the source reports it (full depth, "
+        "since rules 0.30.0)",
+    )
+    engagement: XEngagement | None = Field(
+        default=None,
+        description="The linked post's likes, reposts, replies, quotes, bookmarks and views "
+        "with their as_of time (full depth, since rules 0.30.0)",
+    )
+    media: list[XMedia] = Field(
+        default=[],
+        description="The linked post's photos and videos (full depth, since rules 0.30.0)",
+    )
     relation: (
         Literal[
             "narrative_reference",
@@ -783,6 +843,13 @@ class Analysis(_Model):
     summary: str
     evidence: list[Evidence] = []
     caveats: list[str] = []
+    timed_out: list[str] = Field(
+        default=[],
+        description="Full-depth sources still unfinished at the job deadline "
+        "(FULL_DEPTH_DEADLINE_S, default 20 s) and left out of this read: x, x_media, "
+        "wikipedia, ocr, vision, trends, news, bluesky, news_check. Non-empty makes the read "
+        "partial; each is also reported in the response's errors (since rules 0.30.0)",
+    )
     depth: Depth
     analyzed_at: datetime
     versions: Versions

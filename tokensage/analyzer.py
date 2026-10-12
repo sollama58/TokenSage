@@ -8,6 +8,8 @@ tokens, X link reuse, creator history, image-hash candidates), run the basic-dep
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -39,11 +41,13 @@ from tokensage.api.schemas import (
     Versions,
     XAccount,
     XAuthor,
+    XEngagement,
     XInfo,
     XLinkAccount,
     XMatchField,
     XMatchImage,
     XMatchReferent,
+    XMedia,
     XQuoted,
     XRef,
 )
@@ -100,6 +104,7 @@ from tokensage.resolve.fees import creator_fee_to_dict
 from tokensage.resolve.resolver import Resolved, ResolveError, curves_now, resolve
 from tokensage.resolve.rpc import SolanaRpc
 from tokensage.sources import bluesky, gnews, lookups
+from tokensage.sources.x import TweetData
 
 log = structlog.get_logger("analyzer")
 
@@ -880,6 +885,7 @@ def build_document(
                 confidence=rr.confidence,
                 supported_by=rr.supported_by,
                 generic=rr.generic,
+                post_id=rr.post_id,
                 wave=None if rr.generic else ex.wave,
             )
         categories = [
@@ -1171,7 +1177,9 @@ async def _store_read(conn: asyncpg.Connection, doc: Analysis) -> None:
         doc.mint,
         doc.created_at,
         # a generic referent ("frog") is a kind, not one idea coins pile onto
-        referent_key(doc.referent.label) if doc.referent and not doc.referent.generic else None,
+        wave_key(doc.referent.label, doc.referent.post_id)
+        if doc.referent and not doc.referent.generic
+        else None,
         doc.referent.label if doc.referent and not doc.referent.generic else None,
         [c.label for c in doc.categories],
     )
@@ -1548,36 +1556,9 @@ async def analyze(
         # first call loads the ONNX model from disk: keep that off the event loop
         inp.encoder = await asyncio.to_thread(embed.default_encoder, ctx.settings)
     await _queue_pair_analysis(conn, inp.pair)
+    timed_out: list[str] = []
     if depth == "full":
-        tweet, profile = await fulldepth.x_content(conn, ctx.http, ctx.settings, x)
-        inp.x_url_handle = x.ref.url_handle if x else None
-        inp.tweet, inp.profile = tweet, profile
-        inp.ocr_lines = await fulldepth.ocr_cached(conn, m.image_content_key if m else None)
-        ran_ocr = inp.ocr_lines is None and bool(image_bytes)
-        ocr_error: str | None = None
-        if ran_ocr and image_bytes:
-            # OCR here rather than inside run_full: waiting for the single OCR slot then
-            # happens on the event loop, not on a blocked executor thread
-            inp.ocr_lines, ocr_error = await ocr.read_async(image_bytes)
-            inp.ocr_error = ocr_error  # keeps the 'OCR unavailable' caveat
-        if ctx.settings.enable_clip:
-            inp.vision = await _vision_labels(conn, ctx, m, image_bytes)
-        inp.trend_index = await fulldepth.trend_index(conn, ctx.http)
-        inp.x_media = await fulldepth.media_hashes(
-            conn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
-        )
-        inp.wiki_refs = await _wiki_refs(conn, ctx, inp)
-        # one after the other: both use this job's single database connection
-        news_hits, news_status = await _name_news(conn, ctx, inp)
-        bsky_hits, bsky_status = await _name_bluesky(conn, ctx, inp)
-        inp.news_hits = news_hits + bsky_hits
-        # CPU-bound (normalisation, image hashing): keep it off the event loop so the
-        # worker's other concurrent jobs keep making network progress meanwhile.
-        out = await asyncio.to_thread(run_full, inp)
-        if ran_ocr and m and m.image_content_key and not ocr_error:
-            await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
-        await _attach_news(conn, ctx, out)
-        out.trend_sources = [*inp.trend_index.sources, news_status, bsky_status]
+        out, timed_out = await _full_depth(conn, ctx, r, m, x, inp, image_bytes)
     else:
         out = await asyncio.to_thread(run_basic, inp)
     if x is not None:
@@ -1598,6 +1579,14 @@ async def analyze(
 
     extras = await _read_extras(conn, ctx, r, out)
     doc = build_document(r, m, depth, out, x, hint_use, extras)
+    if depth == "full":
+        _attach_post_details(doc.x, inp.tweet)
+    if timed_out:
+        doc.timed_out = timed_out
+        doc.caveats.append(
+            f"partial: full-depth deadline ({ctx.settings.full_depth_deadline_s:g} s) reached "
+            f"before {', '.join(timed_out)} answered; the next request may be more complete"
+        )
     score = doc.referent.confidence if doc.referent else None
     log.info(
         "analysis.referent",
@@ -1609,6 +1598,230 @@ async def analyze(
     )
     await _store_xref(conn, r.mint, doc.x)
     return await _store_analysis(conn, doc)
+
+
+# ----------------------------------------------------------------- full depth
+
+
+TIMED_OUT = "timed out (full-depth deadline)"
+
+
+class _Steps:
+    """The full-depth fetches running right now, by source name: what the deadline names."""
+
+    def __init__(self) -> None:
+        self.running: dict[str, int] = {}
+
+    @asynccontextmanager
+    async def run(self, name: str) -> AsyncIterator[None]:
+        self.running[name] = self.running.get(name, 0) + 1
+        try:
+            yield
+        finally:
+            self.running[name] -= 1
+            if self.running[name] <= 0:
+                del self.running[name]
+
+
+async def _until_deadline(
+    coros: list[Coroutine[Any, Any, None]], steps: _Steps, deadline: float
+) -> list[str]:
+    """Run the coroutines concurrently until they finish or the loop clock passes
+    `deadline`; then cancel what is left. Returns the sources still running then (sorted).
+    The first error of any of them is raised (the others are cancelled), as when they ran
+    one after the other."""
+    loop = asyncio.get_running_loop()
+    pending: set[asyncio.Task[None]] = {asyncio.ensure_future(c) for c in coros}
+    late: list[str] = []
+    try:
+        while pending:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                late = sorted(steps.running)
+                break
+            done, pending = await asyncio.wait(
+                pending, timeout=remaining, return_when=asyncio.FIRST_EXCEPTION
+            )
+            for t in done:
+                err = None if t.cancelled() else t.exception()
+                if err is not None:
+                    raise err
+    finally:
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+    if late:
+        log.info("analysis.full_depth_deadline", timed_out=late)
+    return late
+
+
+def engagement_young(created_at: datetime | None, settings: Settings) -> bool:
+    """A coin young enough for its post's counts to be kept fresh (X_ENGAGEMENT_YOUNG_S)."""
+    if created_at is None:
+        return False
+    return (datetime.now(UTC) - created_at).total_seconds() < settings.x_engagement_young_s
+
+
+async def _full_depth(
+    conn: asyncpg.Connection,
+    ctx: Context,
+    r: Resolved,
+    m: md.Metadata | None,
+    x: XInfo | None,
+    inp: EngineInput,
+    image_bytes: bytes | None,
+) -> tuple[EngineOutput, list[str]]:
+    """The full-depth fetches, then the engine. Independent sources run concurrently (the
+    X post first, then its media and the Wikipedia lookups, which read it; OCR; logo
+    labels; the trend index; news; Bluesky), all sharing this job's connection through
+    fulldepth.serial(). What is unfinished at FULL_DEPTH_DEADLINE_S is cancelled and left
+    out; its names are returned so the read can say it is partial (since rules 0.30.0)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + ctx.settings.full_depth_deadline_s
+    sconn = fulldepth.serial(conn)
+    steps = _Steps()
+    inp.x_url_handle = x.ref.url_handle if x else None
+    fresh = engagement_young(r.created_at, ctx.settings)
+    ran_ocr = False
+    ocr_error: str | None = None
+    news: tuple[list[trends.TrendHit], trends.SourceStatus] = (
+        [],
+        trends.SourceStatus("news", "failed", detail=TIMED_OUT),
+    )
+    bsky: tuple[list[trends.TrendHit], trends.SourceStatus] = (
+        [],
+        trends.SourceStatus("bluesky", "failed", detail=TIMED_OUT),
+    )
+
+    async def x_and_after() -> None:
+        async with steps.run("x"):
+            tweet, profile = await fulldepth.x_content(
+                sconn, ctx.http, ctx.settings, x, fresh_engagement=fresh
+            )
+        inp.tweet, inp.profile = tweet, profile
+
+        async def media() -> None:
+            async with steps.run("x_media"):
+                inp.x_media = await fulldepth.media_hashes(
+                    sconn, ctx.http, ctx.settings, fulldepth.media_urls(tweet, profile)
+                )
+
+        async def wiki() -> None:
+            async with steps.run("wikipedia"):
+                inp.wiki_refs = await _wiki_refs(sconn, ctx, inp)
+
+        await fulldepth.run_all([media(), wiki()])
+
+    async def read_ocr() -> None:
+        nonlocal ran_ocr, ocr_error
+        async with steps.run("ocr"):
+            lines = await fulldepth.ocr_cached(sconn, m.image_content_key if m else None)
+            if lines is None and image_bytes:
+                # OCR here rather than inside run_full: waiting for the single OCR slot then
+                # happens on the event loop, not on a blocked executor thread
+                ran_ocr = True
+                lines, ocr_error = await ocr.read_async(image_bytes)
+                inp.ocr_error = ocr_error  # keeps the 'OCR unavailable' caveat
+            inp.ocr_lines = lines
+
+    async def labels() -> None:
+        async with steps.run("vision"):
+            inp.vision = await _vision_labels(sconn, ctx, m, image_bytes)
+
+    async def trend_index() -> None:
+        async with steps.run("trends"):
+            inp.trend_index = await fulldepth.trend_index(sconn, ctx.http)
+
+    async def name_news() -> None:
+        nonlocal news
+        async with steps.run("news"):
+            news = await _name_news(sconn, ctx, inp)
+
+    async def name_bluesky() -> None:
+        nonlocal bsky
+        async with steps.run("bluesky"):
+            bsky = await _name_bluesky(sconn, ctx, inp)
+
+    jobs = [x_and_after(), read_ocr(), trend_index(), name_news(), name_bluesky()]
+    if ctx.settings.enable_clip:
+        jobs.append(labels())
+    timed_out = await _until_deadline(jobs, steps, deadline)
+    if "ocr" in timed_out:
+        ran_ocr, inp.ocr_lines, inp.ocr_error = False, None, TIMED_OUT
+    inp.news_hits = news[0] + bsky[0]
+    # CPU-bound (normalisation, image hashing): keep it off the event loop so the
+    # worker's other concurrent jobs keep making network progress meanwhile.
+    out = await asyncio.to_thread(run_full, inp)
+    if ran_ocr and m and m.image_content_key and not ocr_error:
+        await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
+    # the Google News check of the Wikipedia hits needs the engine's hits: it gets what is
+    # left of the deadline (usually cached lookups)
+    try:
+        async with asyncio.timeout(max(0.0, deadline - loop.time())):
+            await _attach_news(conn, ctx, out)
+    except TimeoutError:
+        timed_out.append("news_check")
+    if inp.trend_index is not None:
+        index_sources = list(inp.trend_index.sources)
+    else:
+        index_sources = [
+            trends.SourceStatus(src, "failed", detail=TIMED_OUT)
+            for src in ("wikipedia", "google_trends", "x_trends")
+        ]
+    out.trend_sources = [*index_sources, news[1], bsky[1]]
+    return out, timed_out
+
+
+def _engagement_out(t: TweetData) -> XEngagement:
+    return XEngagement(
+        likes=t.likes,
+        reposts=t.reposts,
+        replies=t.replies,
+        quotes=t.quotes,
+        bookmarks=t.bookmarks,
+        views=t.views,
+        as_of=t.fetched_at,
+    )
+
+
+_MEDIA_KINDS = ("photo", "video", "gif")
+
+
+def _media_out(t: TweetData) -> list[XMedia]:
+    """The post's media, re-checked through the URL sanitiser (cached copies included). A
+    copy cached before rules 0.30.0 has only the image URLs: type unknown."""
+    out: list[XMedia] = []
+    items = t.media or [{"type": "unknown", "url": u, "thumbnail_url": None} for u in t.media_urls]
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        url, thumb = md.clean_url(it.get("url")), md.clean_url(it.get("thumbnail_url"))
+        if not (url or thumb):
+            continue
+        kind = it.get("type")
+        out.append(
+            XMedia(
+                type=kind if kind in _MEDIA_KINDS else "unknown",  # type: ignore[arg-type]
+                url=url,
+                thumbnail_url=thumb,
+            )
+        )
+    return out[:4]
+
+
+def _attach_post_details(x: XInfo | None, tweet: TweetData | None) -> None:
+    """Engagement, exact time and media of the linked post and of its quoted / replied-to
+    posts (since rules 0.30.0)."""
+    if x is None or tweet is None or tweet.status != "ok":
+        return
+    x.created_at = tweet.created_at
+    x.engagement = _engagement_out(tweet)
+    x.media = _media_out(tweet)
+    for shown, src in ((x.quoted, tweet.quoted), (x.replied_to, tweet.replied_to)):
+        if shown is not None and src is not None and src.status == "ok" and shown.id == src.id:
+            shown.engagement = _engagement_out(src)
+            shown.media = _media_out(src)
 
 
 @dataclass
@@ -1627,6 +1840,13 @@ def referent_key(label: str) -> str:
     """TokenSage's normalised referent: the resolved label, case and punctuation folded. Every
     alias resolves to one entity label first ("Elon", "Musk", "elonmusk" -> "Elon Musk")."""
     return " ".join("".join(ch if ch.isalnum() else " " for ch in label.casefold()).split())
+
+
+def wave_key(label: str, post_id: str | None = None) -> str:
+    """What a referent wave counts by: the referent_key of its label, or, for the subject of
+    an X post (since rules 0.30.0), the post itself ("x:<post id>"): every coin launched on
+    one post rides the same wave, whatever phrase each one's read took from it."""
+    return f"x:{post_id}" if post_id else referent_key(label)
 
 
 async def _read_extras(
@@ -1655,7 +1875,7 @@ async def _read_extras(
     def within(hours: int) -> int:
         return int(launched is not None and now - timedelta(hours=hours) < launched <= now)
 
-    ref = out.agg.referent
+    ref = out.referent_read
     if ref is not None and not ref.generic:
         row = await conn.fetchrow(
             """with p as (select $3::timestamptz as now, coalesce($4::timestamptz, $3) as me)
@@ -1668,7 +1888,7 @@ async def _read_extras(
                from token_read, p
                where referent_key = $1 and mint <> $2
                  and launched_at > p.now - interval '7 days' and launched_at <= p.now""",
-            referent_key(ref.label),
+            wave_key(ref.label, ref.post_id),
             r.mint,
             now,
             launched,

@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 import httpx
@@ -61,6 +61,58 @@ async def _single_flight(key: str) -> AsyncIterator[None]:
             _inflight_locks.pop(key, None)
 
 
+# ----------------------------------------------------------------- one connection, shared
+
+
+class _SerialConn:
+    """One job's database connection shared by its concurrent full-depth fetches. asyncpg
+    runs one query at a time per connection, so each call waits its turn here; the slow
+    part (the network) still overlaps. The helpers sharing it use only execute and the
+    fetch calls, never a transaction, so interleaving their single statements is safe."""
+
+    def __init__(self, conn: asyncpg.Connection) -> None:
+        self._conn = conn
+        self._lock = asyncio.Lock()
+
+    async def execute(self, *args: Any, **kw: Any) -> Any:
+        async with self._lock:
+            return await self._conn.execute(*args, **kw)
+
+    async def fetch(self, *args: Any, **kw: Any) -> Any:
+        async with self._lock:
+            return await self._conn.fetch(*args, **kw)
+
+    async def fetchrow(self, *args: Any, **kw: Any) -> Any:
+        async with self._lock:
+            return await self._conn.fetchrow(*args, **kw)
+
+    async def fetchval(self, *args: Any, **kw: Any) -> Any:
+        async with self._lock:
+            return await self._conn.fetchval(*args, **kw)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
+async def run_all(coros: list[Coroutine[Any, Any, None]]) -> None:
+    """Run the coroutines concurrently. The first error cancels the others and is raised
+    as it is (not wrapped in a group), as when they ran one after the other."""
+    tasks = [asyncio.ensure_future(c) for c in coros]
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def serial(conn: asyncpg.Connection) -> asyncpg.Connection:
+    """`conn` made safe to share between concurrent tasks of one job (see _SerialConn)."""
+    if isinstance(conn, _SerialConn):
+        return conn
+    return cast(asyncpg.Connection, _SerialConn(conn))
+
+
 # ----------------------------------------------------------------- X content with caching
 
 
@@ -75,41 +127,116 @@ async def _paid_x_allowed(conn: asyncpg.Connection, settings: Settings) -> bool:
 
 
 async def tweet_cached(
-    conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, tweet_id: str
+    conn: asyncpg.Connection,
+    http: httpx.AsyncClient,
+    settings: Settings,
+    tweet_id: str,
+    *,
+    fresh_engagement: bool = False,
 ) -> TweetData:
     """The tweet, cached. The first good copy is the record (tweets are immutable apart from
     edits), but it is re-checked every TWEET_RECHECK so a deletion is noticed, and a sparse
     oEmbed copy is upgraded when a richer source answers (asked again at most every
     OEMBED_UPGRADE_RETRY). A deletion confirmed by the paid API is final: deleted tweets do
-    not come back, and the free mirrors' stale verdicts are what the paid call corrects."""
+    not come back, and the free mirrors' stale verdicts are what the paid call corrects.
+
+    Engagement (likes, reposts, replies, quotes, bookmarks, views) is not part of the
+    record: it comes from the newest good copy, and `fetched_at` says when that copy was
+    fetched (since rules 0.30.0). With fresh_engagement (a young coin) the post is fetched
+    again once that copy is X_ENGAGEMENT_REFRESH_S old, on the free mirrors only; a failed
+    attempt is retried at most every X_ENGAGEMENT_RETRY_S."""
     async with _single_flight(f"tweet:{tweet_id}"):
-        return await _tweet_cached(conn, http, settings, tweet_id)
+        return await _tweet_cached(conn, http, settings, tweet_id, fresh_engagement)
+
+
+# engagement counts: taken from the newest good copy, never frozen in the record
+ENGAGEMENT_FIELDS = ("likes", "replies", "reposts", "views", "quotes", "bookmarks")
+
+
+def _take_engagement(record: TweetData, src: TweetData) -> None:
+    """Counts from a newer copy of the same post (and of its inline quoted / replied-to
+    posts). A count the newer source does not report keeps its older value."""
+    if src.status != "ok" or src.id != record.id:
+        return
+    for f in ENGAGEMENT_FIELDS:
+        v = getattr(src, f)
+        if v is not None:
+            setattr(record, f, v)
+    if src.fetched_at is not None:
+        record.fetched_at = src.fetched_at
+    for a in ("quoted", "replied_to"):
+        mine, theirs = getattr(record, a), getattr(src, a)
+        if mine is not None and theirs is not None:
+            _take_engagement(mine, theirs)
+
+
+def _stamp(t: TweetData, at: datetime) -> None:
+    t.fetched_at = at
+    for other in (t.quoted, t.replied_to):
+        if other is not None and other.status == "ok":
+            other.fetched_at = at
+
+
+def _latest_copy(raw: Any) -> TweetData | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return TweetData.from_json(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def engagement_stale(
+    as_of: datetime | None, last_try: timedelta | None, settings: Settings, now: datetime
+) -> bool:
+    """Whether a young coin's post should be fetched again for its counts: the newest copy
+    is X_ENGAGEMENT_REFRESH_S old (or its time unknown), and the last attempt, good or not,
+    is X_ENGAGEMENT_RETRY_S old."""
+    old = as_of is None or (now - as_of).total_seconds() >= settings.x_engagement_refresh_s
+    retry = last_try is None or last_try.total_seconds() >= settings.x_engagement_retry_s
+    return old and retry
 
 
 async def _tweet_cached(
-    conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, tweet_id: str
+    conn: asyncpg.Connection,
+    http: httpx.AsyncClient,
+    settings: Settings,
+    tweet_id: str,
+    fresh_engagement: bool = False,
 ) -> TweetData:
     row = await conn.fetchrow(
         "select first_snapshot, latest, status, source, fetched_at from x_tweet where tweet_id=$1",
         tweet_id,
     )
     record: TweetData | None = None
+    counts_only = False  # the record is good: fetched again only for fresher counts
+    now = datetime.now(UTC)
     if row:
-        age = datetime.now(UTC) - row["fetched_at"] if row["fetched_at"] else None
+        age = now - row["fetched_at"] if row["fetched_at"] else None
         if row["status"] == "ok" and row["first_snapshot"]:
             record = TweetData.from_json(row["first_snapshot"])
+            latest = _latest_copy(row["latest"])
+            if latest is not None:
+                _take_engagement(record, latest)
             # a copy cached before reply support has no reply fields: re-check it now
             # rather than serve it for up to TWEET_RECHECK without them
             current = "replying_to_id" in row["first_snapshot"]
             sparse = row["source"] == "oembed" and age is not None and age >= OEMBED_UPGRADE_RETRY
             if age is not None and age < TWEET_RECHECK and not sparse and current:
-                return record
+                if not (
+                    fresh_engagement and engagement_stale(record.fetched_at, age, settings, now)
+                ):
+                    return record
+                counts_only = True
         elif row["status"] == "deleted" and row["source"] == "twitterapi_io":
             return TweetData(id=tweet_id, status="deleted", source=row["source"])
         elif row["status"] in ("deleted", "failed") and age is not None and age < DELETED_RETRY:
             return TweetData(id=tweet_id, status=row["status"], source=row["source"])
-    paid_ok = await _paid_x_allowed(conn, settings)
+    # fresher counts alone are not worth a paid call
+    paid_ok = not counts_only and await _paid_x_allowed(conn, settings)
     t = await fetch_tweet(http, tweet_id, paid_key=settings.twitterapi_io_key, allow_paid=paid_ok)
+    if t.status == "ok":
+        _stamp(t, datetime.now(UTC))
     if t.source == "twitterapi_io":
         from tokensage.api import usage
 
@@ -144,12 +271,20 @@ async def _tweet_cached(
             return t  # the richer copy replaces the sparse oEmbed record
         if t.status == "ok":
             _fill_missing(record, t)
+            _take_engagement(record, t)
         return record
     return t
 
 
 # Fields older cache records may lack: filled from a fresh copy without replacing the record.
-_BACKFILL = ("media_urls", "quoted_tweet_id", "quoted", "replying_to_id", "replying_to_handle")
+_BACKFILL = (
+    "media_urls",
+    "media",
+    "quoted_tweet_id",
+    "quoted",
+    "replying_to_id",
+    "replying_to_handle",
+)
 
 
 def _fill_missing(record: TweetData, fresh: TweetData) -> None:
@@ -216,32 +351,64 @@ async def _profile_cached(
 
 
 async def x_content(
-    conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, x: XInfo | None
+    conn: asyncpg.Connection,
+    http: httpx.AsyncClient,
+    settings: Settings,
+    x: XInfo | None,
+    *,
+    fresh_engagement: bool = False,
 ) -> tuple[TweetData | None, ProfileData | None]:
+    """The linked post with its quoted / replied-to posts and its author's profile, or the
+    linked profile. The post comes first; the other three then load concurrently (`conn`
+    is shared through serial()). fresh_engagement: see tweet_cached."""
     if x is None:
         return None, None
+    conn = serial(conn)
     tweet: TweetData | None = None
     profile: ProfileData | None = None
     if x.ref.kind == "tweet" and x.ref.tweet_id:
-        tweet = await tweet_cached(conn, http, settings, x.ref.tweet_id)
-        if (
-            tweet.status == "ok"
-            and tweet.quoted is None
-            and tweet.quoted_tweet_id
-            and tweet.quoted_tweet_id != tweet.id
-        ):
+        tweet = await tweet_cached(
+            conn, http, settings, x.ref.tweet_id, fresh_engagement=fresh_engagement
+        )
+        main = tweet
+
+        async def quoted() -> None:
             # oEmbed and pre-quote cache rows carry only the quoted id: fetch it (cached too)
-            tweet.quoted = await tweet_cached(conn, http, settings, tweet.quoted_tweet_id)
-        if (
-            tweet.status == "ok"
-            and tweet.replied_to is None
-            and tweet.replying_to_id
-            and tweet.replying_to_id != tweet.id
-        ):
+            assert main.quoted_tweet_id
+            main.quoted = await tweet_cached(
+                conn, http, settings, main.quoted_tweet_id, fresh_engagement=fresh_engagement
+            )
+
+        async def replied() -> None:
             # a reply: the post it answers is usually the context the coin is about
-            tweet.replied_to = await tweet_cached(conn, http, settings, tweet.replying_to_id)
-        if tweet.status == "ok" and tweet.author_handle:
-            profile = await profile_cached(conn, http, tweet.author_handle)
+            assert main.replying_to_id
+            main.replied_to = await tweet_cached(
+                conn, http, settings, main.replying_to_id, fresh_engagement=fresh_engagement
+            )
+
+        async def author() -> None:
+            nonlocal profile
+            assert main.author_handle
+            profile = await profile_cached(conn, http, main.author_handle)
+
+        jobs: list[Coroutine[Any, Any, None]] = []
+        if (
+            main.status == "ok"
+            and main.quoted is None
+            and main.quoted_tweet_id
+            and main.quoted_tweet_id != main.id
+        ):
+            jobs.append(quoted())
+        if (
+            main.status == "ok"
+            and main.replied_to is None
+            and main.replying_to_id
+            and main.replying_to_id != main.id
+        ):
+            jobs.append(replied())
+        if main.status == "ok" and main.author_handle:
+            jobs.append(author())
+        await run_all(jobs)
     elif x.ref.kind == "profile" and x.ref.handle:
         profile = await profile_cached(conn, http, x.ref.handle)
     return tweet, profile

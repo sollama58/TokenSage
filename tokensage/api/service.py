@@ -150,6 +150,47 @@ def _freshness(doc: dict[str, Any], max_age_s: int, from_cache: bool) -> Freshne
     return Freshness(analyzed_at=analyzed_at, age_s=age, max_age_s=max_age_s, from_cache=from_cache)
 
 
+def doc_errors(doc: dict[str, Any]) -> list[UpstreamError]:
+    """The sources a stored read left out because the full-depth deadline passed (since
+    rules 0.30.0): one `timeout` error each."""
+    names = doc.get("timed_out") or []
+    return [
+        UpstreamError(
+            source=str(n),
+            code="timeout",
+            detail="not finished within the full-depth deadline; left out of this read",
+        )
+        for n in names
+        if isinstance(n, str)
+    ]
+
+
+def engagement_expired(
+    doc: dict[str, Any], token_created_at: datetime | None, settings: Settings
+) -> bool:
+    """A young coin's cached read whose post counts (x.engagement.as_of) are older than
+    X_ENGAGEMENT_REFRESH_S: not served from cache, so the read is re-run and the post
+    fetched again. A read under X_ENGAGEMENT_RETRY_S old is still served (the re-fetch just
+    failed, say: mirrors down), so a dead mirror does not re-run the read on every request.
+    Coins older than X_ENGAGEMENT_YOUNG_S, or of unknown age, keep the usual max_age."""
+    if token_created_at is None:
+        return False
+    now = datetime.now(UTC)
+    if (now - token_created_at).total_seconds() >= settings.x_engagement_young_s:
+        return False
+    eng = (doc.get("x") or {}).get("engagement")
+    if not isinstance(eng, dict):
+        return False
+    try:
+        analyzed = datetime.fromisoformat(doc["analyzed_at"])
+        if (now - analyzed).total_seconds() < settings.x_engagement_retry_s:
+            return False
+        as_of = datetime.fromisoformat(eng["as_of"]) if eng.get("as_of") else None
+    except (KeyError, TypeError, ValueError):
+        return False
+    return as_of is None or (now - as_of).total_seconds() > settings.x_engagement_refresh_s
+
+
 def _status_for(doc: dict[str, Any]) -> str:
     caveats = doc.get("caveats") or []
     return "partial" if any(str(c).startswith("partial:") for c in caveats) else "complete"
@@ -219,6 +260,10 @@ async def get_or_enqueue(
             outdated = max_age_s is None and (doc.get("versions") or {}).get("rules") != (
                 RULES_VERSION
             )
+            # a young coin's post counts are kept within X_ENGAGEMENT_REFRESH_S
+            outdated = outdated or (
+                max_age_s is None and engagement_expired(doc, created, settings)
+            )
             if fr.age_s is not None and fr.age_s <= max_age and not outdated:
                 return TokenResponse(
                     ca=mint,
@@ -226,6 +271,7 @@ async def get_or_enqueue(
                     depth=doc["depth"],
                     analysis=stored_analysis(doc),
                     freshness=fr,
+                    errors=doc_errors(doc),
                     request_id=request_id,
                 )
 
@@ -288,6 +334,7 @@ async def get_or_enqueue(
                         depth=doc["depth"],
                         analysis=stored_analysis(doc),
                         freshness=fr,
+                        errors=doc_errors(doc),
                         request_id=request_id,
                     )
             job = await enqueue(0)
@@ -316,6 +363,7 @@ async def get_or_enqueue(
                         depth=doc["depth"],
                         analysis=stored_analysis(doc),
                         freshness=_freshness(doc, max_age, from_cache=False),
+                        errors=doc_errors(doc),
                         request_id=request_id,
                     )
             if j and j.status == "failed" and j.error_code in DEFINITIVE_CODES:

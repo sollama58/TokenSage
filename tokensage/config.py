@@ -46,6 +46,22 @@ class Settings(BaseSettings):
     max_age_mid_s: int = 3600  # 1 h .. 7 d
     max_age_old_s: int = 86400  # > 7 d
 
+    # --- X engagement freshness (since rules 0.30.0) ---
+    # For coins younger than X_ENGAGEMENT_YOUNG_S, the linked post (and its quoted / replied-to
+    # posts) is fetched again when its stored copy is older than X_ENGAGEMENT_REFRESH_S, and
+    # a cached read is not served once its x.engagement is older than that. Older coins keep
+    # the cached copy (re-checked every 6 h for deletion). A failed re-fetch is retried at
+    # most every X_ENGAGEMENT_RETRY_S, and a read this young is served whatever its as_of.
+    x_engagement_refresh_s: int = 300
+    x_engagement_young_s: int = 7200
+    x_engagement_retry_s: int = 60
+
+    # --- full-depth job deadline (since rules 0.30.0) ---
+    # The full-depth fetches (X, OCR, logo labels, trends, Wikipedia, news, Bluesky) run
+    # concurrently; whatever is unfinished after this many seconds is cancelled and the read
+    # is returned as partial, naming the sources in `errors`.
+    full_depth_deadline_s: float = 20.0
+
     # --- copycats ---
     # A coin is flagged as a copycat only when the coin it copies (same name, ticker or logo)
     # launched within this many days before it; older namesakes are references, not copies.

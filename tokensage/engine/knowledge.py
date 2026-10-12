@@ -127,6 +127,8 @@ class Knowledge:
     # WordNet words that are also given names / surnames: their dictionary sense is weak
     name_words: frozenset[str] = frozenset()
     cjk: dict[str, str] = field(default_factory=dict)  # Han word -> English (data/cjk_words.yaml)
+    # referent precision and X-post subject rules (data/referent_rules.yaml)
+    rules: dict[str, Any] = field(default_factory=dict)
 
     # -- derived indexes
     def coin_by_symbol(self) -> dict[str, list[KnownCoin]]:
@@ -277,5 +279,6 @@ def load_knowledge() -> Knowledge:
         meta=_yaml("meta.yaml"),
         name_words=frozenset(str(w).lower() for w in t.get("wordnet_name_words") or []),
         cjk={str(w): str(v or "").lower() for w, v in _yaml("cjk_words.yaml")["words"].items()},
+        rules=_yaml("referent_rules.yaml") or {},
         versions={"lexicon": LEXICON_VERSION, "known_coins": KNOWN_COINS_VERSION},
     )

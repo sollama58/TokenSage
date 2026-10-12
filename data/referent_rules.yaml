@@ -1,0 +1,99 @@
+# Referent precision rules (since rules 0.30.0). Config, not code: the lists and thresholds
+# the engine uses to keep homonyms, substrings and passing mentions from becoming what a coin
+# is about, and to name the subject of the X post a coin was launched on.
+
+# ---------------------------------------------------------------- what the NAME is about
+# A named referent found only in the X post or the description, whose label the name and
+# ticker do not echo, is a passing mention ("Ansem and others back it", "paste it into
+# ChatGPT"): its score is multiplied by this, which puts a typical one-input hit under the
+# 0.45 named-referent floor (a weak guess at most).
+mention_only_factor: 0.55
+# The other way round: an account behind the post (its author, the quoted or replied-to
+# author) whose name the coin's name echoes ("Elonius Maximus" launched on an @elonmusk post)
+# is the referent; its account-pass score (0.4x) is multiplied by this, up to 0.9.
+echoed_account_lift: 2.0
+
+# Chain and platform names: where a coin lives, not what it is about. Outside the name they
+# never become the referent and their category rows count at platform_text_factor; in the
+# name they give way to any other named candidate or theme the name has ("GTA6 Coin
+# Solana"). Matched on the referent label.
+platform_labels:
+  - Solana
+  - pump.fun (token)
+  - Pump.fun
+  - Raydium
+  - Memecoin
+platform_text_factor: 0.35
+
+# Slang that only means something in the coin's name: every coin is a memecoin, so the word
+# in a description or post says nothing about pump.fun meta.
+name_only_slang: [memecoin, memecoins, meme coin, meme coins, memecoin's]
+
+# Fee-routing text ("Creator fees split 90% to my wallet", "Fees to tetsuo wallet") says
+# where the money goes, not what the coin is: a sentence or line matching one of these is
+# dropped from the description and post text before the word lists read them.
+fee_text_patterns:
+  - '\b(?:creator\s+)?fees?\b[^.\n!?]*'
+  - '\b(?:rev(?:enue)?\s*share|buybacks?\s+and\s+burns?)\b[^.\n!?]*'
+
+# ---------------------------------------------------------------- Wikipedia lookups
+# A result whose short description says it is a list, a name page or a disambiguation is
+# never a referent ("Cowe: Surname list", "Pupkin: Surname list").
+wiki_reject_desc:
+  - surname
+  - given name
+  - family name
+  - name list
+  - list of
+  - index of
+  - disambiguation
+  - topics referred to by the same term
+  - human name
+  - unisex name
+# A Wikipedia article found for the name whose kind disagrees with the theme the coin's
+# other inputs give (a musical form for an AI-agent coin, a Polish village for a launchpad
+# game) is a homonym: its score is multiplied by this.
+wiki_conflict_factor: 0.6
+# Creative works matched by a name made only of everyday words ("Pig Boy", "Night Clerk")
+# need the description, the post or a trend to name them too; without that, this factor.
+wiki_common_work_factor: 0.6
+wiki_work_desc: [book, novel, film, movie, album, song, single, episode, short story, play by,
+                 poem, painting, documentary, ep by, mixtape, comic]
+
+# Gazetteer surfaces made only of everyday words ("what if", "the end") count only when the
+# text writes them like a title (each word capitalised, not a whole line in capitals), and in
+# the name only when they are the whole name.
+case_aware_common_entities: true
+
+# WordNet classes whose rare words ("pons", "nape") are almost never what a coin means: a
+# word of these classes counts only when it is among the 20k most frequent English words.
+rare_word_classes: [body_part]
+
+# ---------------------------------------------------------------- news_event from X timing
+# An earlier post by someone else is news only with content: a trend or news hit, a named
+# entity in the post, or an author with this many followers (or a verified business or
+# government account). Otherwise it is a plain post reference.
+news_author_min_followers: 50000
+
+# ---------------------------------------------------------------- the X post's subject
+x_subject:
+  # the reported confidence of a subject the coin's name or ticker repeats, and of the
+  # post's lead clause when nothing in the post matches the name
+  matched_confidence: 0.6
+  lead_confidence: 0.45
+  # a name word matches a post word at this rapidfuzz ratio or better ("cumpound" ~
+  # "compound")
+  fuzzy_min: 80
+  # the excerpt in referent.desc ("@author: <first characters>")
+  excerpt_chars: 120
+  # the lead clause used as a label, at most
+  lead_max_chars: 60
+  lead_max_words: 9
+  # a post must say this much beyond the coin's own name, ticker, links and launch words
+  # before it can name the coin's subject
+  min_content_words: 3
+  # words that are never a subject on their own, and launch filler
+  filler: [ca, lfg, live, launched, launching, now, soon, coin, token, the, a, an, is, it,
+           its, this, that, and, of, on, in, to, for, just, we, our, my, new, send, sending,
+           run, running, pump, pumpfun, sol, solana, official, meme, memecoin, dev, ticker,
+           here, buy, chart, moon, gm, x, https, http, com]

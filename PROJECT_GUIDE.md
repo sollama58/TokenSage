@@ -308,10 +308,12 @@ Typical cost of a cold resolve: 2–3 RPC calls plus 1 metadata fetch, well insi
 - **Public Nitter is dead.** X sent cease-and-desist letters in Aug 2026, and only a few instances still work. Do not use it.
 - **Caching:**
   - Tweets: **forever, first-seen snapshot kept**, because narrative tweets get deleted.
+    The snapshot's text is the record; its engagement counts are not (see below).
   - Profiles: 6–24 h TTL, keyed by **user ID** so renames are detected.
   - Communities: 24 h.
   - Tombstones: short TTL, then permanent.
   - Use a single-flight lock per tweet ID, because many tokens link the same celebrity tweet.
+- **Engagement (since rules 0.30.0).** The read exposes `x.engagement` (`likes`, `reposts`, `replies`, `quotes`, `bookmarks`, `views`, `as_of`) for the linked post and for `x.quoted` / `x.replied_to`, with `x.created_at` (the source's time) and `x.media` (`type`, `url`, `thumbnail_url`; https only, through the metadata URL sanitiser). Counts come from the newest stored copy (`x_tweet.latest`, stamped with `fetched_at`), the text from the first. For coins younger than `X_ENGAGEMENT_YOUNG_S` (2 h) the post is fetched again (free mirrors only, never the paid tier) when that copy is `X_ENGAGEMENT_REFRESH_S` (300 s) old, a failed try retried after `X_ENGAGEMENT_RETRY_S` (60 s); and the API does not serve a cached read of such a coin whose `engagement.as_of` is older than `X_ENGAGEMENT_REFRESH_S` (unless the read is under `X_ENGAGEMENT_RETRY_S` old, or the caller gave `max_age`), so served counts are at most 5 min old unless the mirrors are down. Older coins keep the cached copy. This is the attention signal to grade for predictive value.
 
 ### 4.4 Knowledge sources (refreshed by cron, stored locally)
 
@@ -390,6 +392,13 @@ TokenContext(raw on-chain + metadata + optional enrichment)
   - The `baby`/`lil`/`mini` marker is a derivative only when the rest of the name is a known coin or a named entity ("Baby PNUT", "Baby Trump"); "Baby Shark" is a song.
   - A known-coin match by ticker alone, when the name resolves to a different entity ("Department of Government Efficiency $DOGE"), keeps the `derivative/reference` evidence but does not inherit the coin's subject categories (the dog).
   - A referent found only in the description while the name's head word is unresolved ("Gork", described as "elons dumb ai") is demoted below 0.45 and reported as a weak guess with a caveat.
+- **Referent precision (since rules 0.30.0, knobs in `data/referent_rules.yaml`, regression set `tests/golden/referent_audit.yaml` from the 2026-10-12 hand audit, run by `tests/test_referent_audit.py`):**
+  - Whole-word, case-aware matching: a shorter lexicon hit at the start of a longer one gives way to it ("musk ox"); a gazetteer name made only of everyday words counts in text only when written like a title, and in the name only as the whole name; rare body-part words count only when common.
+  - Wikipedia results that are lists, surname/given-name pages or disambiguations are rejected (`wiki_reject_desc`); a title-only article whose kind conflicts with the coin's other themes, or an everyday-word creative work named nowhere else, is scaled down with its categories.
+  - The referent must agree with the name or ticker: a referent only the post or description names, which the name does not echo and no sentence says together with the whole name, is a passing mention (`mention_only_factor`); an account the name echoes is lifted (`echoed_account_lift`).
+  - Chain/platform words (`platform_labels`) never become the referent outside the name and their categories are down-weighted; memecoin slang counts only in the name; fee-routing text is dropped before the word lists read the text; a tokenized-stock pair the name does not build on gives only `crypto_native/paired_ecosystem`.
+  - X-timing `news_event` needs content (a trend or news hit, a named entity in the post, or an author with `news_author_min_followers` reach); otherwise the row is a plain `x_post` reference.
+  - **The X post's subject** (`engine/xsubject.py`): when the theme comes from the post and no entity names it, the referent is the phrase of the post the name or ticker repeats (quoted term, "named X", capitalised name, shortest window of the name's words), or the post's lead clause; `source: "x"`, `desc` "@author: <first ~120 chars>", `post_id` set, and its wave is counted by post id (`analyzer.wave_key`).
 
 ### 5.4 S4 Ticker ↔ name explanation
 Compute these features and pick the explanation that fits, in this priority order:
@@ -583,6 +592,8 @@ Analysis depth is chosen **per request** by the consumer:
 | **basic** | resolve; metadata; S1–S5 on name, ticker, description; X link parse, snowflake time and reuse count (no X fetch); image fetch + hashes + near-duplicates; on-demand copycat lookup; S9/S10 | ~300 ms CPU + a few fetches; never any paid call |
 | **full** (default) | everything in basic, plus OCR, the X fetch chain (§4.3), trend matching and news confirmation, optional CLIP | seconds; the paid X fallback only here, under a daily cap |
 
+**Full-depth fetches run concurrently under a deadline (since rules 0.30.0).** The X post (then, concurrently, its quoted and replied-to posts and the author's profile; then the post media hashes and the Wikipedia lookups, which read the post), OCR, logo labels, the trend index, Google News and Bluesky run at once, sharing the job's one database connection through `fulldepth.serial()` (one statement at a time; the network overlaps). `FULL_DEPTH_DEADLINE_S` (default 20 s, under the API's 25 s maximum wait) bounds them: whatever is unfinished is cancelled, the engine runs on the rest, and the read is `partial` with `analysis.timed_out` naming the sources and one `timeout` entry each in the response's `errors` (cached 60 s like any partial read). The news check of the Wikipedia hits runs after the engine on what is left of the deadline (`news_check`).
+
 **What never changes and is cached forever:**
 - on-chain name, symbol, uri, creator and creation time;
 - the metadata JSON (by CID);
@@ -593,7 +604,7 @@ Analysis depth is chosen **per request** by the consumer:
 
 | Token age | Default `max_age` | Why |
 |---|---|---|
-| < 1 hour | 5 min | copycat counts, trends, X reuse and bonding-curve state move fast |
+| < 1 hour | 5 min | copycat counts, trends, X reuse and bonding-curve state move fast; X engagement (below 2 h, see §4.3) also expires a cached read once its counts are 5 min old |
 | 1 hour – 7 days | 1 hour | |
 | > 7 days | 24 hours | |
 

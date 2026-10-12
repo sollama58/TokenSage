@@ -23,12 +23,14 @@ from tokensage.engine import (
     xcred,
     xmatch,
     xsignals,
+    xsubject,
 )
 from tokensage.engine import image as image_stage
 from tokensage.engine import lineage as lineage_stage
 from tokensage.engine import vision as vision_stage
 from tokensage.engine.aggregate import (
     ACCOUNT_SIZE_KINDS,
+    DICTIONARY_KINDS,
     NO_PARENT,
     THEME_ORDER,
     TREND_SOURCES,
@@ -251,6 +253,10 @@ def _lexicon_evidence(
     # words the name was actually written with (before compound splitting): a 1-2 letter
     # match such as "xi" only counts when it was its own word, not a piece of "robotaxi"
     written = set(n.name_clean.split())
+    rules = k.rules
+    name_only_slang = {str(w).lower() for w in rules.get("name_only_slang") or []}
+    rare_classes = set(rules.get("rare_word_classes") or [])
+    common = segment.common_words(k)
     named_words: set[str] = set()  # words of entity/slang matches in the name
     head = _head_word(n)
     head_named = False  # an entity in the name covers its head word
@@ -272,6 +278,16 @@ def _lexicon_evidence(
         for h in hits:
             if where == "name" and len(h.surface) <= 2 and h.surface not in written:
                 continue
+            if (
+                h.kind == "slang"
+                and where not in ("name", "symbol")
+                and h.surface in name_only_slang
+            ):
+                continue  # every coin is a memecoin: the word in a post says nothing
+            if h.kind == "wordnet" and h.payload in rare_classes and h.surface not in common:
+                continue  # "pons" is a body part only to a dictionary
+            if h.kind == "entity" and not _everyday_title_ok(h, where, text, n, k):
+                continue  # "what if we run it" is not Marvel's What If...?
             if where == "name" and h.kind != "wordnet" and _tail_of_word(h.surface, written):
                 continue  # "iggy" in "Niggy": a name read out of the end of another word
             if where == "name" and (
@@ -385,6 +401,74 @@ def _lexicon_evidence(
                 if ev.referent is not None and ev.label == "referent":
                     ev.weight = ev.referent.score
     return evs
+
+
+# Function words: with dictionary words they make up titles that are also everyday phrases.
+_FUNCTION_WORDS = {
+    "a", "an", "the", "what", "if", "of", "and", "or", "to", "in", "on", "at", "for", "is",
+    "it", "be", "we", "you", "i", "my", "your", "our", "this", "that", "who", "how", "why",
+    "when", "where", "not", "no", "yes", "all", "so", "but", "me", "us", "he", "she", "they",
+    "do", "go", "up", "out", "with", "from", "by", "as", "are", "was", "will", "can", "just",
+}  # fmt: skip
+
+
+def _everyday_title_ok(h: lexicon.Hit, where: str, text: str, n: Normalized, k: Knowledge) -> bool:
+    """A gazetteer title made only of everyday words ("What If...?", "The End") is that
+    title only when it is written like one: in a post or description each word capitalised
+    (not a whole line in capitals), in the name only as the whole name. The curated seed is
+    exempt: its aliases were chosen to be read in any case."""
+    e = h.payload
+    if not isinstance(e, Entity) or e.source != "wikidata":
+        return True
+    if not k.rules.get("case_aware_common_entities", True):
+        return True
+    words = h.surface.split()
+    dictionary = gazetteer.common_words()
+    if not words or not all(
+        w in _FUNCTION_WORDS or gazetteer.is_common(w, dictionary) for w in words
+    ):
+        return True  # "Sydney Sweeney", "Charlie Kirk": a name, in any case
+    if where == "name":
+        content = [t for t in n.name_tokens if t not in _HEAD_STOP]
+        return content == words or n.name_tokens == words
+    if where == "description":
+        text = n.description_raw or ""
+    if where not in ("x", "description"):
+        return True
+    return written_as_title(h.surface, text)
+
+
+def written_as_title(surface: str, raw: str) -> bool:
+    """Some occurrence of `surface` in the raw text has every word capitalised and is not
+    simply shouted (all capitals)."""
+    words = [re.escape(w) for w in surface.split()]
+    if not words or not raw:
+        return False
+    pat = re.compile(r"(?<![\w])" + r"[\W_]+".join(words) + r"(?![\w])", re.IGNORECASE)
+    for m in pat.finditer(raw):
+        got = re.findall(r"\w+", m.group(0))
+        if all(w[0].isupper() for w in got) and any(c.islower() for c in m.group(0)):
+            return True
+    return False
+
+
+_FEE_RES: dict[int, list[re.Pattern[str]]] = {}
+
+
+def strip_fee_text(text: str | None, k: Knowledge) -> str | None:
+    """The text without its fee-routing clauses (data/referent_rules.yaml fee_text_patterns):
+    "Creator fees split 90% to my wallet" says where the money goes, and its "wallet" made
+    coins utility claims."""
+    if not text:
+        return text
+    pats = _FEE_RES.get(id(k))
+    if pats is None:
+        pats = [re.compile(p, re.IGNORECASE) for p in k.rules.get("fee_text_patterns") or []]
+        _FEE_RES.clear()
+        _FEE_RES[id(k)] = pats
+    for p in pats:
+        text = p.sub(" ", text)
+    return text
 
 
 _WORD_SETS: dict[int, dict[str, set[str]]] = {}
@@ -962,7 +1046,8 @@ def _ocr_pass(
 
 def _run(inp: EngineInput, depth: str) -> EngineOutput:
     k = load_knowledge()
-    n = normalize(inp.name, inp.symbol, inp.description)
+    # where the creator fees go is not what the coin is about ("fees to my wallet")
+    n = normalize(inp.name, inp.symbol, strip_fee_text(inp.description, k))
     evidence: list[Ev] = []
     evidence += _normalization_evidence(n, k)
 
@@ -989,10 +1074,10 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             )
             evidence += xa.evidence
             if xa.text:
-                extra_passes.append(("x", xa.text, 0.8))
+                extra_passes.append(("x", strip_fee_text(xa.text, k) or "", 0.8))
             for related in (xa.quoted, xa.replied_to):
                 if related and related.text:
-                    extra_passes.append(("x", related.text, 0.7))
+                    extra_passes.append(("x", strip_fee_text(related.text, k) or "", 0.7))
             extra_passes += _account_passes(xa)
     gaz = inp.ctx.gazetteer if inp.ctx.gazetteer is not None else gazetteer.packaged()
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
@@ -1175,6 +1260,12 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
     if not is_famous:
         _enrich_copies(copies, lin, n, inp, logo_near, k)
 
+    post_texts = _post_texts(xa)
+    if depth == "full" and inp.wiki_refs:
+        _demote_wiki_homonyms(evidence, inp.wiki_refs, n, k, post_texts)
+    evidence = _platform_referents(evidence, n, k)
+    _news_needs_content(evidence, xa, n, k)
+    _demote_mentions(evidence, n, k, [n.description_raw or "", *post_texts])
     evidence = _news_needs_a_date(evidence, k, inp.created_at)
     symbol_is_name = _symbol_is_name(n)
     _require_second_signal(evidence, k, symbol_is_name)
@@ -1202,6 +1293,8 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             agg = aggregate(evidence, k, symbol_is_name=_symbol_is_name(n))
     _demote_description_only_referent(agg, head)
     referent_read = read_referent(agg, symbol_is_name, k)
+    if depth == "full" and xa is not None and xa.status == "ok" and inp.x_kind == "tweet":
+        referent_read = _post_subject(referent_read, agg, inp, xa, n, k)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     flags += _lineage_flags(lin, k)
     if not is_famous:
@@ -1307,6 +1400,304 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         referent_read=referent_read,
         vision=inp.vision if depth == "full" else None,
     )
+
+
+def _post_texts(xa: xsignals.XAssessment | None) -> list[str]:
+    """The linked post's text and the texts of the posts it quotes or replies to."""
+    if xa is None:
+        return []
+    out = [xa.text or ""]
+    out += [r.text or "" for r in (xa.quoted, xa.replied_to) if r is not None]
+    return [t for t in out if t]
+
+
+# Evidence kinds that say nothing about what the coin is about on their own (timing, size,
+# relation and setting rows), when judging whether a Wikipedia hit fits the coin's theme.
+_NOT_THEME_KINDS = {
+    "x_timing", "x_quote_timing", "x_reply_timing", "x_mentions", "x_sensitive", "marker",
+    "same_name", "image_hash", "pair", "script", "meta", "copy_inherit", "known_coin_inherit",
+}  # fmt: skip
+
+
+def _scale_referent(
+    evidence: list[Ev], ref: ReferentCandidate, factor: float, why: str, rows: bool = False
+) -> None:
+    """Scale one referent candidate (shared by its evidence rows) and say why; with `rows`,
+    the category rows it brought scale too (a homonym's categories are as wrong as it is)."""
+    ref.score = round(ref.score * factor, 3)
+    for ev in evidence:
+        if ev.referent is ref:
+            if ev.label == "referent":
+                ev.weight = ref.score
+            elif rows:
+                ev.weight = round(ev.weight * factor, 3)
+            if why not in ev.detail:
+                ev.detail += f" ({why})"
+
+
+def _demote_wiki_homonyms(
+    evidence: list[Ev],
+    refs: list[wikilookup.WikiRef],
+    n: Normalized,
+    k: Knowledge,
+    post_texts: list[str],
+) -> None:
+    """A Wikipedia article found by title only is often a homonym: Folia the musical form for
+    an AI-agent swarm, Błocko the village for a village-building game, Pig Boy the book for a
+    pig coin. It keeps its score only when it fits: its kind agrees with the theme the coin's
+    other inputs give (or they give none), and a creative work matched by everyday words is
+    named again in the description, the post or a trend."""
+    wiki_rows = [ev for ev in evidence if ev.source.startswith("wikipedia_search:")]
+    if not wiki_rows:
+        return
+    other = {
+        ev.label.split("/")[0]
+        for ev in evidence
+        if not ev.source.startswith("wikipedia_search:")
+        and ev.kind not in DICTIONARY_KINDS
+        and ev.kind not in ACCOUNT_SIZE_KINDS
+        and ev.kind not in _NOT_THEME_KINDS
+        and ev.label != "referent"
+        and is_theme(ev.label)
+        and ev.label.split("/")[0] != "news_event"
+        and ev.weight >= 0.3
+    }
+    trend_terms = {ev.source.partition(":")[2].lower() for ev in evidence if ev.kind == "trend"}
+    texts = " ".join([n.description_raw or "", *post_texts]).casefold()
+    conflict = float(k.rules.get("wiki_conflict_factor", 0.6))
+    work = float(k.rules.get("wiki_common_work_factor", 0.6))
+    done: set[int] = set()
+    for r in refs:
+        rows = [ev for ev in wiki_rows if ev.source == f"wikipedia_search:{r.title}"]
+        ref = next((ev.referent for ev in rows if ev.referent is not None), None)
+        if ref is None or id(ref) in done:
+            continue
+        done.add(id(ref))
+        tops = {c.split("/")[0] for c in ref.categories}
+        if r.span.where == "name" and other and not (tops & other):
+            _scale_referent(
+                evidence,
+                ref,
+                conflict,
+                "a different thing from what the coin's other inputs say",
+                rows=True,
+            )
+        title = re.sub(r"\s*\([^)]*\)\s*$", "", r.title).casefold()
+        if (
+            r.span.common
+            and wikilookup.is_work(r.desc, k)
+            and title not in texts
+            and title not in trend_terms
+        ):
+            _scale_referent(
+                evidence, ref, work, "a title made of everyday words, named nowhere else", True
+            )
+
+
+_LABEL_STOP = {"the", "and", "of", "coin", "token", "inc", "ltd", "com"}
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in re.split(r"[^0-9a-z]+", text.casefold()) if w]
+
+
+def echoes_name(ref: ReferentCandidate, n: Normalized) -> bool:
+    """The coin's name or ticker says this referent: one of its words ("Elonius" holds
+    "elon"; "SpaceX 6900" says SpaceX), or the ticker spells it."""
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", ref.label)
+    words = {w for w in _words(base) + _words(ref.surface or "") if len(w) >= 3}
+    words -= _LABEL_STOP
+    names = {t for t in n.name_tokens if len(t) >= 3}
+    tick = n.ticker.lower()
+    compact = n.name_compact
+    if words & names or (tick and tick in words):
+        return True
+    for c in ("".join(_words(base)), "".join(_words(ref.surface or ""))):
+        if len(c) >= 4 and compact and (c in compact or (len(compact) >= 4 and compact in c)):
+            return True
+        if len(c) >= 3 and tick and (c == tick or (len(c) >= 4 and c in tick)):
+            return True
+    return any(len(w) >= 4 and compact and w in compact for w in words)
+
+
+def _candidates(evidence: list[Ev]) -> dict[int, tuple[ReferentCandidate, set[str]]]:
+    """Each referent candidate once, with the inputs (where) its rows come from."""
+    out: dict[int, tuple[ReferentCandidate, set[str]]] = {}
+    for ev in evidence:
+        if ev.referent is None:
+            continue
+        got = out.setdefault(id(ev.referent), (ev.referent, set()))
+        got[1].add(ev.where)
+    return out
+
+
+def _platform_referents(evidence: list[Ev], n: Normalized, k: Knowledge) -> list[Ev]:
+    """Solana, pump.fun, Raydium, "memecoin": where a coin lives, not what it is about. Named
+    only in the post or the description ("built on Solana", "launch a memecoin on Solana")
+    they are never the referent and their categories count at a fraction; in the name they
+    are the referent only when nothing else the name says is ("GTA6 Coin Solana" is about
+    GTA 6), and never as a piece of a longer word ("Solworker")."""
+    labels = {str(x).casefold() for x in k.rules.get("platform_labels") or []}
+    if not labels:
+        return evidence
+    factor = float(k.rules.get("platform_text_factor", 0.35))
+    written = set(n.name_clean.split())
+    drop: set[int] = set()
+    for ref, wheres in _candidates(evidence).values():
+        if ref.label.casefold() not in labels:
+            continue
+        surface = (ref.surface or "").casefold()
+        in_name = bool(wheres & {"name", "symbol"})
+        # "sol" of "Solworker": a piece of a longer written word, not the chain
+        fragment = (
+            bool(surface)
+            and " " not in surface
+            and surface not in written
+            and any(w != surface and w.startswith(surface) for w in written)
+        )
+        # "GTA6 Coin Solana", "Dog on Sol": the chain written as the coin's address
+        toks = n.name_tokens
+        tag = any(
+            t == surface and i > 0 and toks[i - 1] in ("coin", "token", "on", "in", "for")
+            for i, t in enumerate(toks)
+        )
+        fragment = fragment or tag
+        in_name = in_name and not fragment
+        if in_name:
+            other = [
+                ev
+                for ev in evidence
+                if ev.referent is not None
+                and ev.referent is not ref
+                and ev.referent.label.casefold() not in labels
+                and ev.where in ("name", "symbol")
+                and ev.kind in ("entity", "known_coin", "referent", "template_family")
+            ]
+            if not other:
+                continue
+        for ev in evidence:
+            if ev.referent is ref:
+                if ev.label == "referent":
+                    drop.add(id(ev))
+                    continue
+                ev.referent = None
+                if ev.where not in ("name", "symbol") or fragment:
+                    ev.weight = round(ev.weight * factor, 3)
+                ev.detail += " (a chain or platform the coin is on, not its subject)"
+    return [ev for ev in evidence if id(ev) not in drop]
+
+
+_TIMING_KINDS = ("x_timing", "x_quote_timing", "x_reply_timing")
+X_POST_LABEL = "x_post"  # not a taxonomy label: a post reference with no news content
+
+
+def _account_row(ev: Ev) -> bool:
+    """A row from the account-name passes (who posted, quoted, was replied to, mentioned)."""
+    return ev.detail.startswith(tuple(f"{role} " for role in _ACCOUNT_ROLE.values()))
+
+
+def _made_for_coin(handle: str | None, n: Normalized) -> bool:
+    h = "".join(_words(handle or ""))
+    t = n.ticker.lower()
+    return bool(h) and (
+        (len(n.name_compact) >= 3 and n.name_compact in h) or (len(t) >= 3 and t in h)
+    )
+
+
+def _news_needs_content(
+    evidence: list[Ev], xa: xsignals.XAssessment | None, n: Normalized, k: Knowledge
+) -> None:
+    """An earlier post by someone else is news only when something says so: a trend or news
+    hit, a named entity in the post, or an author with real reach (not an account named
+    after the coin). Otherwise its timing row is a plain post reference (label x_post, no
+    category): "sdasdc e awe" posted a minute before launch is not a news event."""
+    rows = [ev for ev in evidence if ev.kind in _TIMING_KINDS and ev.label == "news_event"]
+    if not rows or xa is None:
+        return
+    if any(ev.kind == "trend" for ev in evidence):
+        return
+    if any(
+        ev.where == "x"
+        and ev.kind == "entity"
+        and ev.referent is not None
+        and not ev.referent.generic
+        and not _account_row(ev)
+        for ev in evidence
+    ):
+        return
+    reach = int(k.rules.get("news_author_min_followers", xsignals.BIG_ACCOUNT))
+    authors = {
+        "x_timing": (xa.author_handle, xa.followers, xa.verified_type),
+        "x_quote_timing": (
+            (xa.quoted.author_handle, xa.quoted.followers, xa.quoted.verified_type)
+            if xa.quoted
+            else (None, None, None)
+        ),
+        "x_reply_timing": (
+            (xa.replied_to.author_handle, xa.replied_to.followers, xa.replied_to.verified_type)
+            if xa.replied_to
+            else (None, None, None)
+        ),
+    }
+    for ev in rows:
+        handle, followers, verified = authors[ev.kind]
+        big = (followers or 0) >= reach or verified in ("business", "government")
+        if big and not _made_for_coin(handle, n):
+            continue
+        ev.label = X_POST_LABEL
+        ev.detail += (
+            "; nothing in it says news (no trend or headline, no named entity, a small "
+            "account): a post reference, not a news event"
+        )
+
+
+def _told_with_the_name(ref: ReferentCandidate, n: Normalized, texts: list[str]) -> bool:
+    """A sentence of the post or description names the referent and says the coin's whole
+    name too ("Peanut the squirrel did nothing wrong" for Did Nothing Wrong): the name is
+    said about it, so it is no passing mention."""
+    names = {t for t in n.name_tokens if len(t) >= 3}
+    if not names:
+        return False
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", ref.label)
+    want = {w for w in _words(base) + _words(ref.surface or "") if len(w) >= 3} - _LABEL_STOP
+    if not want:
+        return False
+    for text in texts:
+        for sentence in re.split(r"[.!?\n]+", text or ""):
+            words = set(_words(sentence))
+            if names <= words and want & words:
+                return True
+    return False
+
+
+def _demote_mentions(
+    evidence: list[Ev], n: Normalized, k: Knowledge, texts: list[str] | None = None
+) -> None:
+    """The subject is what the name is about. A named referent found only in the X post or
+    the description, which the name and ticker do not echo, is a passing mention: a KOL the
+    post tags, a tool it says to paste a link into, a country in a turn of phrase. It drops
+    to a weak guess (data/referent_rules.yaml mention_only_factor)."""
+    if not n.name_compact and not n.ticker:
+        return  # x.match reads the post alone: there is no name to echo
+    factor = float(k.rules.get("mention_only_factor", 0.55))
+    lift = float(k.rules.get("echoed_account_lift", 2.0))
+    for ref, wheres in _candidates(evidence).values():
+        if not wheres or not wheres <= {"x", "description"} or ref.generic:
+            continue
+        if echoes_name(ref, n):
+            rows = [ev for ev in evidence if ev.referent is ref]
+            if wheres == {"x"} and rows and all(_account_row(ev) for ev in rows):
+                # @elonmusk posted and the coin is "Elonius Maximus": the account the name
+                # echoes is the referent, not just a large account in the background
+                ref.score = round(min(0.9, ref.score * lift), 3)
+                for ev in rows:
+                    if ev.label == "referent":
+                        ev.weight = ref.score
+                    ev.detail += " (the coin's name echoes this account)"
+            continue
+        if _told_with_the_name(ref, n, texts or []):
+            continue
+        _scale_referent(evidence, ref, factor, "named only in the post or description")
 
 
 def _self_coins(
@@ -1570,6 +1961,8 @@ class ReferentRead:
     confidence: float
     supported_by: list[str]
     generic: bool = False
+    # the X post the label comes from (source "x"): waves count coins on this post
+    post_id: str | None = None
 
 
 def own_categories(agg: Aggregated) -> list[tuple[str, float]]:
@@ -1712,6 +2105,121 @@ def read_referent(agg: Aggregated, symbol_is_name: bool, k: Knowledge) -> Refere
         supported_by=list(inputs),
         generic=True,
     )
+
+
+def _subject_posts(inp: EngineInput, xa: xsignals.XAssessment) -> list[xsubject.Post]:
+    """The posts that can name the coin's subject, the linked one first: it, then the posts
+    it quotes or replies to when they are someone else's earlier posts."""
+    k = load_knowledge()
+    out: list[xsubject.Post] = []
+    own = (xa.author_handle or "").casefold()
+    if inp.tweet is not None and xa.text and xa.relation != "spoofed":
+        out.append(
+            xsubject.Post(
+                inp.tweet.id,
+                xa.author_handle,
+                strip_fee_text(xa.text, k) or "",
+                xa.relation == "narrative_reference",
+            )
+        )
+    for r in (xa.quoted, xa.replied_to):
+        if r is None or r.status != "ok" or not r.text:
+            continue
+        other = (r.author_handle or "").casefold() != own
+        earlier = (
+            r.created_at is not None
+            and inp.created_at is not None
+            and _aware(r.created_at) < _aware(inp.created_at)
+        )
+        out.append(
+            xsubject.Post(r.id, r.author_handle, strip_fee_text(r.text, k) or "", other and earlier)
+        )
+    return out
+
+
+def _post_subject(
+    rr: ReferentRead | None,
+    agg: Aggregated,
+    inp: EngineInput,
+    xa: xsignals.XAssessment,
+    n: Normalized,
+    k: Knowledge,
+) -> ReferentRead | None:
+    """When the post names what the coin is and nothing better does, the referent is the
+    post's subject (source "x"): a phrase the coin's name or ticker repeats ("Luna", "Ping
+    Ping", "mouse in a theater") replaces a kind-only read, a weak guess, a coin matched by
+    the ticker alone or a title-only Wikipedia hit; the post's lead clause replaces only a
+    kind-only read that the post itself gave."""
+    posts = _subject_posts(inp, xa)
+    if not posts:
+        return rr
+    subj = xsubject.find(posts, n, k)
+    if subj is None:
+        return rr
+    cfg = dict(k.rules.get("x_subject") or {})
+    if subj.matched:
+        use = (
+            rr is None
+            or rr.generic
+            or rr.confidence < 0.5
+            or rr.supported_by == ["symbol"]
+            or (rr.source.startswith("wikipedia_search:") and set(rr.supported_by) <= {"name"})
+        )
+        conf = float(cfg.get("matched_confidence", 0.6))
+        if use and rr is not None and not rr.generic and _post_names(rr, posts, subj.post_id, n):
+            # the same post names the read's entity ("Peanut the squirrel did nothing
+            # wrong" for Did Nothing Wrong): the post is about it, so it stays the referent
+            use = False
+    else:
+        use = rr is not None and rr.generic and rr.supported_by[:1] == ["x"]
+        conf = float(cfg.get("lead_confidence", 0.45))
+    if not use:
+        return rr
+    theme = _theme(agg, float(k.scoring.get("generic_referent_min_category", 0.2)))
+    if rr is not None and rr.generic:
+        kind = rr.kind
+    elif theme is not None:
+        top, leaf, _ = theme
+        kind = _CATEGORY_KIND.get(leaf) or _CATEGORY_KIND[top]
+    else:
+        kind = "other"
+    if subj.matched:
+        # the summary names it too, instead of the weaker read it replaces
+        old = agg.referent
+        agg.referent = ReferentCandidate(
+            label=subj.label, kind=kind, desc=None, source="x", score=conf, surface=subj.label
+        )
+        if old is not None and old.label != subj.label:
+            agg.referent_runner_up = old
+        agg.caveats = [
+            c
+            for c in agg.caveats
+            if c != "referent is a weak guess" and not c.startswith("referent is ambiguous")
+        ]
+    return ReferentRead(
+        label=subj.label,
+        kind=kind,
+        desc=subj.excerpt,
+        source="x",
+        confidence=round(conf, 3),
+        supported_by=["x"],
+        generic=False,
+        post_id=subj.post_id,
+    )
+
+
+def _post_names(rr: ReferentRead, posts: list[xsubject.Post], post_id: str, n: Normalized) -> bool:
+    """The post the subject came from names the read's entity itself, in words beyond the
+    coin's own name (a title the name merely spells, "AlterNet" for Alternet, does not
+    count: the post's subject is then the better read of that same word)."""
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", rr.label)
+    want = {w for w in _words(base) if len(w) >= 3} - _LABEL_STOP - set(n.name_tokens)
+    if not want:
+        return False
+    for p in posts:
+        if p.id == post_id and want <= set(_words(p.text)):
+            return True
+    return False
 
 
 # The quoted / replied-to author is usually the narrative; the posting account is often the
@@ -1895,13 +2403,16 @@ def _demote_description_only_referent(agg: Aggregated, head: str | None) -> None
     ("Gork", described as "elons dumb ai"), is a theme, not what the coin is: report it as
     a weak guess rather than "may refer to Elon Musk"."""
     r = agg.referent
-    if r is None or not head or r.score < 0.45:
+    # (since rules 0.30.0 a description-only referent the name does not echo is already a
+    # weak guess, see _demote_mentions: it still gets the caveat)
+    if r is None or not head:
         return
     wheres = {
         ev.where for ev in agg.evidence if ev.referent is not None and ev.referent.label == r.label
     }
     if wheres and wheres <= {"description"} and not _covers(r, head):
-        r.score = round(min(r.score, 0.44), 3)
+        # a weak guess: the bottom of that band at least, whatever the mention demotion left
+        r.score = round(min(max(r.score, 0.3), 0.44), 3)
         agg.caveats.append(
             f"'{r.label}' appears only in the description; the name itself is unresolved"
         )

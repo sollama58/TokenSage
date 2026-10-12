@@ -56,7 +56,7 @@ GET /v1/tokens/{ca}?depth=full&wait=10
 
 | HTTP | Meaning | What to do |
 |---|---|---|
-| `200` | Analysis in body. `status` is `complete`, `partial` (the metadata is not available yet: analysed from caller hints before the mint was visible on-chain, or the metadata JSON is still being retried; cached for 60 s only, so the next request may be more complete) or `failed` (the analysis job failed; `errors[0].detail` says why, `job_id` names the job, `stale_analysis` carries the previous analysis if there is one). An upstream source that failed does not make the result `partial`: it is reported in `analysis.caveats` and in the per-source fields (`x.status`, `trend.sources[].status`, `image.status`); `errors` is only filled on `failed`. A failure is reported as `failed` for 10 minutes without starting a new job or spending quota; pass `refresh=true` to retry at once. The same applies per item in a batch | Use it; for `failed`, retry later or with `refresh=true` |
+| `200` | Analysis in body. `status` is `complete`, `partial` (the metadata is not available yet: analysed from caller hints before the mint was visible on-chain, or the metadata JSON is still being retried; or, since rules 0.30.0, a full-depth source did not answer within the job deadline, see `analysis.timed_out`; cached for 60 s only, so the next request may be more complete) or `failed` (the analysis job failed; `errors[0].detail` says why, `job_id` names the job, `stale_analysis` carries the previous analysis if there is one). An upstream source that failed does not make the result `partial`: it is reported in `analysis.caveats` and in the per-source fields (`x.status`, `trend.sources[].status`, `image.status`); `errors` is filled on `failed`, and since rules 0.30.0 on a `partial` read cut short by the full-depth deadline: one `{source, code: "timeout", detail}` per source left out. A failure is reported as `failed` for 10 minutes without starting a new job or spending quota; pass `refresh=true` to retry at once. The same applies per item in a batch | Use it; for `failed`, retry later or with `refresh=true` |
 | `202` | Not ready yet. Body has `status: "pending"`, a `job_id`, and `stale_analysis` if an older result exists | Retry the same URL after `Retry-After` seconds (≈3 s), or poll `GET /v1/jobs/{job_id}`. Give up after ~60 s total |
 | `400` | `invalid_ca`: not a Solana address; `invalid_callback_url` (batch only) | Don't retry |
 | `401` | `unauthorized` | Fix the key |
@@ -81,7 +81,8 @@ Every error has one shape:
   "analysis": { … },                    // the Analysis document, see below
   "stale_analysis": null,               // on 202: an older analysis if one exists
   "freshness": { "analyzed_at": "…", "age_s": 42, "max_age_s": 300, "from_cache": true },
-  "errors": [],                         // only on status "failed": why the job failed
+  "errors": [],                         // on "failed": why the job failed; on a "partial"
+                                        // read cut by the deadline: {source, code: "timeout"}
   "job_id": null,                       // set on 202
   "request_id": "…"
 }
@@ -96,7 +97,7 @@ Every error has one shape:
 | `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `graduated_pool` (since rules 0.29.0: the PumpSwap pool a completed curve migrated into, or `null` while on the curve and for coins that graduated to Raydium before PumpSwap), `creator` (the creator **wallet**; since rules 0.19.0 never a PDA), `creator_onchain` and `creator_kind` (what the bonding curve's creator field actually holds: `wallet`, `sharing_config`, `holder_rewards_pda`, or `unknown` when it holds none), `creator_fee` (where the creator fee goes: the creator, another wallet, a split, holders, a charity or a GitHub account; see below), `quote_mint`, and `pair` (the token it trades against; see below) |
 | `raw` | Name, symbol, description and social links as found in the metadata (**untrusted text, escape before rendering**) |
 | `normalized` | Cleaned tokens, ticker base, version markers (`version:2`), emoji keywords, obfuscation flags |
-| `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, `supported_by` and `generic`. `kind` is one of `famous_animal`, `meme`, `person`, `coin`, `event`, `concept`, `place`, `other`, and since rules 0.17.0 `animal` (an animal, not a specific famous one), `media` (a film, game, show or franchise), `project` (a crypto or AI product, protocol or launchpad), `object` (food, an object, an abstract thing) and `organization` (a company, exchange or listed stock); expect new kinds over time. `supported_by` lists the independent inputs pointing at it (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, and `copy_of` when it is inherited from the coin this one copies); a ticker that spells the name counts as the name. **`generic: true`** means only the kind is known: the name, ticker, image or description make it plain what sort of coin this is ("FROGMAN" is an animal coin) but no specific entity was identified, so `label` is a generic word for the kind (`"frog"`, `"cat"`, `"crypto project"`, `"AI agent"`) and `wave` is `null`. `confidence` bands (rules 0.17.0): **0.3-0.49** only the kind is known (`generic`), or a weak named guess; **0.5-0.69** a named referent from one input; **0.7+** two or more independent inputs agree. Since rules 0.21.0 a live trend that names the referent counts as the `trend` input (a Wikipedia article whose title is the referent, or an X, Google Trends, news or Bluesky label that is its name), a famous coin matched only by the ticker counts as `symbol`, not `name`, and the summary's "(confidence …)" is this banded value. `referent` is `null` when the coin has no readable theme at all (a random string, no description) and, since rules 0.28.0, when the best guess is below 0.3: the summary then says no clear reference was found instead of naming it. `wave` counts the coins on the same referent, see below |
+| `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, `supported_by` and `generic`. `kind` is one of `famous_animal`, `meme`, `person`, `coin`, `event`, `concept`, `place`, `other`, and since rules 0.17.0 `animal` (an animal, not a specific famous one), `media` (a film, game, show or franchise), `project` (a crypto or AI product, protocol or launchpad), `object` (food, an object, an abstract thing) and `organization` (a company, exchange or listed stock); expect new kinds over time. `supported_by` lists the independent inputs pointing at it (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, and `copy_of` when it is inherited from the coin this one copies); a ticker that spells the name counts as the name. **`generic: true`** means only the kind is known: the name, ticker, image or description make it plain what sort of coin this is ("FROGMAN" is an animal coin) but no specific entity was identified, so `label` is a generic word for the kind (`"frog"`, `"cat"`, `"crypto project"`, `"AI agent"`) and `wave` is `null`. `confidence` bands (rules 0.17.0): **0.3-0.49** only the kind is known (`generic`), or a weak named guess; **0.5-0.69** a named referent from one input; **0.7+** two or more independent inputs agree. Since rules 0.21.0 a live trend that names the referent counts as the `trend` input (a Wikipedia article whose title is the referent, or an X, Google Trends, news or Bluesky label that is its name), a famous coin matched only by the ticker counts as `symbol`, not `name`, and the summary's "(confidence …)" is this banded value. `referent` is `null` when the coin has no readable theme at all (a random string, no description) and, since rules 0.28.0, when the best guess is below 0.3: the summary then says no clear reference was found instead of naming it. `wave` counts the coins on the same referent, see below. Since rules 0.30.0 the referent can be **the subject of the coin's X post** (`source: "x"`, `supported_by: ["x"]`): when the post names what the coin is and no lexicon or Wikipedia entity does (a generic kind, a weak guess, a coin matched by the ticker alone, or a title-only Wikipedia hit), `label` is the phrase the coin's name or ticker repeats in the post ("a white lioness named \"Luna\"" gives `Luna`; a quoted term, a "named/called/meet X" phrase, a capitalised name, or the shortest stretch holding the name's words), `confidence` 0.6, `kind` the closest existing kind for the coin's theme, `desc` `"@author: <first ~120 characters of the post>"`, and the new optional **`post_id`** the post's id. When nothing in the post matches the name but the coin's only theme came from the post, its lead clause stands in at 0.45. `post_id` is `null` for every other referent |
 | `categories[]` | Multi-label with confidences and `inputs`: the independent inputs that agree on the label, strongest first (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, `copy_of`). Labels come from `GET /v1/meta`; expect new ones over time. `wave_1h` is how many coins TokenSage analysed in the last hour carry the same label (this one included). How confidence is scored: see "Category confidence" below |
 | `main_category` | Since rules 0.20.0: the coin's main category, the strongest top-level theme in `categories[]` (same object: `label`, `confidence`, `inputs`, `wave_1h`). Use it, not `categories[0]`, when you show one category per coin. `derivative` is the coin's relation to another coin, not a theme: it stays in `categories[]` (often the highest confidence on a copy) and in `copy_of`/`lineage`, and is `main_category` only when the coin has no theme at all, its own or inherited from the original. Since rules 0.21.0 `regional_language` (the script of the name: who the coin is for, not what it is about) is treated the same way, and two themes with equal confidence are ordered the way the generic referent's kind is chosen (the subject before the setting: `animal`, `celebrity`, `meme_template`, `pop_culture`, `news_event`, `political`, `ai_agent`, `tradfi`, `food_object_abstract`, `humor_crude_offensive`, `crypto_native`). `null` when `categories[]` has no top-level label (it is empty, or holds only `crypto_native/paired_ecosystem`), and on an analysis stored before rules 0.20.0 that is served with `max_age` or as `stale_analysis`. The summary's "reads as …" clause follows the same rule |
 | `ticker_explanation` | Plain-language explanation of the ticker |
@@ -112,6 +113,7 @@ Every error has one shape:
 | `summary` | Template-generated plain-language summary. It includes a "Context:" sentence pulling the whole picture together: what it trades against, what its X post replies to or quotes, which recent coin it copies, and which trend it matches |
 | `evidence[]` | Why: `{kind, label, weight, detail, source, url, where}`; `where` is the input it came from (`name`, `symbol`, `description`, `image`, `x`, `trend`, `chain`, `db`, or `copy_of` for rows inherited from the original a copycat coin copies) |
 | `caveats[]` | Automatic caveats (single weak source, ambiguous referent, deleted tweet, …) |
+| `timed_out[]` | Since rules 0.30.0, full depth: the sources still unfinished when the job deadline (`FULL_DEPTH_DEADLINE_S`, default 20 s) passed and left out of this read (`x`, `x_media`, `wikipedia`, `ocr`, `vision`, `trends`, `news`, `bluesky`, `news_check`). Empty normally; when not, `status` is `partial`, a `partial: full-depth deadline …` caveat names them, and `errors[]` has one `timeout` entry each |
 | `depth`, `analyzed_at`, `versions` | What was run, when, and with which rule/lexicon versions. Since rules 0.29.0 `versions.models` names the models whose output is in the document (`vision`, the logo-label model, when `image.labels` is filled). A cached analysis made by older rules (before a deploy) is re-run on the next request unless you pass `max_age` |
 
 ### `lineage`: which copy is this, and of what (all depths)
@@ -146,8 +148,11 @@ window). `first_seen_at`: the launch time of the first such coin in the last 7 d
 `rank_24h`: this coin's place by launch time among the last 24 h's launches on the referent
 (`null` when it launched before that window). Referents are matched by TokenSage's normalised
 referent, the resolved label with case and punctuation folded, after every alias has resolved
-to one entity, so "Elon", "Musk" and "elonmusk" coins count together. Unlike `lineage`, these
-windows end at the read, so a later re-read sees the wave as it is then.
+to one entity, so "Elon", "Musk" and "elonmusk" coins count together. Since rules 0.30.0 a
+referent that is the subject of an X post (`referent.post_id` set) is counted by the post
+instead: every coin launched on one post rides one wave, whatever phrase each read took from
+it. Unlike `lineage`, these windows end at the read, so a later re-read sees the wave as it is
+then.
 
 **All lineage and wave counts only cover coins TokenSage has analysed** (since 2026-10-07 that
 is every pump.fun launch TrenchScanner forwards). The latest read of each coin counts.
@@ -183,9 +188,72 @@ A category's confidence comes from how many independent inputs agree on it and h
 - Dictionary words count only in their usual sense: the WordNet lists keep a word for a class
   only when its most-used sense is in that class ("world" is not an animal, "pad" not a body
   part, "launch" not a vehicle).
+- Since rules 0.30.0, `news_event` from the X post's timing (an earlier post by someone else)
+  needs content: a trend or headline hit, a named entity in the post (beyond the accounts
+  involved), or an author with reach (50k+ followers, or a verified business or government
+  account, not one made for the coin). Otherwise the timing row is a plain post reference
+  (label `x_post`, no category).
+
+#### Referent precision (since rules 0.30.0)
+
+The lists and thresholds below live in `data/referent_rules.yaml`.
+
+- Matching is whole-word, and a shorter lexicon hit inside a longer one at the same place gives
+  way to it ("musk ox" is not Elon Musk). Gazetteer names made only of everyday words ("what
+  if", "the end") count in a post or description only when written like a title, and in the
+  name only when they are the whole name. Rare words of some WordNet classes (body parts:
+  "pons") count only when they are among the 20k most frequent English words.
+- Wikipedia results whose short description marks a list, a surname or given-name page or a
+  disambiguation page are never a referent. A Wikipedia article found by the name whose kind
+  disagrees with the theme the other inputs give, or a creative work matched by everyday words
+  and named nowhere else, is scaled down (0.6×) with its categories.
+- The referent must agree with the name or ticker: a named referent found only in the post or
+  description, which the name and ticker do not echo and no sentence says together with the
+  coin's whole name, is a passing mention (0.55×, a weak guess at most). An account behind the
+  post whose name the coin's name echoes ("Elonius" on an @elonmusk post) is lifted instead.
+- Chain and platform words (Solana, pump.fun, Raydium, "memecoin") are where a coin lives, not
+  what it is about: outside the name they never become the referent and their categories count
+  at 0.35×; in the name they give way to any other candidate the name has. "Memecoin" slang
+  counts only in the name.
+- Fee-routing text ("creator fees to my wallet", rev share, buybacks) is dropped from the
+  description and post before the word lists read them.
 
 `scripts/category_audit.py` measures per-category precision and recall against hand-labelled
 pump.fun launches (`tests/golden/category_audit.yaml`, `category_audit_holdout.yaml`).
+
+### `x.engagement`: likes, reposts and views of the post (depth=full, since rules 0.30.0)
+
+The linked post's public counts, and the same for `x.quoted` and `x.replied_to`:
+
+```jsonc
+"x": {
+  "created_at": "2026-10-12T03:16:40Z",  // the post's own time as the source reports it
+  "engagement": {
+    "likes": 41000, "reposts": 4100, "replies": 2050,
+    "quotes": 12, "bookmarks": 40, "views": 9800000,
+    "as_of": "2026-10-12T03:21:02Z"      // when the copy these counts come from was fetched
+  },
+  "media": [ { "type": "video", "url": "https://video.twimg.com/…mp4",
+               "thumbnail_url": "https://pbs.twimg.com/…jpg" } ],
+  "replied_to": { "id": "…", "engagement": { … }, "media": [ … ], … }
+}
+```
+
+- A count is `null` when the source that answered does not report it (the free mirrors
+  differ: views, quotes and bookmarks are often missing, especially for the replied-to post).
+  `engagement` is `null` when the post was not fetched (basic depth, deleted, mirrors down).
+- **Freshness.** The post's text is the first copy fetched (posts are immutable apart from
+  edits); its counts come from the newest copy. For coins younger than
+  `X_ENGAGEMENT_YOUNG_S` (default 2 h) the post, and its quoted / replied-to posts, are fetched
+  again once that copy is `X_ENGAGEMENT_REFRESH_S` (default 300 s) old, and a cached read is
+  not served once its `engagement.as_of` is older than that: the read is re-run. Older coins keep
+  their cached copy (re-checked every 6 h for deletion) and the usual `max_age`. When the
+  re-fetch fails (mirrors down) the older counts are served with their `as_of`, and the read is
+  re-run at most once a minute (`X_ENGAGEMENT_RETRY_S`). An explicit `max_age` wins. Read
+  `as_of`, not `analyzed_at`, for the age of the counts.
+- `media[]` (`type`: `photo`, `video`, `gif` or `unknown`; `url`; `thumbnail_url` for video and
+  GIF): https URLs only, at most 4. Posts cached before rules 0.30.0 list their images with
+  `type: "unknown"` until the next re-check. Like the logo, media are not screened.
 
 ### `x.match`: does the linked post match the token? (depth=full)
 
@@ -324,12 +392,14 @@ How it changes the analysis when `kind` is `token`:
 
 **Tokenized stocks (xStocks).** A pair token whose symbol is a stock ticker plus `x` (TSLAx,
 NVDAx, SPYx) and whose name says "xStock" (or whose mint is one of Backed's `Xs…` addresses)
-is `kind: "tokenized_stock"`. The coin gets `tradfi/tokenized_stock` (it was launched for that
-stock's crowd) instead of `crypto_native/paired_ecosystem`. The company comes from
+is `kind: "tokenized_stock"`. When the coin's name or ticker builds on the stock, the coin gets
+`tradfi/tokenized_stock` (it was launched for that stock's crowd) instead of
+`crypto_native/paired_ecosystem`; since rules 0.30.0 a coin that does not build on it gets only
+`crypto_native/paired_ecosystem` (the pair is where it trades, not what it is about). The company comes from
 `data/stocks.yaml` (64 large caps, meme stocks and index ETFs, e.g. Tesla → `celebrity/elon`,
 Nvidia → `ai_agent`). When the coin's name or ticker builds on the company or stock ticker
 ("Tesla Moon", `$NVDAMOON`) the company becomes the referent; otherwise only its categories
-count, weakly. Company names and tickers are also understood in the coin itself ("Tesla",
+count, weakly (before rules 0.30.0; since then they do not count). Company names and tickers are also understood in the coin itself ("Tesla",
 "$NVDA", "TSLAx"); common-word names and tickers (Apple, Meta, COIN, HOOD, SPY) only count in
 an unambiguous form ("apple inc", "metax").
 
