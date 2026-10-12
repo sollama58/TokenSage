@@ -56,7 +56,7 @@ GET /v1/tokens/{ca}?depth=full&wait=10
 
 | HTTP | Meaning | What to do |
 |---|---|---|
-| `200` | Analysis in body. `status` is `complete`, `partial` (the metadata is not available yet: analysed from caller hints before the mint was visible on-chain, or the metadata JSON is still being retried; cached for 60 s only, so the next request may be more complete) or `failed` (the analysis job failed; `errors[0].detail` says why, `job_id` names the job, `stale_analysis` carries the previous analysis if there is one). An upstream source that failed does not make the result `partial`: it is reported in `analysis.caveats` and in the per-source fields (`x.status`, `trend.sources[].status`, `image.status`); `errors` is only filled on `failed`. A failure is reported as `failed` for 10 minutes without starting a new job or spending quota; pass `refresh=true` to retry at once. The same applies per item in a batch | Use it; for `failed`, retry later or with `refresh=true` |
+| `200` | Analysis in body. `status` is `complete`, `partial` (the metadata is not available yet: analysed from caller hints before the mint was visible on-chain, or the metadata JSON is still being retried; or, since rules 0.30.0, a full-depth source did not answer within the job deadline, see `analysis.timed_out`; cached for 60 s only, so the next request may be more complete) or `failed` (the analysis job failed; `errors[0].detail` says why, `job_id` names the job, `stale_analysis` carries the previous analysis if there is one). An upstream source that failed does not make the result `partial`: it is reported in `analysis.caveats` and in the per-source fields (`x.status`, `trend.sources[].status`, `image.status`); `errors` is filled on `failed`, and since rules 0.30.0 on a `partial` read cut short by the full-depth deadline: one `{source, code: "timeout", detail}` per source left out. A failure is reported as `failed` for 10 minutes without starting a new job or spending quota; pass `refresh=true` to retry at once. The same applies per item in a batch | Use it; for `failed`, retry later or with `refresh=true` |
 | `202` | Not ready yet. Body has `status: "pending"`, a `job_id`, and `stale_analysis` if an older result exists | Retry the same URL after `Retry-After` seconds (≈3 s), or poll `GET /v1/jobs/{job_id}`. Give up after ~60 s total |
 | `400` | `invalid_ca`: not a Solana address; `invalid_callback_url` (batch only) | Don't retry |
 | `401` | `unauthorized` | Fix the key |
@@ -81,7 +81,8 @@ Every error has one shape:
   "analysis": { … },                    // the Analysis document, see below
   "stale_analysis": null,               // on 202: an older analysis if one exists
   "freshness": { "analyzed_at": "…", "age_s": 42, "max_age_s": 300, "from_cache": true },
-  "errors": [],                         // only on status "failed": why the job failed
+  "errors": [],                         // on "failed": why the job failed; on a "partial"
+                                        // read cut by the deadline: {source, code: "timeout"}
   "job_id": null,                       // set on 202
   "request_id": "…"
 }
@@ -112,6 +113,7 @@ Every error has one shape:
 | `summary` | Template-generated plain-language summary. It includes a "Context:" sentence pulling the whole picture together: what it trades against, what its X post replies to or quotes, which recent coin it copies, and which trend it matches |
 | `evidence[]` | Why: `{kind, label, weight, detail, source, url, where}`; `where` is the input it came from (`name`, `symbol`, `description`, `image`, `x`, `trend`, `chain`, `db`, or `copy_of` for rows inherited from the original a copycat coin copies) |
 | `caveats[]` | Automatic caveats (single weak source, ambiguous referent, deleted tweet, …) |
+| `timed_out[]` | Since rules 0.30.0, full depth: the sources still unfinished when the job deadline (`FULL_DEPTH_DEADLINE_S`, default 20 s) passed and left out of this read (`x`, `x_media`, `wikipedia`, `ocr`, `vision`, `trends`, `news`, `bluesky`, `news_check`). Empty normally; when not, `status` is `partial`, a `partial: full-depth deadline …` caveat names them, and `errors[]` has one `timeout` entry each |
 | `depth`, `analyzed_at`, `versions` | What was run, when, and with which rule/lexicon versions. Since rules 0.29.0 `versions.models` names the models whose output is in the document (`vision`, the logo-label model, when `image.labels` is filled). A cached analysis made by older rules (before a deploy) is re-run on the next request unless you pass `max_age` |
 
 ### `lineage`: which copy is this, and of what (all depths)
@@ -217,6 +219,40 @@ The lists and thresholds below live in `data/referent_rules.yaml`.
 
 `scripts/category_audit.py` measures per-category precision and recall against hand-labelled
 pump.fun launches (`tests/golden/category_audit.yaml`, `category_audit_holdout.yaml`).
+
+### `x.engagement`: likes, reposts and views of the post (depth=full, since rules 0.30.0)
+
+The linked post's public counts, and the same for `x.quoted` and `x.replied_to`:
+
+```jsonc
+"x": {
+  "created_at": "2026-10-12T03:16:40Z",  // the post's own time as the source reports it
+  "engagement": {
+    "likes": 41000, "reposts": 4100, "replies": 2050,
+    "quotes": 12, "bookmarks": 40, "views": 9800000,
+    "as_of": "2026-10-12T03:21:02Z"      // when the copy these counts come from was fetched
+  },
+  "media": [ { "type": "video", "url": "https://video.twimg.com/…mp4",
+               "thumbnail_url": "https://pbs.twimg.com/…jpg" } ],
+  "replied_to": { "id": "…", "engagement": { … }, "media": [ … ], … }
+}
+```
+
+- A count is `null` when the source that answered does not report it (the free mirrors
+  differ: views, quotes and bookmarks are often missing, especially for the replied-to post).
+  `engagement` is `null` when the post was not fetched (basic depth, deleted, mirrors down).
+- **Freshness.** The post's text is the first copy fetched (posts are immutable apart from
+  edits); its counts come from the newest copy. For coins younger than
+  `X_ENGAGEMENT_YOUNG_S` (default 2 h) the post, and its quoted / replied-to posts, are fetched
+  again once that copy is `X_ENGAGEMENT_REFRESH_S` (default 300 s) old, and a cached read is
+  not served once its `engagement.as_of` is older than that: the read is re-run. Older coins keep
+  their cached copy (re-checked every 6 h for deletion) and the usual `max_age`. When the
+  re-fetch fails (mirrors down) the older counts are served with their `as_of`, and the read is
+  re-run at most once a minute (`X_ENGAGEMENT_RETRY_S`). An explicit `max_age` wins. Read
+  `as_of`, not `analyzed_at`, for the age of the counts.
+- `media[]` (`type`: `photo`, `video`, `gif` or `unknown`; `url`; `thumbnail_url` for video and
+  GIF): https URLs only, at most 4. Posts cached before rules 0.30.0 list their images with
+  `type: "unknown"` until the next re-check. Like the logo, media are not screened.
 
 ### `x.match`: does the linked post match the token? (depth=full)
 

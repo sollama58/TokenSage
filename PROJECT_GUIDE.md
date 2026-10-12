@@ -308,10 +308,12 @@ Typical cost of a cold resolve: 2–3 RPC calls plus 1 metadata fetch, well insi
 - **Public Nitter is dead.** X sent cease-and-desist letters in Aug 2026, and only a few instances still work. Do not use it.
 - **Caching:**
   - Tweets: **forever, first-seen snapshot kept**, because narrative tweets get deleted.
+    The snapshot's text is the record; its engagement counts are not (see below).
   - Profiles: 6–24 h TTL, keyed by **user ID** so renames are detected.
   - Communities: 24 h.
   - Tombstones: short TTL, then permanent.
   - Use a single-flight lock per tweet ID, because many tokens link the same celebrity tweet.
+- **Engagement (since rules 0.30.0).** The read exposes `x.engagement` (`likes`, `reposts`, `replies`, `quotes`, `bookmarks`, `views`, `as_of`) for the linked post and for `x.quoted` / `x.replied_to`, with `x.created_at` (the source's time) and `x.media` (`type`, `url`, `thumbnail_url`; https only, through the metadata URL sanitiser). Counts come from the newest stored copy (`x_tweet.latest`, stamped with `fetched_at`), the text from the first. For coins younger than `X_ENGAGEMENT_YOUNG_S` (2 h) the post is fetched again (free mirrors only, never the paid tier) when that copy is `X_ENGAGEMENT_REFRESH_S` (300 s) old, a failed try retried after `X_ENGAGEMENT_RETRY_S` (60 s); and the API does not serve a cached read of such a coin whose `engagement.as_of` is older than `X_ENGAGEMENT_REFRESH_S` (unless the read is under `X_ENGAGEMENT_RETRY_S` old, or the caller gave `max_age`), so served counts are at most 5 min old unless the mirrors are down. Older coins keep the cached copy. This is the attention signal to grade for predictive value.
 
 ### 4.4 Knowledge sources (refreshed by cron, stored locally)
 
@@ -589,6 +591,8 @@ Analysis depth is chosen **per request** by the consumer:
 | **basic** | resolve; metadata; S1–S5 on name, ticker, description; X link parse, snowflake time and reuse count (no X fetch); image fetch + hashes + near-duplicates; on-demand copycat lookup; S9/S10 | ~300 ms CPU + a few fetches; never any paid call |
 | **full** (default) | everything in basic, plus OCR, the X fetch chain (§4.3), trend matching and news confirmation, optional CLIP | seconds; the paid X fallback only here, under a daily cap |
 
+**Full-depth fetches run concurrently under a deadline (since rules 0.30.0).** The X post (then, concurrently, its quoted and replied-to posts and the author's profile; then the post media hashes and the Wikipedia lookups, which read the post), OCR, logo labels, the trend index, Google News and Bluesky run at once, sharing the job's one database connection through `fulldepth.serial()` (one statement at a time; the network overlaps). `FULL_DEPTH_DEADLINE_S` (default 20 s, under the API's 25 s maximum wait) bounds them: whatever is unfinished is cancelled, the engine runs on the rest, and the read is `partial` with `analysis.timed_out` naming the sources and one `timeout` entry each in the response's `errors` (cached 60 s like any partial read). The news check of the Wikipedia hits runs after the engine on what is left of the deadline (`news_check`).
+
 **What never changes and is cached forever:**
 - on-chain name, symbol, uri, creator and creation time;
 - the metadata JSON (by CID);
@@ -599,7 +603,7 @@ Analysis depth is chosen **per request** by the consumer:
 
 | Token age | Default `max_age` | Why |
 |---|---|---|
-| < 1 hour | 5 min | copycat counts, trends, X reuse and bonding-curve state move fast |
+| < 1 hour | 5 min | copycat counts, trends, X reuse and bonding-curve state move fast; X engagement (below 2 h, see §4.3) also expires a cached read once its counts are 5 min old |
 | 1 hour – 7 days | 1 hour | |
 | > 7 days | 24 hours | |
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from email.utils import format_datetime
 
 import asyncpg
 import httpx
@@ -32,6 +33,14 @@ FEED = """<?xml version="1.0" encoding="UTF-8"?>
   <pubDate>Wed, 7 Oct 2026 11:00:00 -0700</pubDate>
 </item>
 </channel></rss>"""
+
+
+def _fresh_feed() -> str:
+    """FEED with its pubDates moved to the last hours, inside the 48 h the index keeps."""
+    now = datetime.now(UTC)
+    return FEED.replace(
+        "Wed, 7 Oct 2026 12:10:00 -0700", format_datetime(now - timedelta(hours=1))
+    ).replace("Wed, 7 Oct 2026 11:00:00 -0700", format_datetime(now - timedelta(hours=2)))
 
 
 def test_gtrends_parse() -> None:
@@ -141,7 +150,7 @@ async def test_trend_index_reports_each_source(db: asyncpg.Connection) -> None:
     )
     with respx.mock(assert_all_called=False) as router:
         router.get(url__regex=r"https://trends\.google\.com/trending/rss\?geo=US").mock(
-            return_value=httpx.Response(200, text=FEED)
+            return_value=httpx.Response(200, text=_fresh_feed())
         )
         router.get(url__startswith="https://trends.google.com/").mock(
             return_value=httpx.Response(429)
