@@ -161,8 +161,9 @@ def test_cherry_os_does_not_inherit_zohran_mamdani_from_justice_for_cherry() -> 
     _assert_collision(out, "Zohran", {"political"})
     lin = out.lineage
     assert lin is not None and lin.same_ticker == 1
-    # an earlier $CHERRY in the 24 h rank window: 2nd of 2, so not "original" either
-    assert (lin.rank, lin.rank_of) == (2, 2) and lin.kind == "early_copy"
+    # an earlier $CHERRY in the 24 h rank window, but "cherry" is an everyday word and the
+    # names differ: a ticker collision alone does not make it a copy
+    assert lin.kind == "original" and lin.original is None
 
 
 def test_pit_fighting_is_not_pitbull() -> None:
