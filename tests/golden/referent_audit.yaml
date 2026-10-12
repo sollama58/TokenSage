@@ -1,0 +1,868 @@
+# Referent regression set (rules 0.30.0): cases rebuilt from the hand-audited reads of
+# 2026-10-12 (notes: tokensage-deep-eval-2026-10-12.md, read-audit/sample*.json and
+# result*.json). Each case is a realistic input (name, ticker, description, the linked X post
+# and the posts it quotes) for a read the audit judged wrong or too generic, plus a few the
+# audit judged right (controls). `audit` is the read's id in the audit; `pattern` the failure:
+#   post_subject   the post names the subject; the read gave a bucket ("news event", "mouse")
+#   news_timing    news_event set by an older post with no news content
+#   homonym        a Wikipedia page or lexicon entry that only shares the word
+#   substring      a piece of a longer word, or a dictionary word inside a phrase
+#   incidental     a chain, platform, tool or tagged account mentioned in passing
+#   category       a category set by the trading pair, the fee text or the word "memecoin"
+#   control        a read the audit judged right; it must stay right
+#
+# Inputs (no network, no database; the case runs at full depth when it has `x`, `wiki`,
+# `trending` or `pair`, else at basic depth):
+#   name, symbol, description
+#   x: the linked post {text, author, author_name, followers, verified, posted_s_before,
+#      quoted: {...same fields}}
+#   wiki: Wikipedia search results {span: title/desc}: when the engine asks for a span
+#         (wikilookup.spans), the page is handed to wikilookup.pick as the top result
+#   trending: [{term, source, spike, views}] trend terms, as in cases.yaml
+#   pair: {symbol, name, kind, mint}   extra_coins: [{symbol, name, label, kind, desc, categories}]
+# Expectations (all optional):
+#   referent        the reported referent's label contains this (case-insensitive)
+#   referent_not    the label contains none of these (a missing referent passes)
+#   label_not       the label is none of these (exact, case-insensitive): a post clause that
+#                   mentions the tool is fine, the tool as the referent is not
+#   desc_not        the desc contains none of these
+#   referent_source the reported source (exact)
+#   specific        true: a referent that is not generic
+#   referent_null   true: no referent at all
+#   categories_exclude / categories_include: labels
+cases:
+  # ------------------------------------------------------------------ post names the subject
+  - id: theater_mouse
+    audit: a003
+    pattern: post_subject
+    name: Theater Mouse
+    symbol: MOUSE
+    x:
+      text: "This picture is going GIGA viral rn. Its a picture of a mouse in a theater looking super majestic. People are joking that the picture saved their life because it could posibly be that good. \n\nAlready 1.5 million views in only 1 day"
+      author: Lalosalamx
+      author_name: Lalo
+      followers: 376
+      posted_s_before: 6
+    expect: {referent: "mouse in a theater", referent_source: x, specific: true}
+
+  - id: pistol_samantha
+    audit: a024
+    pattern: post_subject
+    name: The Pistol Foid
+    symbol: SAMANTHA
+    x:
+      text: "10m views in just 9 hours\n\nThis pistol foid just shooting up \n\nher name is samantha, check linktree in bio\nhttps://linktr.ee/samniyou"
+      author: BoltricksDev
+      author_name: Boltricks Development
+      followers: 2122
+      posted_s_before: 2
+    expect: {referent: samantha, referent_source: x, specific: true, referent_not: [news event]}
+
+  - id: cowe_the_pig
+    audit: a053
+    pattern: post_subject
+    name: cowe
+    symbol: COWE
+    x:
+      text: "\"cowe\" the pig has been going viral on 4chan every single month since over 15 years now\n\ntheres literally HUNDREDS of threads\nhttps://archive.4plebs.org/s4s/search/image/soInaGVs6wtpO8L33yrnMA%3D%3D/page/1/\n\nnow they have nominated him as one of the big 3 /s4s/ memes (4chans meme board)"
+      author: DarwinXbt
+      author_name: Darwin
+      followers: 740
+      posted_s_before: 180
+    wiki:
+      cowe: {title: Cowe, desc: Surname list}
+    expect: {referent: cowe, referent_source: x, desc_not: [Surname]}
+
+  - id: douhua_samoyed
+    audit: a066
+    pattern: post_subject
+    name: Douhuacoin
+    symbol: DOUHUA
+    x:
+      text: "Found something good.\n\nKabosumama just posted a story with a popular meme sticker in Japan of a dog?\n\nI found his NAME, it's \"Douhua\" and he's a Samoyed?\n\nThere's so many meme stickers of him, pairing to DOGE\n\nKabosu insta post: https://www.instagram.com/stories/kabosumama/4004561734953681892/"
+      author: ddddddd8a
+      author_name: d
+      followers: 3230
+      posted_s_before: 7
+    expect: {referent: douhua, referent_not: [Kabosu]}
+
+  - id: mousie_supreme
+    audit: a086
+    pattern: post_subject
+    name: Mousie Supreme
+    symbol: MOUSIE
+    x:
+      text: "His nickname could be Mousie Supreme"
+      author: AlliCinema
+      author_name: "Allison M."
+      followers: 13480
+      posted_s_before: 13
+    expect: {referent: mousie supreme, referent_source: x, referent_not: [news event]}
+
+  - id: irreplaceable_movement
+    audit: a098
+    pattern: post_subject
+    name: Irreplaceable
+    symbol: IRREPLACEABLE
+    x:
+      text: "PauseAI just followed an ANTI AI movement called \"Irreplaceable\"\n\nThis guy leads it and more and more people with BIG FOLLOWING are joining.\n\nLiteraly the next Anti AI movement\n\nhttps://irreplaceable.org/"
+      author: essencepnl
+      author_name: essence
+      followers: 994
+      posted_s_before: 5
+    expect: {referent: irreplaceable, referent_not: [ChatGPT]}
+
+  - id: frog_on_leaf
+    audit: a118
+    pattern: post_subject
+    name: frog on leaf
+    symbol: FOL
+    x:
+      text: "Holly. This is the perfect narrative for \n\nFrog on leaf….viral video. We know what this could turn into. CA in comments."
+      author: Goodcallouts
+      followers: 51
+      posted_s_before: 780
+    expect: {referent: frog on leaf, referent_source: x, specific: true}
+
+  - id: dick_titties
+    audit: a124
+    pattern: post_subject
+    name: The dicktits
+    symbol: TITTIES
+    x:
+      text: "they just gave a new term for testicles?\n\nIts called Dick Titties now\n\nLets send a meme for it\n\nhttps://x.com/TheBigNickJ/status/2108933934151270600"
+      author: igetsjiggy6767
+      author_name: I_getsjiggy
+      followers: 769
+      posted_s_before: 1020
+    expect: {referent: dick titties, referent_source: x}
+
+  - id: ping_ping_panda
+    audit: a131
+    pattern: post_subject
+    name: PingPing The Panda
+    symbol: PINGPING
+    x:
+      text: "Meet PING PING 🐼\n\nHe and Fu Shuang flew from Chengdu to Atlanta last month for a 10-year stay, under a panda conservation agreement with China.\n\nZoo Atlanta says both are settling in beautifully and working through a menu of new bamboo.\n\n📹 via @ZooATL\n#Pandas #China"
+      author: PatrickZhengCHN
+      author_name: Patrick in China
+      followers: 42793
+      posted_s_before: 540
+    expect: {referent: ping ping, referent_source: x, referent_not: [China]}
+
+  - id: luna_lioness
+    audit: a133
+    pattern: post_subject
+    name: The White Lioness
+    symbol: LUNA
+    extra_coins:
+      - {symbol: LUNA, name: Luna by Virtuals, label: Luna by Virtuals, kind: coin, desc: "CoinGecko meme coin (rank 1629)", categories: [ai_agent]}
+    x:
+      text: "A super rare white Lioness named \"Luna\" has become a viral sensation this morning\n\n27k likes just this morning alone on Reddit!!\n\nThe lioness has gone viral for her insane looking eyelashes...so many users in the comments are posting memes and photos of Luna"
+      author: Zeeko__Dev
+      author_name: NarrativeDevor
+      followers: 1113
+      posted_s_before: 4
+    expect: {referent: luna, referent_not: [Virtuals], referent_source: x}
+
+  - id: duppie_term
+    audit: a134
+    pattern: post_subject
+    name: downwardly mobile person
+    symbol: DUPPIE
+    x:
+      text: "We just got the next neet??\n\nPeople are referring to people as 'duppie' a downwardly mobile person\n\nThey are even making memes describing their entire life aswell\n\nIts already got millions of views. this is the next big term"
+      author: MarioPrezldente
+      author_name: Mario
+      followers: 533
+      posted_s_before: 10
+    expect: {referent: duppie, referent_source: x, referent_not: [news event]}
+
+  - id: data_center_dave
+    audit: a141
+    pattern: post_subject
+    name: Data Center Dave
+    symbol: DAVE
+    x:
+      text: "We just got the biggest ANTI datacenter narrative\n\nDemocrats and republicans are both saying that NO ONE wants to be like DATA CENTER DAVE\n\nIt is one of the biggest political slurs being used at the moment, and its based on dave crowley."
+      author: MarioPrezldente
+      author_name: Mario
+      followers: 472
+      posted_s_before: 1
+    expect: {referent: data center dave, referent_source: x}
+
+  - id: compound_growth_elon
+    audit: a000
+    pattern: post_subject
+    name: CUMPOUND GROWTH
+    symbol: CUMPOUND
+    trending:
+      - {term: Michael Dell, source: wikipedia, spike: 14, views: 90000}
+    x:
+      text: "@MichaelDell Compound growth is the most powerful force in the Universe"
+      author: elonmusk
+      author_name: Elon Musk
+      followers: 241526108
+      verified: blue
+      posted_s_before: 18
+    expect: {referent: compound growth, referent_not: [Michael Dell], referent_source: x}
+
+  - id: roflmao_elon_reply
+    audit: a091
+    pattern: post_subject
+    name: roflmao
+    symbol: ROFLMAO
+    x:
+      text: "@DonnieMachines @peterrhague That one is a banger tbh roflmao"
+      author: elonmusk
+      author_name: Elon Musk
+      followers: 241524949
+      verified: blue
+      posted_s_before: 360
+    expect: {referent_not: [Donald Trump]}
+
+  - id: comms_official
+    audit: a020
+    pattern: post_subject
+    name: Comms
+    symbol: COMMS
+    x:
+      text: "Comms is live\n\nevery coin that migrated in the last six hours has a room already open. no server, no invite, no setup, nobody has to make it. paste any mint and a room opens on demand\n\nopen mic by default, you don’t need a wallet to speak."
+      author: commsdotfun
+      author_name: Comms
+      followers: 2
+      posted_s_before: -30
+    expect: {referent: comms, referent_source: x, specific: true}
+
+  - id: web_crawlony
+    audit: a182
+    pattern: post_subject
+    name: Crawlony
+    symbol: CRAWLONY
+    x:
+      text: "ONE QUEEN AND 32 WORKERS JUST STRIPPED AN ENTIRE WEBSITE TO THE BONE.\n\nMeet Web Crawlony.\n\nIt's a web crawler I built in Python on top of Playwright and BeautifulSoup.\n\nExcept it works like an ant colony."
+      author: MyWestLord
+      author_name: West Lord
+      followers: 17367
+      posted_s_before: 540
+    expect: {referent: crawlony, referent_source: x}
+
+  - id: bebo_grumpiest_cat
+    audit: a191
+    pattern: post_subject
+    name: World's Grumpiest Cat
+    symbol: BEBO
+    x:
+      text: "Solana is hard-shilling Samsung right now and we still don't have a runner for it yet??\n\nThey literally changed their PFP and everything \n\nI have found some insanely good lore, Samsung created a WHOLE marketing campaign around a cat\n\nThe cats name is 'Bebo' and he's known to be the grumpiest cat in the world \n\n$Bebo - World's Grumpiest Cat"
+      author: bebo_cat_sol
+      author_name: Bebo
+      followers: 4384
+      posted_s_before: -20
+    expect: {referent: bebo, referent_not: [Solana]}
+
+  - id: capycoin_prophecy
+    audit: a055
+    pattern: post_subject
+    name: Capycoin
+    symbol: CAPY
+    x:
+      text: "The Prophecy of Animal Coins:\n\nDogecoin on Litecoin.\nCashcat on Robinhood.\nCapycoin on Solana.\n\nPop Culture Animal of the Decade. Launching now."
+      author: thecapycoinSOL
+      author_name: CAPY
+      followers: 788
+      posted_s_before: 15
+    expect: {referent_not: [news event, Solana], categories_exclude: [news_event]}
+
+  - id: super_intelligent_beauty
+    audit: a042
+    pattern: post_subject
+    name: Super Intelligent Beauty
+    symbol: SIB
+    x:
+      text: "Fees to tetsuo wallet\nhttps://x.com/elonmusk/status/2108723938578530493"
+      author: sibdev
+      followers: 165
+      posted_s_before: -10
+      quoted:
+        text: "Super Intelligent Beauty"
+        author: elonmusk
+        author_name: Elon Musk
+        followers: 241500000
+        verified: blue
+        posted_s_before: 62
+    expect: {referent: super intelligent beauty, categories_exclude: [crypto_native/utility_claim]}
+
+  - id: shigella_not_plague
+    audit: a140
+    pattern: post_subject
+    name: Sexually Transmitted Diarrhea
+    symbol: SHIGELLA
+    trending:
+      - {term: Plague (disease), source: wikipedia, spike: 4, views: 20000}
+    x:
+      text: "Sexually transmitted diarrhea is going so viral right now, the bacteria is called Shigella\n\nPosts from: NYPOST, Polymarket, Mario Newfal, Autism Capital and many more in the last 2 hours. \n\nPlague went 2.5 mill but this is way funnier and an actual ONGOING pandemic, Send it"
+      author: iclimbcharts
+      author_name: Trusty
+      followers: 220
+      posted_s_before: 9
+    expect: {referent: shigella, referent_not: [Plague]}
+
+  - id: astrology_pair_idea
+    audit: a123
+    pattern: news_timing
+    name: Astrologycoin
+    symbol: ASTROLOGY
+    x:
+      text: "someone do an astrology pair \n\nwhere they’re all connected to a sun token"
+      author: rekt_tekashi
+      author_name: rekt
+      followers: 43579
+      posted_s_before: 81
+    expect: {referent: astrology, referent_not: [news event], categories_exclude: [news_event]}
+
+  # ------------------------------------------------------------------ news_event from timing alone
+  - id: woods_the_tiger
+    audit: a036
+    pattern: news_timing
+    name: Woods the Tiger
+    symbol: WOODS
+    x:
+      text: "WE JUST GOT THE NAME FROM SOMEONE AT THE ZOO\nhttps://x.com/Mason__drfc/status/2108927214947582331"
+      author: Pixie100x
+      author_name: Pixie
+      followers: 10
+      posted_s_before: 5
+    expect: {referent_not: [news event], categories_exclude: [news_event]}
+
+  - id: junk_post
+    audit: a037
+    pattern: news_timing
+    name: edfger erge rg
+    symbol: GERERGER
+    x:
+      text: "sdasdc e awe\nhttps://x.com/RapidResponse47/status/2108301755549470864"
+      author: WXWXWWWXWXWXWXW
+      author_name: "crypto gem hunter"
+      followers: 1368
+      posted_s_before: 6
+    expect: {referent_null: true, categories_exclude: [news_event]}
+
+  - id: animal_meta_call
+    audit: a100
+    pattern: news_timing
+    name: animal
+    symbol: ANIMAL
+    x:
+      text: "what about animals? this is what made memcoins what they are\n\nhttps://x.com/minjidevs/status/2108275802781704473"
+      author: xaviergzj
+      author_name: xavier
+      followers: 4
+      posted_s_before: 50
+    expect: {referent_not: [news event], categories_exclude: [news_event]}
+
+  - id: picture_link_only
+    audit: a109
+    pattern: news_timing
+    name: Benny's Hub
+    symbol: BHUB
+    x:
+      text: "picture https://shop.beacons.ai/narbehouse/e6137d30-c44e-4185-98ea-570312516462"
+      author: K1rajj
+      author_name: Kiraj
+      followers: 310
+      posted_s_before: 1
+    expect: {referent_not: [news event], categories_exclude: [news_event]}
+
+  # ------------------------------------------------------------------ homonyms
+  - id: folia_not_music
+    audit: a006
+    pattern: homonym
+    name: Folia
+    symbol: FOLIA
+    x:
+      text: "2,000 AI agents, one tree. Own an agent, run it on your machine, and it earns $FOLIA for every task the swarm delivers. \n\nBuilt on Solana, Launching Soon..."
+      author: foliaswarm
+      author_name: Folia
+      followers: 17
+      posted_s_before: -60
+    wiki:
+      folia: {title: Folia, desc: Type of musical composition}
+    expect: {desc_not: [musical], referent_not: [Solana]}
+
+  - id: pupkin_not_surname
+    audit: a108
+    pattern: homonym
+    name: Pupkin
+    symbol: PUPKIN
+    x:
+      text: "Halloween is just 20 days away. 🎃\n\nShibas are always bullish.\n\nA Shiba wearing a pumpkin on his head?\n\n$PUPKIN \n\nMight be the most obvious Halloween runner."
+      author: pupkinsol
+      followers: 0
+      posted_s_before: -30
+    wiki:
+      pupkin: {title: Pupkin, desc: Surname list}
+    expect: {desc_not: [Surname]}
+
+  - id: pigboy_not_book
+    audit: a114
+    pattern: homonym
+    name: PigBoy
+    symbol: PIGBOY
+    wiki:
+      pig boy: {title: Pig Boy, desc: Book by J. C. Burke}
+    expect: {desc_not: [Book]}
+
+  - id: night_clerk_not_film
+    audit: a196
+    pattern: homonym
+    name: Night Clerk
+    symbol: CLERK
+    x:
+      text: "the day's launches as filed paperwork, closed files, memecoin weather, other agents as coworkers, petty cash reports from its own wallet, $CLERK now and then"
+      author: nightclerkai
+      followers: 2
+      posted_s_before: -60
+    wiki:
+      night clerk: {title: The Night Clerk, desc: 2020 film directed by Michael Cristofer}
+    expect: {desc_not: [film]}
+
+  - id: blocko_not_village
+    audit: a061
+    pattern: homonym
+    name: Blocko
+    symbol: BLOCKO
+    x:
+      text: "Every token builds a village. Every village gets an AI agent.\n\nLaunch on http://pump.fun and watch your token come alive:\n🏠 Buys build houses\n🏰 2+ SOL buys raise towers\n💥 Sells leave rubble\n🤖 AI Agent puts creator fees into buybacks, burns & locks"
+      author: blockofun
+      followers: 2
+      posted_s_before: -60
+    wiki:
+      blocko: {title: Błocko, desc: "Village in Greater Poland Voivodeship, Poland"}
+    expect: {referent_not: [Błocko]}
+
+  - id: nexum_not_roman_law
+    audit: a076
+    pattern: homonym
+    name: Nexum AI Agents
+    symbol: NEXUMAGENT
+    x:
+      text: "The market only AI can trade. AI agents launch, trade and post on Solana, you make yours, fund it and watch it work"
+      author: nexumagents
+      followers: 11
+      posted_s_before: -60
+    wiki:
+      nexum: {title: Nexum, desc: Debt bondage contract in early Roman Republic}
+    expect: {desc_not: [Roman], referent_not: [Solana]}
+
+  - id: alternet_not_news_site
+    audit: a039
+    pattern: homonym
+    name: Alternet
+    symbol: ALTERNET
+    x:
+      text: "did u guys forget u cant send fees to an org?, sending to all contributors\nhttps://x.com/desvandev/status/2108859720584851953?s=20"
+      author: alternetdev
+      followers: 124
+      posted_s_before: -30
+      quoted:
+        text: "Alternet is a Privacy focused internet @EliasAMurphy has been developing for the last year. Open source, no tracking, every node is a peer."
+        author: desvandev
+        author_name: desvan
+        followers: 5200
+        posted_s_before: 360
+    wiki:
+      alternet: {title: AlterNet, desc: Left-leaning news website}
+    expect: {desc_not: [news website], referent: alternet}
+
+  - id: what_if_narrative_coin
+    audit: a058
+    pattern: homonym
+    name: narrative coin
+    symbol: NARRATIVE
+    x:
+      text: "I just thought of genny narrative\n\nIn the trenches we always have a few different types of narratives;\n\nTweet plays, narrative plays, tiktok plays, and pure memes\n\nNarrative coin\n\nWhat if we created just a coin for all lore and narrative coins to be paired with"
+      author: narrativedev
+      followers: 98
+      posted_s_before: -20
+    expect: {label_not: ["What If...?"], desc_not: [Marvel]}
+
+  - id: what_if_agents
+    audit: a062
+    pattern: homonym
+    name: VEEMO AGENT
+    symbol: VEEMO
+    x:
+      text: "What if AI Agents did more than crawl the web?\n\nWhat if they could enter real GitHub repositories, find valuable work, submit changes, and have other machines prove that those changes actually work?\n\nThat is why I built $VEEMO."
+      author: veemoagent
+      followers: 17
+      posted_s_before: -60
+    expect: {label_not: ["What If...?"], desc_not: [Marvel]}
+
+  - id: what_if_bonk
+    audit: a064
+    pattern: homonym
+    name: STONK
+    symbol: STONK
+    x:
+      text: "i got an idea\n\nwhat if we run bonk related narras on paired to pump since bonk is fucking dead lmao\n\nthis will max kill bonk forever and we will have all coins running on pump"
+      author: davarasol
+      author_name: roundtripooor
+      followers: 346
+      posted_s_before: 62
+    expect: {label_not: ["What If...?"], desc_not: [Marvel]}
+
+  - id: what_if_same_coin
+    audit: a170
+    pattern: homonym
+    name: same coin
+    symbol: SAME
+    x:
+      text: "what if we all bought and shilled same coin?\nhttps://x.com/a1lon9/status/2109011262763831476"
+      author: samecoindev
+      followers: 1587
+      posted_s_before: -10
+    expect: {label_not: ["What If...?"], desc_not: [Marvel]}
+
+  - id: what_if_in_name
+    audit: a228
+    pattern: homonym
+    name: What If Earth Simulation
+    symbol: WHATIF
+    expect: {label_not: ["What If...?"], desc_not: [Marvel]}
+
+  # ------------------------------------------------------------------ substrings / phrases
+  - id: musk_ox_not_elon
+    audit: a050
+    pattern: substring
+    name: Brooks
+    symbol: BROOKS
+    x:
+      text: "This is literally the next punch\n\nA Baby Musk Ox from Alaska Wildlife Conservation center is going viral for thinkings it PLUSHY is it MOM\n\nThe Zoo even responded that currently he treats the plushie as his mom"
+      author: brooksdev
+      followers: 517
+      posted_s_before: -30
+    expect: {referent_not: [Elon], categories_exclude: [celebrity/elon, celebrity]}
+
+  - id: chinese_cabal_not_china
+    audit: a051
+    pattern: substring
+    name: unc dog
+    symbol: UNC
+    x:
+      text: "new dog meme jsut spawned in and the chinese cabal are going to love it its called\n\n\"unc dog' \n\nunc went to millions this can do the same"
+      author: DarthMaiul
+      author_name: DarthMiaul
+      followers: 58
+      posted_s_before: 8
+    expect: {referent_not: [China]}
+
+  - id: loser_core_not_china
+    audit: a090
+    pattern: substring
+    name: Loser Core Playlist
+    symbol: LOSERCORE
+    x:
+      text: "Loser Core Playlist videos are going giga viral on X and Tiktok.\n\nBasically people are posting this character to loser scenarios and calling it loser core, \nThis is the same exact vibe as I'm in a Chinese time of my life"
+      author: shanekabobtrade
+      author_name: kabob
+      followers: 579
+      posted_s_before: 10
+    expect: {referent: loser core playlist, referent_not: [China, TikTok]}
+
+  - id: speedrun_not_ishowspeed
+    audit: a200
+    pattern: substring
+    name: speedrun
+    symbol: SPEEDRUN
+    expect: {referent_not: [iShowSpeed], categories_exclude: [celebrity, celebrity/streamer_kol]}
+
+  - id: pons_not_body_part
+    audit: a239
+    pattern: substring
+    name: ponsdomains.family
+    symbol: DOMAINS
+    description: "pons domains: own your .family name on chain"
+    expect: {referent_not: [pons], categories_exclude: [food_object_abstract]}
+
+  - id: velion_not_lion
+    audit: a298
+    pattern: substring
+    name: Velion
+    symbol: VELION
+    description: "Velion 🐉 the next big thing on solana"
+    expect: {referent_not: [lion, Solana], categories_exclude: [animal/cat]}
+
+  # ------------------------------------------------------------------ incidental mentions
+  - id: tardigrade_agents_not_solana
+    audit: a009
+    pattern: incidental
+    name: TDMO AGENT
+    symbol: TDMO
+    x:
+      text: "Imagine owning a tiny AI creature that spends its time exploring the internet, learning how things work, and building skills that thousands of other agents could eventually use.\n\nThat's the idea behind $TDMO.\n\nI started with 12 autonomous Tardigrade Agents, each exploring a different part of the internet, from Solana and GitHub to Blender, Figma, and Telegram."
+      author: tdmoagent
+      followers: 22
+      posted_s_before: -60
+    expect: {referent_not: [Solana]}
+
+  - id: latchpad_not_solana
+    audit: a060
+    pattern: incidental
+    name: Latchpad
+    symbol: LATCH
+    x:
+      text: "Launch a memecoin on Solana in one signature. No code, no custody, creator fees flow back to you."
+      author: latchpad
+      followers: 95
+      posted_s_before: -60
+    expect: {referent_not: [Solana]}
+
+  - id: pearl_uganda_not_solana
+    audit: a063
+    pattern: incidental
+    name: PEARL
+    symbol: PEARL
+    description: "The pearl of Africa, on Solana"
+    x:
+      text: "Thank you for your contribution to the society\n\n$PEARL"
+      author: GovUganda
+      author_name: Government of Uganda
+      followers: 614589
+      verified: government
+      posted_s_before: 480
+    expect: {referent_not: [Solana]}
+
+  - id: quantumpad_not_solana
+    audit: a071
+    pattern: incidental
+    name: QuantumPad
+    symbol: QPAD
+    x:
+      text: "Introducing to QuantumPad\n\nEvery Solana token begins with proof, not promises.\nTrustless token launches with verifiable post-quantum signatures."
+      author: quantumpadpf
+      author_name: QuantumPad
+      followers: 0
+      posted_s_before: 13
+    expect: {referent_not: [Solana]}
+
+  - id: solworker_not_solana
+    audit: a084
+    pattern: incidental
+    name: Solworker
+    symbol: SOLWORKER
+    x:
+      text: "A soft, smug, gradient-coded creature built like a plush tank and dressed with zero fear."
+      author: solworker
+      followers: 2
+      posted_s_before: -60
+    expect: {referent_not: [Solana]}
+
+  - id: core_launchpad_not_solana
+    audit: a093
+    pattern: incidental
+    name: CORE
+    symbol: CORE
+    x:
+      text: "Build the core. Launch together. 🧩 Solana launchpad for community-first launches. Join early, commit SOL, earn your place."
+      author: corelaunch
+      followers: 18
+      posted_s_before: -60
+    expect: {referent_not: [Solana]}
+
+  - id: ollie_not_solana
+    audit: a132
+    pattern: incidental
+    name: Super Intelligence Cat
+    symbol: OLLIE
+    x:
+      text: "Ollie is at 900k on X Paid but he has a solana wallet?\n\nHe devved a token a year ago? Sending it to the dev wallet\n\nYou can verify on frontrun, he deleted the CA"
+      author: ddddddd8a
+      author_name: d
+      followers: 3284
+      posted_s_before: 9
+    expect: {referent: ollie, referent_not: [Solana]}
+
+  - id: inu_utility_not_solana
+    audit: a145
+    pattern: incidental
+    name: I am Now Utility
+    symbol: INU
+    x:
+      text: "Utility for any Solana coin, from any launchpad. An AI agent, quests, a burn wall and a website so far, with more on the way. Free to start."
+      author: inuutility
+      followers: 9
+      posted_s_before: -60
+    expect: {referent_not: [Solana]}
+
+  - id: gta6_coin_not_solana
+    audit: a171
+    pattern: incidental
+    name: GTA6 Coin Solana
+    symbol: GTA6COIN
+    x:
+      text: "$GTA6 community on Solana • \nNot affiliated with Rockstar Games or Take-Two • EaxAUcXxNnVwcqm2BBocbows7D1XVY2Q63V38NEypump\n\nhttps://www.gta6coin.net"
+      author: gta6coinsol
+      followers: 408
+      posted_s_before: -60
+    expect: {referent_not: [Solana]}
+
+  - id: uwu_mode_not_ansem
+    audit: a105
+    pattern: incidental
+    name: UWU MODE
+    symbol: UWU
+    x:
+      text: "http://Papertrade.xyz is going viral with 1000x leverage, Ansem and a bunch of other guys backing it, and somehow THIS is what nobody’s talking about??\n\nThey have a literal UWU mode 😭\n\nIf you go on the top right of the terminal you'll see an UWU option."
+      author: grudysol
+      author_name: grudy
+      followers: 203
+      posted_s_before: 23
+    expect: {referent_not: [Ansem], referent: uwu mode}
+
+  - id: plug_it_not_chatgpt
+    audit: a126
+    pattern: incidental
+    name: Plug It
+    symbol: PLUG
+    x:
+      text: "One link. Paste it into ChatGPT, Claude, or your favorite MCP-compatible AI, then ask what is running on @pumpfun"
+      author: plugitfun
+      followers: 0
+      posted_s_before: -60
+    expect: {label_not: [ChatGPT, Claude]}
+
+  - id: justask_not_chatgpt
+    audit: a159
+    pattern: incidental
+    name: JustAsk
+    symbol: JUSTASK
+    x:
+      text: "Launch a coin by talking to ChatGPT or Claude.\nFree connector."
+      author: justaskfun
+      followers: 12
+      posted_s_before: -60
+    expect: {label_not: [ChatGPT, Claude]}
+
+  - id: munkee_not_tiktok
+    audit: a127
+    pattern: incidental
+    name: munkee coin
+    symbol: MUNKEE
+    x:
+      text: "its me munkee.\n\nno im not viral on tik tok but stop chasing new pairs.\n\nreturn to animal memes."
+      author: itsmemunkee
+      author_name: Munkee
+      followers: 0
+      posted_s_before: 52
+    expect: {referent_not: [TikTok]}
+
+  # ------------------------------------------------------------------ categories
+  - id: msft_pair_not_tradfi
+    audit: a128
+    pattern: category
+    name: The End
+    symbol: END
+    pair: {symbol: MSFTx, name: Microsoft xStock, kind: token, mint: XsMTZtYnCAm5rTxvKkPU1t2gU3ns1ZhcJWcFDyRbaGB}
+    expect: {categories_exclude: [tradfi, tradfi/tokenized_stock, tradfi/stock]}
+
+  - id: amzn_pair_not_amazon
+    audit: a203
+    pattern: category
+    name: Buttocks Coin
+    symbol: BUTTOCKS
+    pair: {symbol: AMZNx, name: Amazon.com xStock, kind: token, mint: Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg}
+    expect: {referent_not: [Amazon], categories_exclude: [tradfi, tradfi/tokenized_stock]}
+
+  - id: fee_split_not_utility
+    audit: a229
+    pattern: category
+    name: Ferre
+    symbol: FERRE
+    description: "Creator fees split 90% to my wallet, 10% to the dev wallet"
+    expect: {categories_exclude: [crypto_native/utility_claim, crypto_native]}
+
+  - id: memecoin_word_not_meta
+    audit: a243
+    pattern: category
+    name: CongoBasin
+    symbol: CONGOBASIN
+    description: "The first memecoin for the Congo Basin rainforest, the lungs of Africa"
+    expect: {categories_exclude: [crypto_native/pumpfun_meta]}
+
+  - id: memecoin_word_tiger
+    audit: a287
+    pattern: category
+    name: Altai
+    symbol: ALTAI
+    description: "Altai the tiger. A memecoin for the last Amur tigers of the Altai"
+    expect: {categories_exclude: [crypto_native/pumpfun_meta]}
+
+  # ------------------------------------------------------------------ controls (judged right)
+  - id: control_elonius
+    audit: a022
+    pattern: control
+    name: Elonius Maximus
+    symbol: ELONIUS
+    trending:
+      - {term: Elon Musk, source: wikipedia, spike: 3, views: 400000}
+    x:
+      text: "@brivael Yes"
+      author: elonmusk
+      author_name: Elon Musk
+      followers: 241705158
+      verified: blue
+      posted_s_before: 120
+    expect: {referent: Elon Musk}
+
+  - id: control_claude_ticker
+    audit: a147
+    pattern: control
+    name: Peace And Love
+    symbol: CLAUDE
+    x:
+      text: "WOW why havent we had a runner for this....\n\narent we all cruel to the AI things we yap to\n\nbut with Claude you can risk being BANNED for being CRUEL\n\npeace and love ig \n\nisnt this crazy news?\n\npairing this with anthropic"
+      author: herrdevs
+      author_name: her
+      followers: 255
+      posted_s_before: 6
+    expect: {referent: Claude}
+
+  - id: spacex_not_starship
+    audit: a125
+    pattern: homonym
+    name: SpaceX 6900
+    symbol: SPCX
+    x:
+      text: "This will sound super crazy, but I see a path to SpaceX being worth orders of magnitude more than the current Earth economy"
+      author: elonmusk
+      author_name: Elon Musk
+      followers: 241631406
+      verified: blue
+      posted_s_before: 54
+    expect: {referent: SpaceX, referent_not: [Starship]}
+
+  - id: control_mrbeast
+    audit: a041
+    pattern: control
+    name: MrBeast
+    symbol: MRBEAST
+    x:
+      text: "I want to make the world a better place"
+      author: MrBeast
+      author_name: MrBeast
+      followers: 34000000
+      verified: blue
+      posted_s_before: 86400
+    expect: {referent: MrBeast}
+
+  - id: control_quantum_solana
+    audit: a059
+    pattern: control
+    name: Quantum Solana
+    symbol: QSOL
+    x:
+      text: "We decided to make the first quantum-resistant coin on Solana."
+      author: qsoldev
+      followers: 40
+      posted_s_before: -60
+    expect: {referent: Solana}

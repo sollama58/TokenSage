@@ -226,7 +226,11 @@ def test_unrelated_coin_on_a_stock_pair_keeps_its_own_meaning() -> None:
     out = _run("Robotaxi", "TAXI", _xstock())
     assert out.pair is not None and not out.pair.builds_on
     assert out.agg.referent is None or "Tesla" not in out.agg.referent.label
-    assert "tradfi/tokenized_stock" in dict(out.agg.categories)
+    # since rules 0.30.0 the stock pair alone sets no theme (audit 2026-10-12: "The End"
+    # paired to MSFTx read as a stock coin): it is the coin's setting, like any token pair
+    cats = dict(out.agg.categories)
+    assert "tradfi/tokenized_stock" not in cats and "tradfi" not in cats
+    assert "crypto_native/paired_ecosystem" in cats
 
 
 def test_unknown_xstock_still_reads_as_a_stock() -> None:

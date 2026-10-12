@@ -9,7 +9,8 @@ entities:
   - {label: Floki (Musk's dog), kind: famous_animal, aliases: [floki], categories: [animal/dog, celebrity/elon], desc: "Elon Musk's Shiba Inu", popularity: 0.7}
   - {label: Kekius Maximus, kind: meme, aliases: [kekius, kekius maximus], categories: [celebrity/elon, meme_template/pepe_wojak_chad], desc: "Musk's Pepe-gladiator X name (Dec 2024)", popularity: 0.7}
   - {label: DOGE (Dept. of Government Efficiency), kind: concept, aliases: [department of government efficiency, d.o.g.e], categories: [political, celebrity/elon], desc: "Musk-led US government efficiency effort, 2025", popularity: 0.8}
-  - {label: Starship, kind: concept, aliases: [starship, spacex], categories: [celebrity/elon, news_event], desc: "SpaceX rocket", popularity: 0.5}
+  - {label: Starship, kind: concept, aliases: [starship], categories: [celebrity/elon, news_event], desc: "SpaceX rocket", popularity: 0.5}
+  - {label: SpaceX, kind: concept, aliases: [spacex, space x], categories: [celebrity/elon], desc: "Elon Musk's rocket company", popularity: 0.7}
   # --- politics
   - {label: Donald Trump, kind: person, aliases: [trump, donald trump, djt, donald j trump], categories: [political], desc: "US president", popularity: 1.0}
   - {label: Melania Trump, kind: person, aliases: [melania], categories: [political], desc: "US first lady", popularity: 0.6}

@@ -289,10 +289,17 @@ class Referent(_Model):
         description="Only the kind is known: the name, ticker, image or description make it "
         "plain what sort of coin this is, but no specific entity was identified",
     )
+    post_id: str | None = Field(
+        default=None,
+        description="Since rules 0.30.0: when the referent is the subject of an X post "
+        '(`source` "x"), the id of that post; `desc` then quotes it ("@author: <first '
+        'characters>") and the wave counts the coins launched on that post. Null otherwise',
+    )
     wave: ReferentWave | None = Field(
         default=None,
         description="Launch counts on this referent, by TokenSage's normalised referent "
-        "(coins TokenSage has analysed only)",
+        "(coins TokenSage has analysed only); since rules 0.30.0, for the subject of an X "
+        "post, by that post",
     )
 
 

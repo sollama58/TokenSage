@@ -873,6 +873,7 @@ def build_document(
                 confidence=rr.confidence,
                 supported_by=rr.supported_by,
                 generic=rr.generic,
+                post_id=rr.post_id,
                 wave=None if rr.generic else ex.wave,
             )
         categories = [
@@ -1163,7 +1164,9 @@ async def _store_read(conn: asyncpg.Connection, doc: Analysis) -> None:
         doc.mint,
         doc.created_at,
         # a generic referent ("frog") is a kind, not one idea coins pile onto
-        referent_key(doc.referent.label) if doc.referent and not doc.referent.generic else None,
+        wave_key(doc.referent.label, doc.referent.post_id)
+        if doc.referent and not doc.referent.generic
+        else None,
         doc.referent.label if doc.referent and not doc.referent.generic else None,
         [c.label for c in doc.categories],
     )
@@ -1620,6 +1623,13 @@ def referent_key(label: str) -> str:
     return " ".join("".join(ch if ch.isalnum() else " " for ch in label.casefold()).split())
 
 
+def wave_key(label: str, post_id: str | None = None) -> str:
+    """What a referent wave counts by: the referent_key of its label, or, for the subject of
+    an X post (since rules 0.30.0), the post itself ("x:<post id>"): every coin launched on
+    one post rides the same wave, whatever phrase each one's read took from it."""
+    return f"x:{post_id}" if post_id else referent_key(label)
+
+
 async def _read_extras(
     conn: asyncpg.Connection, ctx: Context, r: Resolved, out: EngineOutput
 ) -> ReadExtras:
@@ -1646,7 +1656,7 @@ async def _read_extras(
     def within(hours: int) -> int:
         return int(launched is not None and now - timedelta(hours=hours) < launched <= now)
 
-    ref = out.agg.referent
+    ref = out.referent_read
     if ref is not None and not ref.generic:
         row = await conn.fetchrow(
             """with p as (select $3::timestamptz as now, coalesce($4::timestamptz, $3) as me)
@@ -1659,7 +1669,7 @@ async def _read_extras(
                from token_read, p
                where referent_key = $1 and mint <> $2
                  and launched_at > p.now - interval '7 days' and launched_at <= p.now""",
-            referent_key(ref.label),
+            wave_key(ref.label, ref.post_id),
             r.mint,
             now,
             launched,

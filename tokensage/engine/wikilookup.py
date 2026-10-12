@@ -157,13 +157,31 @@ def _title_matches(span: str, title: str) -> bool:
     return fuzz.ratio(span, t) >= 92 and abs(len(span) - len(t)) <= 2
 
 
+def _reject_desc() -> tuple[str, ...]:
+    from tokensage.engine.knowledge import load_knowledge
+
+    return tuple(str(x).lower() for x in load_knowledge().rules.get("wiki_reject_desc") or [])
+
+
+def is_work(desc: str, k: Knowledge) -> bool:
+    """The short description is a creative work's: a book, film, album, song."""
+    d = desc.lower()
+    return any(
+        re.search(rf"\b{re.escape(str(w).lower())}\b", d)
+        for w in k.rules.get("wiki_work_desc") or []
+    )
+
+
 def pick(span: Span, pages: list[WikiPage]) -> WikiRef | None:
     """The search result that *is* this name: among the top three, the first whose title
     matches the span, that is an article (not a disambiguation page) with a description."""
+    reject = _reject_desc()
     for p in sorted(pages, key=lambda x: x.rank)[:3]:
         d = p.desc.lower()
         if p.disambiguation or not p.desc or any(x in d for x in _DISAMBIG):
             continue
+        if any(x in d for x in reject):
+            continue  # "Surname list", "Given name": a name page names nothing
         if p.title.lower().startswith("list of"):
             continue
         if _title_matches(span.text, p.title):

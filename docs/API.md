@@ -96,7 +96,7 @@ Every error has one shape:
 | `market` | Bonding-curve state: `complete` (graduated), `curve_progress` 0–1, `graduated_pool` (since rules 0.29.0: the PumpSwap pool a completed curve migrated into, or `null` while on the curve and for coins that graduated to Raydium before PumpSwap), `creator` (the creator **wallet**; since rules 0.19.0 never a PDA), `creator_onchain` and `creator_kind` (what the bonding curve's creator field actually holds: `wallet`, `sharing_config`, `holder_rewards_pda`, or `unknown` when it holds none), `creator_fee` (where the creator fee goes: the creator, another wallet, a split, holders, a charity or a GitHub account; see below), `quote_mint`, and `pair` (the token it trades against; see below) |
 | `raw` | Name, symbol, description and social links as found in the metadata (**untrusted text, escape before rendering**) |
 | `normalized` | Cleaned tokens, ticker base, version markers (`version:2`), emoji keywords, obfuscation flags |
-| `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, `supported_by` and `generic`. `kind` is one of `famous_animal`, `meme`, `person`, `coin`, `event`, `concept`, `place`, `other`, and since rules 0.17.0 `animal` (an animal, not a specific famous one), `media` (a film, game, show or franchise), `project` (a crypto or AI product, protocol or launchpad), `object` (food, an object, an abstract thing) and `organization` (a company, exchange or listed stock); expect new kinds over time. `supported_by` lists the independent inputs pointing at it (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, and `copy_of` when it is inherited from the coin this one copies); a ticker that spells the name counts as the name. **`generic: true`** means only the kind is known: the name, ticker, image or description make it plain what sort of coin this is ("FROGMAN" is an animal coin) but no specific entity was identified, so `label` is a generic word for the kind (`"frog"`, `"cat"`, `"crypto project"`, `"AI agent"`) and `wave` is `null`. `confidence` bands (rules 0.17.0): **0.3-0.49** only the kind is known (`generic`), or a weak named guess; **0.5-0.69** a named referent from one input; **0.7+** two or more independent inputs agree. Since rules 0.21.0 a live trend that names the referent counts as the `trend` input (a Wikipedia article whose title is the referent, or an X, Google Trends, news or Bluesky label that is its name), a famous coin matched only by the ticker counts as `symbol`, not `name`, and the summary's "(confidence …)" is this banded value. `referent` is `null` when the coin has no readable theme at all (a random string, no description) and, since rules 0.28.0, when the best guess is below 0.3: the summary then says no clear reference was found instead of naming it. `wave` counts the coins on the same referent, see below |
+| `referent` | What the token refers to: `label`, `kind`, `desc`, `source`, `confidence`, `supported_by` and `generic`. `kind` is one of `famous_animal`, `meme`, `person`, `coin`, `event`, `concept`, `place`, `other`, and since rules 0.17.0 `animal` (an animal, not a specific famous one), `media` (a film, game, show or franchise), `project` (a crypto or AI product, protocol or launchpad), `object` (food, an object, an abstract thing) and `organization` (a company, exchange or listed stock); expect new kinds over time. `supported_by` lists the independent inputs pointing at it (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, and `copy_of` when it is inherited from the coin this one copies); a ticker that spells the name counts as the name. **`generic: true`** means only the kind is known: the name, ticker, image or description make it plain what sort of coin this is ("FROGMAN" is an animal coin) but no specific entity was identified, so `label` is a generic word for the kind (`"frog"`, `"cat"`, `"crypto project"`, `"AI agent"`) and `wave` is `null`. `confidence` bands (rules 0.17.0): **0.3-0.49** only the kind is known (`generic`), or a weak named guess; **0.5-0.69** a named referent from one input; **0.7+** two or more independent inputs agree. Since rules 0.21.0 a live trend that names the referent counts as the `trend` input (a Wikipedia article whose title is the referent, or an X, Google Trends, news or Bluesky label that is its name), a famous coin matched only by the ticker counts as `symbol`, not `name`, and the summary's "(confidence …)" is this banded value. `referent` is `null` when the coin has no readable theme at all (a random string, no description) and, since rules 0.28.0, when the best guess is below 0.3: the summary then says no clear reference was found instead of naming it. `wave` counts the coins on the same referent, see below. Since rules 0.30.0 the referent can be **the subject of the coin's X post** (`source: "x"`, `supported_by: ["x"]`): when the post names what the coin is and no lexicon or Wikipedia entity does (a generic kind, a weak guess, a coin matched by the ticker alone, or a title-only Wikipedia hit), `label` is the phrase the coin's name or ticker repeats in the post ("a white lioness named \"Luna\"" gives `Luna`; a quoted term, a "named/called/meet X" phrase, a capitalised name, or the shortest stretch holding the name's words), `confidence` 0.6, `kind` the closest existing kind for the coin's theme, `desc` `"@author: <first ~120 characters of the post>"`, and the new optional **`post_id`** the post's id. When nothing in the post matches the name but the coin's only theme came from the post, its lead clause stands in at 0.45. `post_id` is `null` for every other referent |
 | `categories[]` | Multi-label with confidences and `inputs`: the independent inputs that agree on the label, strongest first (`name`, `symbol`, `description`, `image`, `x`, `trend`, `db`, `copy_of`). Labels come from `GET /v1/meta`; expect new ones over time. `wave_1h` is how many coins TokenSage analysed in the last hour carry the same label (this one included). How confidence is scored: see "Category confidence" below |
 | `main_category` | Since rules 0.20.0: the coin's main category, the strongest top-level theme in `categories[]` (same object: `label`, `confidence`, `inputs`, `wave_1h`). Use it, not `categories[0]`, when you show one category per coin. `derivative` is the coin's relation to another coin, not a theme: it stays in `categories[]` (often the highest confidence on a copy) and in `copy_of`/`lineage`, and is `main_category` only when the coin has no theme at all, its own or inherited from the original. Since rules 0.21.0 `regional_language` (the script of the name: who the coin is for, not what it is about) is treated the same way, and two themes with equal confidence are ordered the way the generic referent's kind is chosen (the subject before the setting: `animal`, `celebrity`, `meme_template`, `pop_culture`, `news_event`, `political`, `ai_agent`, `tradfi`, `food_object_abstract`, `humor_crude_offensive`, `crypto_native`). `null` when `categories[]` has no top-level label (it is empty, or holds only `crypto_native/paired_ecosystem`), and on an analysis stored before rules 0.20.0 that is served with `max_age` or as `stale_analysis`. The summary's "reads as …" clause follows the same rule |
 | `ticker_explanation` | Plain-language explanation of the ticker |
@@ -145,8 +145,11 @@ window). `first_seen_at`: the launch time of the first such coin in the last 7 d
 `rank_24h`: this coin's place by launch time among the last 24 h's launches on the referent
 (`null` when it launched before that window). Referents are matched by TokenSage's normalised
 referent, the resolved label with case and punctuation folded, after every alias has resolved
-to one entity, so "Elon", "Musk" and "elonmusk" coins count together. Unlike `lineage`, these
-windows end at the read, so a later re-read sees the wave as it is then.
+to one entity, so "Elon", "Musk" and "elonmusk" coins count together. Since rules 0.30.0 a
+referent that is the subject of an X post (`referent.post_id` set) is counted by the post
+instead: every coin launched on one post rides one wave, whatever phrase each read took from
+it. Unlike `lineage`, these windows end at the read, so a later re-read sees the wave as it is
+then.
 
 **All lineage and wave counts only cover coins TokenSage has analysed** (since 2026-10-07 that
 is every pump.fun launch TrenchScanner forwards). The latest read of each coin counts.
@@ -182,6 +185,35 @@ A category's confidence comes from how many independent inputs agree on it and h
 - Dictionary words count only in their usual sense: the WordNet lists keep a word for a class
   only when its most-used sense is in that class ("world" is not an animal, "pad" not a body
   part, "launch" not a vehicle).
+- Since rules 0.30.0, `news_event` from the X post's timing (an earlier post by someone else)
+  needs content: a trend or headline hit, a named entity in the post (beyond the accounts
+  involved), or an author with reach (50k+ followers, or a verified business or government
+  account, not one made for the coin). Otherwise the timing row is a plain post reference
+  (label `x_post`, no category).
+
+#### Referent precision (since rules 0.30.0)
+
+The lists and thresholds below live in `data/referent_rules.yaml`.
+
+- Matching is whole-word, and a shorter lexicon hit inside a longer one at the same place gives
+  way to it ("musk ox" is not Elon Musk). Gazetteer names made only of everyday words ("what
+  if", "the end") count in a post or description only when written like a title, and in the
+  name only when they are the whole name. Rare words of some WordNet classes (body parts:
+  "pons") count only when they are among the 20k most frequent English words.
+- Wikipedia results whose short description marks a list, a surname or given-name page or a
+  disambiguation page are never a referent. A Wikipedia article found by the name whose kind
+  disagrees with the theme the other inputs give, or a creative work matched by everyday words
+  and named nowhere else, is scaled down (0.6×) with its categories.
+- The referent must agree with the name or ticker: a named referent found only in the post or
+  description, which the name and ticker do not echo and no sentence says together with the
+  coin's whole name, is a passing mention (0.55×, a weak guess at most). An account behind the
+  post whose name the coin's name echoes ("Elonius" on an @elonmusk post) is lifted instead.
+- Chain and platform words (Solana, pump.fun, Raydium, "memecoin") are where a coin lives, not
+  what it is about: outside the name they never become the referent and their categories count
+  at 0.35×; in the name they give way to any other candidate the name has. "Memecoin" slang
+  counts only in the name.
+- Fee-routing text ("creator fees to my wallet", rev share, buybacks) is dropped from the
+  description and post before the word lists read them.
 
 `scripts/category_audit.py` measures per-category precision and recall against hand-labelled
 pump.fun launches (`tests/golden/category_audit.yaml`, `category_audit_holdout.yaml`).
@@ -323,12 +355,14 @@ How it changes the analysis when `kind` is `token`:
 
 **Tokenized stocks (xStocks).** A pair token whose symbol is a stock ticker plus `x` (TSLAx,
 NVDAx, SPYx) and whose name says "xStock" (or whose mint is one of Backed's `Xs…` addresses)
-is `kind: "tokenized_stock"`. The coin gets `tradfi/tokenized_stock` (it was launched for that
-stock's crowd) instead of `crypto_native/paired_ecosystem`. The company comes from
+is `kind: "tokenized_stock"`. When the coin's name or ticker builds on the stock, the coin gets
+`tradfi/tokenized_stock` (it was launched for that stock's crowd) instead of
+`crypto_native/paired_ecosystem`; since rules 0.30.0 a coin that does not build on it gets only
+`crypto_native/paired_ecosystem` (the pair is where it trades, not what it is about). The company comes from
 `data/stocks.yaml` (64 large caps, meme stocks and index ETFs, e.g. Tesla → `celebrity/elon`,
 Nvidia → `ai_agent`). When the coin's name or ticker builds on the company or stock ticker
 ("Tesla Moon", `$NVDAMOON`) the company becomes the referent; otherwise only its categories
-count, weakly. Company names and tickers are also understood in the coin itself ("Tesla",
+count, weakly (before rules 0.30.0; since then they do not count). Company names and tickers are also understood in the coin itself ("Tesla",
 "$NVDA", "TSLAx"); common-word names and tickers (Apple, Meta, COIN, HOOD, SPY) only count in
 an unambiguous form ("apple inc", "metax").
 
