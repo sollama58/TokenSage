@@ -71,9 +71,35 @@ def test_the_rank_and_the_age_of_the_original_set_the_kind() -> None:
     assert late.lineage is not None and late.lineage.kind == "late_copy"
     assert late.lineage.rank == 15
     assert "late_copy" in {f.code for f in late.flags}
-    old = _run("Blorbo", "BLORBO", DbContext(same_name=_names([48])))
+    old = _run("Blorbo", "BLORBO", DbContext(same_name=_names([48, 3])))  # a live wave
     assert old.lineage is not None and old.lineage.kind == "late_copy"
     assert "late_copy" in {f.code for f in old.flags}
+
+
+def test_a_name_no_live_coin_carries_is_a_reference_not_a_late_copy() -> None:
+    # since rules 0.31.0: the only namesakes launched days ago, nothing in the last day
+    quiet = _run("Blorbo", "BLORBO", DbContext(same_name=_names([48, 30])))
+    lin = quiet.lineage
+    assert lin is not None and lin.kind == "reference"
+    assert lin.original is not None and lin.original.mint == "m0"  # what it builds on
+    assert lin.reference is None  # no established coin: the earlier namesake is the "of"
+    assert "late_copy" not in {f.code for f in quiet.flags}
+    # one namesake within the last day keeps the wave live: a late copy
+    live = _run("Blorbo", "BLORBO", DbContext(same_name=_names([48, 23])))
+    assert live.lineage is not None and live.lineage.kind == "late_copy"
+    # a reused logo is a copy at any age
+    cands = [_logo("m0", 48, name="Blorbo", sym="BLORBO")]
+    logo = _run(
+        "Blorbo", "BLORBO", DbContext(same_name=_names([48]), image_candidates=cands), logo=True
+    )
+    assert logo.lineage is not None and logo.lineage.kind == "late_copy"
+    # a late rank (eleven same-ticker launches today) stays a late copy
+    wave = _names([48]) + [
+        SameNameToken(f"t{i}", f"Other{i}", "BLORBO", NOW - timedelta(hours=0.1 * (i + 1)), "db")
+        for i in range(11)
+    ]
+    ranked = _run("Blorbo", "BLORBO", DbContext(same_name=wave))
+    assert ranked.lineage is not None and ranked.lineage.kind == "late_copy"
 
 
 def test_a_logo_copy_gets_its_own_copy_of_entry_and_counts() -> None:
@@ -116,6 +142,22 @@ def test_a_clone_of_a_famous_coin_is_a_reference_not_the_coin() -> None:
     assert clone.lineage.reference is not None and clone.lineage.reference.mint == real.mint
     itself = _run("Bonk", "BONK", DbContext(extra_coins=[real]), mint=real.mint or "")
     assert itself.lineage is not None and itself.lineage.kind == "original"
+
+
+def test_a_derivative_of_a_famous_coin_with_only_old_namesakes_is_its_reference() -> None:
+    from tokensage.analyzer import _lineage_out
+
+    same = [SameNameToken("m0", "Bonk Dog", "BONKDOG", NOW - timedelta(days=5), "db")]
+    out = _run("Bonk Dog", "BONKDOG", DbContext(same_name=same))
+    lin = out.lineage
+    assert lin is not None and lin.kind == "reference"
+    assert lin.reference is not None and lin.reference.symbol == "BONK"
+    shown = _lineage_out(lin)
+    assert shown is not None and shown.of_ticker == "BONK"  # the coin it builds on
+    # the same derivative inside a live wave is a copy of the wave's first coin
+    live = same + [SameNameToken("m1", "Bonk Dog", "BONKDOG", NOW - timedelta(hours=2), "db")]
+    out = _run("Bonk Dog", "BONKDOG", DbContext(same_name=live))
+    assert out.lineage is not None and out.lineage.kind == "late_copy"
 
 
 def test_a_copy_inherits_the_referent_with_its_own_support() -> None:

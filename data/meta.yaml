@@ -52,6 +52,10 @@ lineage:
   early_max_original_age_h: 6     # ... and the original launched less than 6 h earlier
   late_min_rank: 11               # late_copy: rank > 10 ...
   late_min_original_age_h: 24     # ... or the original launched more than 24 h earlier
+  # Since rules 0.31.0 a coin late by the original's age alone is a reference when every
+  # name-agreeing namesake launched more than this long before it and no earlier coin shares
+  # its logo: the name was used before, but no coin it could copy is live.
+  reference_quiet_h: 24
   logo_scan_days: 7               # logo near-duplicates are searched this far back
   logo_reused_min: 3              # flag logo_reused at this many other coins in 24 h
   inherit_factor: 0.8             # a copy with no theme of its own inherits the original's

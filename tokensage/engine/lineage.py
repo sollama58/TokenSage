@@ -16,11 +16,15 @@ Pure: the same-name tokens and the logo near-duplicates come in from the databas
   change them (no look-ahead).
 - Kinds (thresholds in data/meta.yaml, `lineage`): early_copy = rank <= 3 and the original
   launched less than 6 h earlier; late_copy = rank > 10 or the original launched more than
-  24 h earlier; copy = any other copy; reference = builds on an established coin only;
-  original = none of the above; unknown = no launch time. Since rules 0.30.0 a coin with no
-  original but with earlier coins of its name or ticker in the rank window (rank > 1: a
-  namesake launched within 5 min, or a ticker collision) is never "original": its kind
-  follows the rank alone.
+  24 h earlier; copy = any other copy; reference = builds on an established coin, or on a
+  name no live coin carries; original = none of the above; unknown = no launch time.
+  Since rules 0.30.0 a coin with no original but with earlier coins of its name or ticker in
+  the rank window (rank > 1: a namesake launched within 5 min, or a ticker collision) is
+  never "original": its kind follows the rank alone.
+  Since rules 0.31.0 a coin late by the original's age alone (rank <= 10) is a reference
+  when every name-agreeing namesake launched more than reference_quiet_h (24 h) earlier and
+  no earlier coin shares its logo: the name was used before, but no coin it could copy is
+  live (a dead "Spire" from 6 days ago is not copied).
 """
 
 from __future__ import annotations
@@ -323,7 +327,32 @@ def assess(
         before = sum(1 for g, _ in earlier_logos if g <= 86400)
         out.rank, out.rank_of, out.window_hours = before + 1, before + 1, 24
     out.kind = _kind(out.rank, o.age_s or 0, cfg)
+    late_rank = int(cfg.get("late_min_rank", 11))
+    if (
+        out.kind == "late_copy"
+        and (out.rank is None or out.rank < late_rank)
+        and _quiet_namesake(names, agreeing, logos, cfg)
+    ):
+        # since rules 0.31.0: late by the original's age alone. The name was used before,
+        # but by no coin of the last day and with another logo. Nothing it could copy is
+        # running: it builds on the name (or the established coin it references).
+        out.kind = "reference"
+        out.reference = references[0] if references else None
     return out
+
+
+def _quiet_namesake(
+    names: dict[str, tuple[_Launch, float]],
+    agreeing: set[str],
+    logos: dict[str, tuple[NearDup, float]],
+    cfg: dict[str, Any],
+) -> bool:
+    """No earlier coin shares the logo, and every earlier coin whose name agrees launched
+    more than reference_quiet_h before this one: the namesakes are old, not a live wave."""
+    if any(g > 0 for _, g in logos.values()):
+        return False
+    quiet = float(cfg.get("reference_quiet_h", 24)) * 3600
+    return all(g > quiet for m, (_, g) in names.items() if m in agreeing and g > 0)
 
 
 def candidate_mints(

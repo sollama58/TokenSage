@@ -224,7 +224,9 @@ def test_a_name_that_agrees_still_copies_and_inherits() -> None:
     out = _run("animal", "ANIMAL", ctx)
     lin = out.lineage
     assert lin is not None and lin.original is not None and lin.original.mint == "orig"
-    assert lin.original.match == ["name", "ticker"] and lin.kind == "late_copy"
+    # since rules 0.31.0 a 4-day-old namesake with no live wave makes it a reference to that
+    # name, still inheriting from it
+    assert lin.original.match == ["name", "ticker"] and lin.kind == "reference"
     assert lin.same_ticker == 0
     entry = next(c for c in out.copy_of if c.get("recent"))
     assert entry["mint"] == "orig" and entry["match"] == ["name", "ticker"]

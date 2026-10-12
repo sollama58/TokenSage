@@ -423,8 +423,10 @@ cases:
     category_between: {animal/frog: [0.6, 0.66]}
     referent: Glorp
     referent_supported_by: [copy_of]
-    lineage_kind: late_copy
-    flags_include: [late_copy, copycat]
+    # since rules 0.31.0 a lone namesake 30 h earlier, with no live wave, is a reference
+    lineage_kind: reference
+    flags_include: [copycat]
+    flags_exclude: [late_copy]
   # a launchpad coin that copies nothing: crypto_native from its words, no derivative
   - name: Pumpfun Bonding Curve
     symbol: BONDING
