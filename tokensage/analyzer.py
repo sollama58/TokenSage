@@ -1086,8 +1086,10 @@ _FEE_FLAGS = {
 def _lineage_out(lin: lineage_stage.Lineage | None) -> Lineage | None:
     if lin is None:
         return None
-    o = lin.original
     ref = lin.reference
+    # a reference names the established coin it builds on, when it has one, before the
+    # earlier namesake (since rules 0.31.0 a reference can have both)
+    o = None if lin.kind == "reference" and ref is not None else lin.original
     return Lineage(
         kind=lin.kind,  # type: ignore[arg-type]
         of_mint=o.mint if o else (ref.mint if ref else None),
