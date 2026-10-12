@@ -318,6 +318,22 @@ def _assess_tokenized_stock(
     why = builds_on(normalize(a.name, a.symbol, None), n, stock, underlying)
     a.builds_on = why is not None
     a.builds_on_detail = why
+    if not a.builds_on:
+        # Since rules 0.30.0 the pair alone sets no theme: "The End" paired to MSFTx is not a
+        # stock coin, nor an AI coin through Microsoft. It is the coin's setting, as any token
+        # pair is.
+        a.evidence.append(
+            Ev(
+                kind="pair",
+                label="crypto_native/paired_ecosystem",
+                weight=W_TOKENIZED_STOCK,
+                detail=f"trades against {who}, the tokenized {company} stock (xStock, "
+                f"${underlying}); the name does not build on it",
+                source=src,
+                where="chain",
+            )
+        )
+        return a
     a.evidence.append(
         Ev(
             kind="pair",

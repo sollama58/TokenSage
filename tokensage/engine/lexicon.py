@@ -169,9 +169,10 @@ def find(
     last_end = -1
     for h in hits:
         if h.start == last_start:
-            # same start: keep other payloads of the same span, but a dictionary word
-            # inside a longer named match ("hawk" in "hawk tuah") says nothing
-            if h.kind == "wordnet" and h.end < last_end:
+            # same start: keep other payloads of the same span, but a shorter match inside
+            # a longer one says nothing: "hawk" in "hawk tuah", and "musk" (Elon Musk) in
+            # "musk ox" (since rules 0.30.0)
+            if h.end < last_end:
                 continue
             kept.append(h)
             continue

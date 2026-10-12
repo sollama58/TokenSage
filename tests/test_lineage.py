@@ -308,7 +308,8 @@ async def test_referent_and_category_waves_count_recent_reads(
         referent=SimpleNamespace(label="Elon Musk", generic=False),
         categories=[("celebrity/elon", 0.8)],
     )
-    out = SimpleNamespace(copy_of=[], lineage=None, agg=agg)
+    rr = SimpleNamespace(label="Elon Musk", generic=False, post_id=None)
+    out = SimpleNamespace(copy_of=[], lineage=None, agg=agg, referent_read=rr)
     ctx = SimpleNamespace(rpc=None)
     r = SimpleNamespace(mint="mine", created_at=now - timedelta(seconds=1))
     ex = await analyzer._read_extras(db, ctx, r, out)  # type: ignore[arg-type]
@@ -317,6 +318,49 @@ async def test_referent_and_category_waves_count_recent_reads(
     assert ex.wave.rank_24h == 4
     assert ex.wave.first_seen_at == now - timedelta(days=3)
     assert ex.category_waves == {"celebrity/elon": 3}  # a, e and this one
+
+
+@needs_db
+async def test_coins_launched_on_one_post_share_its_wave(db: asyncpg.Connection) -> None:
+    """Since rules 0.30.0 the subject of an X post counts its wave by the post: two coins
+    whose reads took different phrases from one post ride one wave; the same phrase from
+    another post does not join it."""
+    from tokensage import analyzer
+    from tokensage.api.schemas import Analysis, Referent, Versions
+
+    now = datetime.now(UTC)
+
+    async def read(mint: str, at: datetime, label: str, post_id: str | None) -> None:
+        await db.execute("insert into token (mint, created_at) values ($1, $2)", mint, at)
+        ref = Referent(label=label, kind="animal", confidence=0.6, source="x", post_id=post_id)
+        doc = Analysis(
+            mint=mint,
+            created_at=at,
+            referent=ref,
+            categories=[],
+            summary="x",
+            depth="full",
+            analyzed_at=now,
+            versions=Versions(rules="t", lexicon="t"),
+        )
+        await analyzer._store_analysis(db, doc)
+
+    await read("a", now - timedelta(minutes=20), "Luna", "111")
+    await read("b", now - timedelta(minutes=10), "white lioness", "111")
+    await read("c", now - timedelta(minutes=5), "Luna", "222")
+    await db.execute("insert into token (mint, created_at) values ('mine', $1)", now)
+    stored = await db.fetchval("select referent_key from token_read where mint='b'")
+    assert stored == "x:111"
+
+    agg = SimpleNamespace(referent=None, categories=[])
+    rr = SimpleNamespace(label="Luna", generic=False, post_id="111")
+    out = SimpleNamespace(copy_of=[], lineage=None, agg=agg, referent_read=rr)
+    r = SimpleNamespace(mint="mine", created_at=now - timedelta(seconds=1))
+    ex = await analyzer._read_extras(db, SimpleNamespace(rpc=None), r, out)  # type: ignore[arg-type]
+    assert ex.wave is not None
+    assert ex.wave.launches_1h == 3  # a, b and this one; not c (another post)
+    assert analyzer.wave_key("Elon  Musk") == "elon musk"
+    assert analyzer.wave_key("Luna", "111") == "x:111"
 
 
 def test_a_namesake_from_two_minutes_earlier_is_a_sibling_not_the_original() -> None:
@@ -428,6 +472,7 @@ async def test_copied_coins_curves_are_read_in_one_batched_call(
         copy_of=[{"mint": m, "recent": True} for m in (T22_MINT, USDC, SPL_MINT, MISSING)],
         lineage=None,
         agg=SimpleNamespace(referent=None, categories=[]),
+        referent_read=None,
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(chain.handle)) as http:
         ctx = SimpleNamespace(rpc=SolanaRpc(RPC, http))
