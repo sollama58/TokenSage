@@ -107,6 +107,14 @@ def _core(words: Sequence[str], filler: set[str]) -> str:
     return "".join(kept or words)
 
 
+def _distinct_ticker(n: Normalized, k: Knowledge) -> bool:
+    """The ticker is specific enough that sharing it means sharing the idea: at least
+    name_word_min_len letters and not an everyday English word."""
+    sym = (n.ticker_base or n.ticker or "").lower()
+    min_len = int(config(k).get("name_word_min_len", 4))
+    return len(sym) >= min_len and sym.isalpha() and sym not in segment.common_words(k)
+
+
 def name_agrees(n: Normalized, name: str | None, k: Knowledge) -> bool:
     """Does another coin's name agree with this one's? The same compact name; the same name
     once filler words are dropped ("Animal" / "Animal Coin"); a close spelling (rapidfuzz
@@ -292,9 +300,14 @@ def assess(
         out.kind = "copy"
         return out
     if chosen is None:
-        if rank is not None and rank[0] > 1:
-            # earlier coins with its name or ticker launched within the rank window (a
-            # namesake within 5 min, a ticker collision): the 13th of 15 is not an original
+        namesake_earlier = any(
+            g > 0 and (m in agreeing or m in logos) for m, (_, g) in names.items()
+        )
+        if rank is not None and rank[0] > 1 and (namesake_earlier or _distinct_ticker(n, k)):
+            # earlier namesakes (name or logo agreeing, e.g. within 5 min) or coins sharing a
+            # distinctive ticker ($NEPENTHES) within the rank window: the 13th of 15 is not
+            # an original. A shared everyday-word ticker ($CHERRY, $LUNA) alone does not
+            # make a coin a copy of anything.
             out.rank, out.rank_of, out.window_hours = rank
             out.kind = _kind(rank[0], None, cfg)
         elif references:
