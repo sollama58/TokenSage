@@ -227,6 +227,7 @@ class Worker:
                     status=service._status_for(doc),  # type: ignore[arg-type]
                     depth=doc["depth"],
                     analysis=stored_analysis(doc),
+                    errors=service.doc_errors(doc),
                     request_id=f"callback-{job.id}",
                 )
         body = JobResponse(
