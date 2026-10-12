@@ -285,6 +285,15 @@
             ],
             "title": "Ticker Explanation"
           },
+          "timed_out": {
+            "default": [],
+            "description": "Full-depth sources still unfinished at the job deadline (FULL_DEPTH_DEADLINE_S, default 20 s) and left out of this read: x, x_media, wikipedia, ocr, vision, trends, news, bluesky, news_check. Non-empty makes the read partial; each is also reported in the response's errors (since rules 0.30.0)",
+            "items": {
+              "type": "string"
+            },
+            "title": "Timed Out",
+            "type": "array"
+          },
           "trend": {
             "$ref": "#/components/schemas/Trend",
             "default": {
@@ -4653,6 +4662,93 @@
         "title": "XAuthor",
         "type": "object"
       },
+      "XEngagement": {
+        "additionalProperties": false,
+        "description": "A post's public counts (full depth, since rules 0.30.0). null when the source that\nanswered does not report that count (the mirrors differ: views, quotes and bookmarks\nare often missing).",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the copy these counts come from was fetched. For coins younger than X_ENGAGEMENT_YOUNG_S (default 2 h) the post is fetched again once this is X_ENGAGEMENT_REFRESH_S (default 300 s) old; older coins keep their cached copy. null for posts cached before rules 0.30.0",
+            "title": "As Of"
+          },
+          "bookmarks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bookmarks"
+          },
+          "likes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Likes"
+          },
+          "quotes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quotes"
+          },
+          "replies": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replies"
+          },
+          "reposts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reposts"
+          },
+          "views": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Views"
+          }
+        },
+        "title": "XEngagement",
+        "type": "object"
+      },
       "XInfo": {
         "additionalProperties": false,
         "properties": {
@@ -4686,6 +4782,19 @@
               }
             ]
           },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The linked post's creation time as the source reports it (full depth, since rules 0.30.0)",
+            "title": "Created At"
+          },
           "credibility": {
             "anyOf": [
               {
@@ -4699,6 +4808,17 @@
             ],
             "description": "How much the account behind the link is worth, apart from whether it matches: age at launch, followers, posts, verification, renames, link reuse (uncalibrated until Phase 6). Context about the account: since rules 0.23.0 renames, a made-for-coin account and late reuse cost little, and nothing else in the read depends on this score",
             "title": "Credibility"
+          },
+          "engagement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XEngagement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The linked post's likes, reposts, replies, quotes, bookmarks and views with their as_of time (full depth, since rules 0.30.0)"
           },
           "fetch_source": {
             "anyOf": [
@@ -4722,6 +4842,15 @@
             ],
             "description": "Post/profile vs token comparison (full depth, tweet or profile links)"
           },
+          "media": {
+            "default": [],
+            "description": "The linked post's photos and videos (full depth, since rules 0.30.0)",
+            "items": {
+              "$ref": "#/components/schemas/XMedia"
+            },
+            "title": "Media",
+            "type": "array"
+          },
           "object_time": {
             "anyOf": [
               {
@@ -4732,6 +4861,7 @@
                 "type": "null"
               }
             ],
+            "description": "When the linked post or community was made, read from its id",
             "title": "Object Time"
           },
           "predates_token_by_s": {
@@ -5130,6 +5260,51 @@
         "title": "XMatchReferent",
         "type": "object"
       },
+      "XMedia": {
+        "additionalProperties": false,
+        "description": "A photo, video or GIF attached to a post (full depth, since rules 0.30.0). https URLs\nonly, as the source gave them.",
+        "properties": {
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Video / GIF preview image",
+            "title": "Thumbnail Url"
+          },
+          "type": {
+            "enum": [
+              "photo",
+              "video",
+              "gif",
+              "unknown"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The photo, or the video / GIF file when the source gives it",
+            "title": "Url"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "XMedia",
+        "type": "object"
+      },
       "XQuoted": {
         "additionalProperties": false,
         "description": "A tweet the linked tweet points at (full depth): the one it quotes (x.quoted) or the\none it replies to (x.replied_to). Often the real narrative: a launch post that quotes\nor answers someone else's earlier post.",
@@ -5156,9 +5331,29 @@
             ],
             "title": "Created At"
           },
+          "engagement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/XEngagement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Likes, reposts, ... of this post (since rules 0.30.0)"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "media": {
+            "default": [],
+            "description": "This post's photos and videos (since rules 0.30.0)",
+            "items": {
+              "$ref": "#/components/schemas/XMedia"
+            },
+            "title": "Media",
+            "type": "array"
           },
           "predates_token_by_s": {
             "anyOf": [
