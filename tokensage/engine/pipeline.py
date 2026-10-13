@@ -1164,6 +1164,9 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         seen_terms: set[str] = set()
         for where, text in texts:
             for h in inp.trend_index.match(text, where):
+                # what the coin is, not what its text mentions (rules 0.32.0)
+                if where != "name" and not trends.identity_hit(h, k):
+                    continue
                 if h.term.term not in seen_terms:
                     seen_terms.add(h.term.term)
                     trend_hits.append(h)
@@ -1209,13 +1212,13 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             if h.term.term not in seen_terms:
                 seen_terms.add(h.term.term)
                 trend_hits.append(h)
-            elif any(p.partial and p.term.term == h.term.term for p in trend_hits):
+            elif any(p.via is None and p.term.term == h.term.term for p in trend_hits):
                 shadowed.append(h)
         trend_hits = trends.gate(trend_hits, support, k)
-        # a one-word name's partial hit that gate() dropped ("Trump" of "Donald Trump": an
-        # everyday word with nothing to support it) gives way to the referent-backed hit on
-        # the same term, which "Trump Dog" and $TRUMP get; a partial hit that survived stays
-        # partial
+        # a text hit that gate() dropped (a one-word name's partial "Trump" of "Donald Trump",
+        # or a coin named "Halloween" against the everyday word) gives way to the
+        # referent-backed hit on the same term, which "Trump Dog" and $TRUMP get; a text hit
+        # that survived stays as it is
         kept = {h.term.term for h in trend_hits}
         trend_hits += [h for h in shadowed if h.term.term not in kept]
         for h in trend_hits:

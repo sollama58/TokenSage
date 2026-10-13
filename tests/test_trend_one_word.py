@@ -66,12 +66,38 @@ def test_everyday_and_frequent_words_need_a_second_signal() -> None:
     assert [(h.term.term, h.support) for h in hits] == [("Kanye West", "kanye")]
 
 
-def test_everyday_x_topic_needs_a_second_signal_but_wikipedia_does_not() -> None:
+def test_everyday_one_word_label_needs_a_second_signal_from_every_source() -> None:
     assert _run("Chow", "CHOW", [_x("Chow")]) == []
+    assert _run("Moon", "MOON", [trends.TrendTerm("Moon", 12.0, 90000)]) == []
+    assert _run("Juniper", "JUNI", [trends.TrendTerm("juniper", 0.0, 5000, "google_trends")]) == []
+    # the story behind a search can carry it
+    story = "Juniper outage hits Comcast"
+    hit = trends.TrendTerm("juniper", 0.0, 5000, "google_trends", headline=story)
+    hits = _run("Juniper", "JUNI", [hit], desc="comcast is down")
+    assert [(h.term.term, h.support) for h in hits] == [("juniper", "comcast")]
+    # a rare word is kept
+    hits = _run("Glasnow", "GLAS", [trends.TrendTerm("Glasnow", 12.0, 90000)])
+    assert [h.term.term for h in hits] == ["Glasnow"]
+
+
+def test_a_coin_named_for_its_referent_matches_through_the_referent() -> None:
+    # "Halloween" is an everyday word, but it is what the coin resolves to
     hits = _run("Halloween", "SPOOKY", [trends.TrendTerm("Halloween", 12.0, 90000)])
-    assert [h.term.source for h in hits] == ["wikipedia"]
-    hits = _run("Juniper", "JUNI", [trends.TrendTerm("juniper", 0.0, 5000, "google_trends")])
-    assert [h.term.term for h in hits] == ["juniper"]
+    assert [(h.term.term, h.via) for h in hits] == [("Halloween", "referent")]
+
+
+def test_description_and_post_hits_must_name_something() -> None:
+    terms = [
+        trends.TrendTerm("time", 0.0, 50000, "google_trends"),
+        trends.TrendTerm("market", 0.0, 50000, "google_trends"),
+        trends.TrendTerm("Glasnow", 0.0, 50000, "google_trends"),
+        _x("Moo Deng"),
+        _x("Life Is Good"),
+    ]
+    desc = "time to buy, the market loves moo deng, life is good, glasnow"
+    hits = _run("Hat Dog", "HDOG", terms, desc=desc)
+    assert sorted(h.term.term for h in hits) == ["Glasnow", "Moo Deng"]
+    assert all(h.where == "description" for h in hits)
 
 
 def test_ticker_matches_a_whole_label() -> None:

@@ -270,10 +270,10 @@ def ordinary(phrase: str, k: Knowledge) -> bool:
 def gate(hits: list[TrendHit], support_text: str, k: Knowledge) -> list[TrendHit]:
     """Drop one-word matches that are too ordinary to mean the coin is about the trend.
 
-    - The whole label is one word: a Wikipedia article or Google Trends search ("Halloween",
-      "Juniper") is kept as before (an unqualified article title is the word's main sense,
-      and a search is what people type); an X topic ("Tory", "Chow") or the ticker is kept
-      unless the word is an everyday word (see everyday()).
+    - The whole label is one word: kept unless the word is an everyday word (see everyday()),
+      whatever the source. Until rules 0.32.0 a Wikipedia article or Google Trends search
+      passed untouched, and "time", "news", "money" and "market" were most of the Google
+      Trends hits on decision rows (notes/tokensage-trend-heat-2026-10-13.md).
     - One word of a longer label (partial: "Leoncio" of "Leoncio Gomez"): kept only when the
       word is rare (see rare()).
     - Either way, a match the word alone does not carry is kept when the coin's other text
@@ -289,9 +289,6 @@ def gate(hits: list[TrendHit], support_text: str, k: Knowledge) -> list[TrendHit
             continue
         if h.surface.isdigit():
             continue  # "2026", "1000": a number names nothing
-        if not h.partial and h.where != "symbol" and h.term.source != "x_trends":
-            out.append(h)
-            continue
         ok = rare(h.surface, k) if h.partial else not everyday(h.surface, k)
         if not ok:
             h.support = _agreeing(h, words, k)
@@ -299,6 +296,17 @@ def gate(hits: list[TrendHit], support_text: str, k: Knowledge) -> list[TrendHit
         if ok:
             out.append(h)
     return out
+
+
+def identity_hit(h: TrendHit, k: Knowledge) -> bool:
+    """Whether a match in the coin's description or X post (not its name, ticker or referent)
+    is specific enough to say what the coin is about: a multi-word label that is not an
+    everyday phrase ("Moo Deng", not "Life Is Good"), or a rare one-word label ("Glasnow").
+    The description and the post mention a dozen things; a one-word label in them ("time",
+    "market") says nothing about the coin."""
+    if " " in h.surface:
+        return not ordinary(h.surface, k)
+    return len(h.surface) >= MIN_WORD_LEN and h.surface.isalpha() and rare(h.surface, k)
 
 
 def _agreeing(h: TrendHit, words: set[str], k: Knowledge) -> str | None:

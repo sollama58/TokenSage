@@ -599,11 +599,11 @@ cases:
   - name: Moon
     symbol: MOON
     trending: [{term: Moon, source: wikipedia, spike: 8.0, views: 200000}]
-    trend_terms: [Moon]  # a spiking article is the word's main sense: kept as before 0.18.0
+    trend_terms: []  # an everyday word, whatever the source (rules 0.32.0)
   - name: Juniper
     symbol: JUNI
     trending: [{term: juniper, source: google_trends, views: 2000}]
-    trend_terms: [juniper]
+    trend_terms: []  # an everyday word, whatever the source (rules 0.32.0)
   - name: Juniper
     symbol: JUNI
     trending: [{term: Juniper Networks, source: google_trends, views: 2000}]
