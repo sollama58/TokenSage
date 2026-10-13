@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     x_engagement_young_s: int = 7200
     x_engagement_retry_s: int = 60
 
+    # --- decision-time refresh, POST /v1/tokens:now (since rules 0.34.0) ---
+    # A stored refresh (fresh trend block and story heat) is served while younger than this;
+    # older, the request starts a new one.
+    now_max_age_s: int = 300
+
     # --- full-depth job deadline (since rules 0.30.0) ---
     # The full-depth fetches (X, OCR, logo labels, trends, Wikipedia, news, Bluesky) run
     # concurrently; whatever is unfinished after this many seconds is cancelled and the read

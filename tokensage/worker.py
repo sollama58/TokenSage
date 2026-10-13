@@ -258,6 +258,13 @@ class Worker:
                     bound.info("job.done", version=version)
                 else:
                     bound.warning("job.done_after_lease_lost", version=version)
+            elif job.kind == "now":
+                assert job.mint
+                from tokensage import now
+
+                await now.refresh(conn, self.ctx.http, job.mint)
+                await queue.complete(conn, job.id, None, job.lease_token)
+                bound.info("job.now.done")
             elif job.kind == "callback":
                 try:
                     await self._callback(conn, job)

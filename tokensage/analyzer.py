@@ -1923,6 +1923,14 @@ async def _read_extras(
 
 
 def _trend_out(out: EngineOutput, now: datetime | None = None) -> TrendOut:
+    return trend_block(out.trend_hits, out.trend_sources, now)
+
+
+def trend_block(
+    hits: list[trends.TrendHit],
+    sources: list[trends.SourceStatus],
+    now: datetime | None = None,
+) -> TrendOut:
     terms = [
         TrendTermOut(
             term=h.term.term,
@@ -1941,7 +1949,7 @@ def _trend_out(out: EngineOutput, now: datetime | None = None) -> TrendOut:
             direction=h.term.direction,  # type: ignore[arg-type]
             novelty=trends.novelty(h.term, now),
         )
-        for h in out.trend_hits
+        for h in hits
     ]
     return TrendOut(
         matched=bool(terms),
@@ -1957,7 +1965,7 @@ def _trend_out(out: EngineOutput, now: datetime | None = None) -> TrendOut:
                 detail=s.detail,
                 history_days=s.history_days,
             )
-            for s in out.trend_sources
+            for s in sources
         ],
     )
 
