@@ -757,6 +757,28 @@ class TrendTerm(_Model):
         description="Bluesky only: posts naming it in the last 24 h (from at least 3 accounts; "
         "coin chatter excluded; at most 100)",
     )
+    days_listed: int | None = Field(
+        default=None,
+        description="Since rules 0.33.0, Wikipedia, Google Trends and X: the distinct UTC days in "
+        "the 30 before yesterday on which any of the three listed it (0: new; 30: trends every "
+        'day, like "Elon"). See trend.sources[].history_days for how much history it rests on',
+    )
+    direction: Literal["rising", "steady", "falling"] | None = Field(
+        default=None,
+        description="Since rules 0.33.0: X, rising when on the newest hourly list higher than "
+        "where it first appeared, falling when off it or 10+ places below its best; Google "
+        "Trends, rising with more searches than when first seen, falling when off the current "
+        "feed; Wikipedia, rising when its strongest day is the newest day loaded. Null for news "
+        "and Bluesky",
+    )
+    novelty: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Since rules 0.33.0: how new the trend is, 0-1: 1 / (1 + days_listed / 2), "
+        "halved every 24 h since first listed this time (seen_at), x0.8 steady, x0.5 falling. "
+        "Null for news and Bluesky",
+    )
 
 
 class TrendSource(_Model):
@@ -776,6 +798,12 @@ class TrendSource(_Model):
         "bluesky: matching posts in the last 24 h)",
     )
     detail: str | None = None
+    history_days: int | None = Field(
+        default=None,
+        description="Since rules 0.33.0, Wikipedia, Google Trends and X: days of this source's "
+        "list kept in the 30 before yesterday, which terms[].days_listed counts (Google Trends "
+        "and X are kept from rules 0.33.0 on)",
+    )
 
 
 class Trend(_Model):
@@ -784,6 +812,11 @@ class Trend(_Model):
         default=None,
         description="Strength of the strongest matching trend, 0-1 (full depth; 0 when "
         "nothing matched)",
+    )
+    novelty: float | None = Field(
+        default=None,
+        description="Since rules 0.33.0: the newest matching trend's novelty, 0-1 (full depth; "
+        "0 when nothing with a list history matched)",
     )
     terms: list[TrendTerm] = []
     sources: list[TrendSource] = Field(

@@ -53,6 +53,15 @@ class TrendTerm:
     # the story behind a Google Trends search, or the most liked matching Bluesky post
     headline: str | None = None
     rank: int | None = None  # x_trends: its best position on X's list (1-50)
+    # how often it trended before (rules 0.33.0): the distinct UTC days in the 30 before
+    # yesterday on which Wikipedia, Google Trends or X listed it; None for news and Bluesky,
+    # which are searched for the coin's name and keep no list
+    days_listed: int | None = None
+    # "rising" | "steady" | "falling" (rules 0.33.0): X, still on the newest hourly list
+    # and higher than when it first appeared, or dropped off / 10+ places below its best;
+    # Google Trends, more searches than when first seen, or off the current feed;
+    # Wikipedia, its strongest day is the newest day loaded
+    direction: str | None = None
 
 
 @dataclass
@@ -89,6 +98,9 @@ class SourceStatus:
     as_of: datetime | None = None  # the newest data the source gave
     terms: int | None = None  # trending terms (or headlines) it contributed
     detail: str | None = None
+    # days of this source's list kept in the 30 before yesterday (rules 0.33.0): how much
+    # history trend.terms[].days_listed rests on
+    history_days: int | None = None
 
 
 class TrendIndex:
@@ -357,6 +369,26 @@ def score(h: TrendHit, index: TrendIndex | None = None) -> float:
     if index is not None and t.source not in ("news", "bluesky") and index.is_generic(t.term):
         s *= 0.5
     return round(s, 3)
+
+
+NOVELTY_HALF_LIFE_H = 24.0  # a term first listed a day ago is half as new
+NOVELTY_DIRECTION = {"rising": 1.0, "steady": 0.8, "falling": 0.5}
+
+
+def novelty(t: TrendTerm, now: datetime | None = None) -> float | None:
+    """How new the trend is, 0-1 (trend.terms[].novelty, rules 0.33.0): rare x fresh x
+    direction. rare: 1 / (1 + days_listed / 2), 1 for a term never listed in the last 30
+    days, 0.06 for one listed on all of them ("Elon"); fresh: halves every 24 h since it was
+    first listed this time (seen_at); direction: falling counts half, steady 0.8. None for
+    news and Bluesky hits, which have no list history."""
+    if t.days_listed is None:
+        return None
+    now = now or datetime.now(UTC)
+    rare_ = 1.0 / (1.0 + t.days_listed / 2.0)
+    hours = max((now - t.seen_at).total_seconds() / 3600, 0.0) if t.seen_at else 24.0
+    fresh = 0.5 ** (hours / NOVELTY_HALF_LIFE_H)
+    move = NOVELTY_DIRECTION.get(t.direction or "", 0.8)
+    return round(max(0.0, min(1.0, rare_ * fresh * move)), 3)
 
 
 def referent_hits(

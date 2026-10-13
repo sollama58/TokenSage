@@ -1922,7 +1922,7 @@ async def _read_extras(
     return ex
 
 
-def _trend_out(out: EngineOutput) -> TrendOut:
+def _trend_out(out: EngineOutput, now: datetime | None = None) -> TrendOut:
     terms = [
         TrendTermOut(
             term=h.term.term,
@@ -1937,16 +1937,25 @@ def _trend_out(out: EngineOutput) -> TrendOut:
             hours=h.term.views if h.term.source == "x_trends" else None,
             posts=h.term.views if h.term.source == "bluesky" else None,
             partial=True if h.partial else None,
+            days_listed=h.term.days_listed,
+            direction=h.term.direction,  # type: ignore[arg-type]
+            novelty=trends.novelty(h.term, now),
         )
         for h in out.trend_hits
     ]
     return TrendOut(
         matched=bool(terms),
         score=max((t.score or 0.0 for t in terms), default=0.0),
+        novelty=max((t.novelty or 0.0 for t in terms), default=0.0),
         terms=terms,
         sources=[
             TrendSourceOut(
-                source=s.source, status=s.status, as_of=s.as_of, terms=s.terms, detail=s.detail
+                source=s.source,
+                status=s.status,
+                as_of=s.as_of,
+                terms=s.terms,
+                detail=s.detail,
+                history_days=s.history_days,
             )
             for s in out.trend_sources
         ],
