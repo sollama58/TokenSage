@@ -166,10 +166,11 @@ async def _prune_usage(conn: asyncpg.Connection) -> int:
 # lookup_cache rows for one name or phrase (Google News, Bluesky, Wikipedia) are upserted on
 # every full read and only checked against their TTL on read, so nothing else removes them.
 # The longest TTL is WIKI_TTL (7 days); past LOOKUP_KEEP a row is only a fallback for an
-# upstream outage that long. The trend rows (gtrends:seen, xtrends:seen) are single
-# long-lived keys and are left alone.
+# upstream outage that long. The decision-time refreshes (now:, heat:, since rules 0.34.0)
+# are minutes-fresh by nature and go with them. The trend rows (gtrends:seen,
+# xtrends:seen) are single long-lived keys and are left alone.
 LOOKUP_KEEP = "8 days"
-LOOKUP_PREFIXES = ["bsky:%", "gnews:%", "wiki:%"]
+LOOKUP_PREFIXES = ["bsky:%", "gnews:%", "wiki:%", "now:%", "heat:%"]
 
 
 async def _prune_lookup_cache(conn: asyncpg.Connection) -> int:

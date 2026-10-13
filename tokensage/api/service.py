@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,13 +12,14 @@ from tokensage import queue
 from tokensage.api.auth import ApiKey
 from tokensage.api.schemas import (
     Freshness,
+    NowItem,
     TokenResponse,
     UpstreamError,
     stored_analysis,
 )
 from tokensage.api.usage import Usage
 from tokensage.config import Settings
-from tokensage.versions import RULES_VERSION
+from tokensage.versions import NOW_KEY, RULES_VERSION
 
 DEPTH_RANK = {"basic": 0, "full": 1}
 # A request that misses the cache while an identical job is committing reuses that job.
@@ -383,3 +385,84 @@ async def get_or_enqueue(
             job_id=job.id,
             request_id=request_id,
         )
+
+
+# ----------------------------------------------------------------- decision-time refresh
+
+
+async def now_items(
+    pool: asyncpg.Pool,
+    waiter: queue.DoneWaiter,
+    settings: Settings,
+    mints: list[str],
+    wait_s: int,
+    requested_by: str,
+) -> dict[str, NowItem]:
+    """The stored refresh per mint (POST /v1/tokens:now), starting a `now` job for each one
+    older than NOW_MAX_AGE_S or made by older rules. Free: no quota is charged. A mint with
+    no full read is `unavailable` without a job."""
+
+    async def stored(conn: asyncpg.Connection) -> dict[str, tuple[dict[str, Any], datetime]]:
+        rows = await conn.fetch(
+            "select key, value, fetched_at from lookup_cache where key = any($1::text[])",
+            [NOW_KEY + m for m in mints],
+        )
+        return {
+            r["key"].removeprefix(NOW_KEY): (r["value"], r["fetched_at"])
+            for r in rows
+            if isinstance(r["value"], dict)
+        }
+
+    def fresh(v: tuple[dict[str, Any], datetime] | None) -> bool:
+        return (
+            v is not None
+            and v[0].get("status") == "complete"
+            and v[0].get("rules") == RULES_VERSION
+            and (datetime.now(UTC) - v[1]).total_seconds() <= settings.now_max_age_s
+        )
+
+    jobs: list[int] = []
+    async with pool.acquire() as conn:
+        have = await stored(conn)
+        stale = [m for m in mints if not fresh(have.get(m))]
+        full = {
+            r["mint"]
+            for r in await conn.fetch(
+                "select distinct mint from analysis where mint = any($1::text[]) "
+                "and depth = 'full'",
+                stale,
+            )
+        }
+        for m in stale:
+            if m not in full:
+                continue
+            job = await queue.enqueue(
+                conn,
+                "now",
+                m,
+                "full",
+                priority=queue.PRIORITY_API,
+                requested_by=requested_by,
+                reuse_done_within_s=min(30, settings.now_max_age_s),
+            )
+            if job.status != "done":
+                jobs.append(job.id)
+    if jobs and wait_s > 0:
+        await asyncio.gather(*(waiter.wait(j, wait_s) for j in jobs))
+    async with pool.acquire() as conn:
+        have = await stored(conn)
+    out: dict[str, NowItem] = {}
+    for m in mints:
+        v = have.get(m)
+        if fresh(v):
+            assert v is not None
+            body = {k: val for k, val in v[0].items() if k != "rules"}
+            out[m] = NowItem.model_validate(body)
+        elif m not in full:
+            out[m] = NowItem(ca=m, status="unavailable", error="no_full_read")
+        elif v is not None and v[0].get("status") == "complete":
+            body = {k: val for k, val in v[0].items() if k != "rules"}
+            out[m] = NowItem.model_validate({**body, "status": "pending"})
+        else:
+            out[m] = NowItem(ca=m, status="pending")
+    return out

@@ -20,6 +20,9 @@ from tokensage.api.schemas import (
     FlagEntry,
     JobResponse,
     MetaResponse,
+    NowItem,
+    NowRequest,
+    NowResponse,
     RawFields,
     TaxonomyEntry,
     TokenHints,
@@ -271,6 +274,51 @@ async def batch(
         )
     response.headers.update(await service.quota_headers(request.app.state.pool, key))
     return BatchResponse(items=items, request_id=request.state.request_id)
+
+
+@router.post(
+    "/tokens:now",
+    response_model=NowResponse,
+    responses={401: err("unauthorized"), 422: err("validation_error")},
+    summary="Fresh trends and story heat for coins already read at full depth",
+    description=(
+        "Since rules 0.34.0. For each CA with a full-depth read: its trend block matched "
+        "against the trend lists as they are now, and how its story trades now (the leading "
+        "coin of its lineage original or referent on GeckoTerminal: market cap, 5 min and 1 h "
+        "change and volume, minutes since its 24 h peak, and the summed volume of the coins on "
+        "the story). A refresh younger than NOW_MAX_AGE_S (300 s) is served as is; an older "
+        "one starts a new refresh (`pending`, with the previous values when there are any). "
+        "Free: refreshes count against no quota."
+    ),
+)
+async def tokens_now(
+    request: Request,
+    body: NowRequest,
+    key: Annotated[ApiKey, Depends(require_api_key)],
+) -> NowResponse:
+    if not body.cas:
+        raise errors.validation("give at least one CA in `cas`")
+    items: dict[str, NowItem] = {}
+    mints: list[str] = []
+    for raw in body.cas:
+        try:
+            mints.append(parse_ca(raw))
+        except ValueError as e:
+            items[raw] = NowItem(ca=raw, status="invalid", error=str(e))
+    if mints:
+        items.update(
+            await service.now_items(
+                request.app.state.pool,
+                request.app.state.waiter,
+                request.app.state.settings,
+                list(dict.fromkeys(mints)),
+                body.wait,
+                key.name,
+            )
+        )
+    out = [items[c] for c in body.cas if c in items]
+    out += [items[m] for m in mints if m not in body.cas and m in items]
+    return NowResponse(items=out, request_id=request.state.request_id)
 
 
 @router.get(

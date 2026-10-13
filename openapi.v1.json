@@ -1489,6 +1489,104 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HeatLeader": {
+        "additionalProperties": false,
+        "properties": {
+          "change_1h_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 1H Pct"
+          },
+          "change_5m_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change 5M Pct"
+          },
+          "from_peak_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its latest price against that high, percent (<= 0)",
+            "title": "From Peak Pct"
+          },
+          "mcap_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Market cap (else FDV), USD",
+            "title": "Mcap Usd"
+          },
+          "mint": {
+            "title": "Mint",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "peak_minutes_ago": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minutes since its highest 15-minute high of the last 24 h (0: at its peak now; large: the story already played out). Null when the candles failed",
+            "title": "Peak Minutes Ago"
+          },
+          "pool": {
+            "description": "Its busiest pool on GeckoTerminal",
+            "title": "Pool",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "volume_1h_usd": {
+            "default": 0.0,
+            "title": "Volume 1H Usd",
+            "type": "number"
+          },
+          "volume_5m_usd": {
+            "default": 0.0,
+            "title": "Volume 5M Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mint",
+          "name",
+          "symbol",
+          "pool"
+        ],
+        "title": "HeatLeader",
+        "type": "object"
+      },
       "HeliusCalls": {
         "additionalProperties": false,
         "properties": {
@@ -2926,6 +3024,126 @@
         "title": "Normalized",
         "type": "object"
       },
+      "NowItem": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "ca": {
+            "title": "Ca",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "status": {
+            "description": "complete: fresh (as_of within NOW_MAX_AGE_S); pending: a refresh is running and the fields are the previous refresh's, if any; unavailable: the coin has no full-depth read to refresh; invalid: not a CA",
+            "enum": [
+              "complete",
+              "pending",
+              "unavailable",
+              "invalid"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "story_heat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoryHeat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the coin has no story to search (no lineage original, generic or no referent)"
+          },
+          "trend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Trend"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The coin's trend block matched now, as in analysis.trend (Wikipedia, Google Trends and X; the name searches, news and Bluesky, are not repeated)"
+          }
+        },
+        "required": [
+          "ca",
+          "status"
+        ],
+        "title": "NowItem",
+        "type": "object"
+      },
+      "NowRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cas": {
+            "description": "1-50 CAs that have a full-depth read",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Cas",
+            "type": "array"
+          },
+          "wait": {
+            "default": 0,
+            "description": "Seconds to wait for refreshes started by this request",
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Wait",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cas"
+        ],
+        "title": "NowRequest",
+        "type": "object"
+      },
+      "NowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NowItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "request_id"
+        ],
+        "title": "NowResponse",
+        "type": "object"
+      },
       "OriginalMarket": {
         "additionalProperties": false,
         "description": "The copied coin's bonding curve when this coin was read.",
@@ -3682,6 +3900,82 @@
           "recall_24h"
         ],
         "title": "StatusResponse",
+        "type": "object"
+      },
+      "StoryHeat": {
+        "additionalProperties": false,
+        "description": "How the coin's story trades right now (rules 0.34.0), from GeckoTerminal.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "coins": {
+            "default": 0,
+            "description": "Coins whose name or ticker carries the story (or the lineage original) among GeckoTerminal's top 20 Solana pools for it; the asking coin may be one of them",
+            "title": "Coins",
+            "type": "integer"
+          },
+          "leader": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeatLeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one with the largest market cap (the asking coin itself when its mint is leader.mint); null when none"
+          },
+          "status": {
+            "description": "ok: GeckoTerminal answered; failed / rate_limited: no numbers this time (rate_limited: the free tier's per-minute budget was spent)",
+            "enum": [
+              "ok",
+              "failed",
+              "rate_limited"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "story": {
+            "description": "The phrase searched: the lineage original's name, else the referent's label",
+            "title": "Story",
+            "type": "string"
+          },
+          "story_kind": {
+            "enum": [
+              "lineage",
+              "referent"
+            ],
+            "title": "Story Kind",
+            "type": "string"
+          },
+          "wave_volume_1h_usd": {
+            "default": 0.0,
+            "description": "Their summed volume in the last hour, USD",
+            "title": "Wave Volume 1H Usd",
+            "type": "number"
+          },
+          "wave_volume_5m_usd": {
+            "default": 0.0,
+            "title": "Wave Volume 5M Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "story",
+          "story_kind",
+          "status"
+        ],
+        "title": "StoryHeat",
         "type": "object"
       },
       "TaxonomyEntry": {
@@ -7163,6 +7457,63 @@
           }
         ],
         "summary": "Prefetch up to 50 CAs",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/v1/tokens:now": {
+      "post": {
+        "description": "Since rules 0.34.0. For each CA with a full-depth read: its trend block matched against the trend lists as they are now, and how its story trades now (the leading coin of its lineage original or referent on GeckoTerminal: market cap, 5 min and 1 h change and volume, minutes since its 24 h peak, and the summed volume of the coins on the story). A refresh younger than NOW_MAX_AGE_S (300 s) is served as is; an older one starts a new refresh (`pending`, with the previous values when there are any). Free: refreshes count against no quota.",
+        "operationId": "tokens_now_v1_tokens_now_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NowResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Fresh trends and story heat for coins already read at full depth",
         "tags": [
           "v1"
         ]

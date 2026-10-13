@@ -426,6 +426,88 @@ def referent_hits(
     return out
 
 
+def collect(
+    index: TrendIndex,
+    k: Knowledge,
+    texts: list[tuple[str, str]],
+    *,
+    name_tokens: list[str],
+    name_compact: str,
+    ticker: str | None,
+    evidence: list[Ev],
+    news_hits: list[TrendHit] | None = None,
+    extra_support: str = "",
+) -> list[TrendHit]:
+    """The coin's trend hits, scored: its texts (name first), a one-word name as one word of
+    a label, the ticker as a whole label, the name searches (news, Bluesky), and the
+    referents in `evidence`, then gate(). A full read and a fresh trend block (tokensage.now)
+    both come through here."""
+    trend_hits: list[TrendHit] = []
+    seen_terms: set[str] = set()
+    for where, text in texts:
+        for h in index.match(text, where):
+            # what the coin is, not what its text mentions (rules 0.32.0)
+            if where != "name" and not identity_hit(h, k):
+                continue
+            if h.term.term not in seen_terms:
+                seen_terms.add(h.term.term)
+                trend_hits.append(h)
+    # a one-word name may be one word of what trends ("Leoncio" of "Leoncio Gomez"), and
+    # a ticker that is not the name may be the whole of it; gate() below weeds out the
+    # everyday words
+    support = " ".join(text for _, text in texts) + " " + extra_support
+    # a whole-label name hit that gate() will drop ("West" trending as itself) must not
+    # stop the word-of-a-label lookup ("West" of "Kanye West")
+    if (
+        len(name_tokens) == 1
+        and len(name_tokens[0]) >= MIN_WORD_LEN
+        and not any(h.where == "name" for h in gate(list(trend_hits), support, k))
+    ):
+        word_hit = index.match_word(name_tokens[0], "name")
+        if word_hit is not None and word_hit.term.term not in seen_terms:
+            seen_terms.add(word_hit.term.term)
+            trend_hits.append(word_hit)
+    tick = (ticker or "").lower()
+    if (
+        len(tick) >= MIN_TERM_LEN
+        and tick.isalpha()
+        and tick != name_compact
+        and tick not in name_tokens
+    ):
+        tick_hit = index.match_exact(tick, "symbol")
+        if tick_hit is not None and tick_hit.term.term not in seen_terms:
+            seen_terms.add(tick_hit.term.term)
+            trend_hits.append(tick_hit)
+    # the name searches (Google News, Bluesky) both search the name: each source keeps
+    # its own hit, but not one for a label the index already matched
+    index_terms = {t.lower() for t in seen_terms}
+    named: set[tuple[str, str]] = set()
+    for h in news_hits or ():
+        key = (h.term.source, h.term.term.lower())
+        if key[1] not in index_terms and key not in named:
+            named.add(key)
+            seen_terms.add(h.term.term)
+            trend_hits.append(h)
+    # the coin's text may not spell the trend ("Elon", $PNUT): its referent can
+    shadowed: list[TrendHit] = []
+    for h in referent_hits(evidence, index, k):
+        if h.term.term not in seen_terms:
+            seen_terms.add(h.term.term)
+            trend_hits.append(h)
+        elif any(p.via is None and p.term.term == h.term.term for p in trend_hits):
+            shadowed.append(h)
+    trend_hits = gate(trend_hits, support, k)
+    # a text hit that gate() dropped (a one-word name's partial "Trump" of "Donald Trump",
+    # or a coin named "Halloween" against the everyday word) gives way to the
+    # referent-backed hit on the same term, which "Trump Dog" and $TRUMP get; a text hit
+    # that survived stays as it is
+    kept = {h.term.term for h in trend_hits}
+    trend_hits += [h for h in shadowed if h.term.term not in kept]
+    for h in trend_hits:
+        h.score = score(h, index)
+    return trend_hits
+
+
 PARTIAL_REFERENT_PENALTY = 0.1  # "Leoncio" names "Leoncio Gomez" less surely than the label
 
 

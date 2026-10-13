@@ -997,6 +997,90 @@ class BatchResponse(_Model):
     request_id: str
 
 
+class HeatLeader(_Model):
+    mint: str
+    name: str
+    symbol: str
+    pool: str = Field(description="Its busiest pool on GeckoTerminal")
+    mcap_usd: float | None = Field(default=None, description="Market cap (else FDV), USD")
+    change_5m_pct: float | None = None
+    change_1h_pct: float | None = None
+    volume_5m_usd: float = 0.0
+    volume_1h_usd: float = 0.0
+    peak_minutes_ago: int | None = Field(
+        default=None,
+        description="Minutes since its highest 15-minute high of the last 24 h (0: at its "
+        "peak now; large: the story already played out). Null when the candles failed",
+    )
+    from_peak_pct: float | None = Field(
+        default=None, description="Its latest price against that high, percent (<= 0)"
+    )
+
+
+class StoryHeat(_Model):
+    """How the coin's story trades right now (rules 0.34.0), from GeckoTerminal."""
+
+    story: str = Field(
+        description="The phrase searched: the lineage original's name, else the referent's label"
+    )
+    story_kind: Literal["lineage", "referent"]
+    status: Literal["ok", "failed", "rate_limited"] = Field(
+        description="ok: GeckoTerminal answered; failed / rate_limited: no numbers this time "
+        "(rate_limited: the free tier's per-minute budget was spent)"
+    )
+    as_of: datetime | None = None
+    coins: int = Field(
+        default=0,
+        description="Coins whose name or ticker carries the story (or the lineage original) "
+        "among GeckoTerminal's top 20 Solana pools for it; the asking coin may be one of them",
+    )
+    leader: HeatLeader | None = Field(
+        default=None,
+        description="The one with the largest market cap (the asking coin itself when its "
+        "mint is leader.mint); null when none",
+    )
+    wave_volume_1h_usd: float = Field(
+        default=0.0, description="Their summed volume in the last hour, USD"
+    )
+    wave_volume_5m_usd: float = 0.0
+
+
+class NowRequest(_Model):
+    cas: list[str] = Field(max_length=50, description="1-50 CAs that have a full-depth read")
+    wait: int = Field(
+        default=0,
+        ge=0,
+        le=10,
+        description="Seconds to wait for refreshes started by this request",
+    )
+
+
+class NowItem(_Model):
+    ca: str
+    status: Literal["complete", "pending", "unavailable", "invalid"] = Field(
+        description="complete: fresh (as_of within NOW_MAX_AGE_S); pending: a refresh is "
+        "running and the fields are the previous refresh's, if any; unavailable: the coin has "
+        "no full-depth read to refresh; invalid: not a CA"
+    )
+    as_of: datetime | None = None
+    trend: Trend | None = Field(
+        default=None,
+        description="The coin's trend block matched now, as in analysis.trend (Wikipedia, "
+        "Google Trends and X; the name searches, news and Bluesky, are not repeated)",
+    )
+    story_heat: StoryHeat | None = Field(
+        default=None,
+        description="Null when the coin has no story to search (no lineage original, generic "
+        "or no referent)",
+    )
+    error: str | None = None
+
+
+class NowResponse(_Model):
+    items: list[NowItem]
+    request_id: str
+
+
 class TaxonomyEntry(_Model):
     label: str
     description: str

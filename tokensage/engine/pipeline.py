@@ -1161,68 +1161,17 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         for related in (xa.quoted, xa.replied_to) if xa else ():
             if related and related.text:
                 texts.append(("x", related.text))
-        seen_terms: set[str] = set()
-        for where, text in texts:
-            for h in inp.trend_index.match(text, where):
-                # what the coin is, not what its text mentions (rules 0.32.0)
-                if where != "name" and not trends.identity_hit(h, k):
-                    continue
-                if h.term.term not in seen_terms:
-                    seen_terms.add(h.term.term)
-                    trend_hits.append(h)
-        # a one-word name may be one word of what trends ("Leoncio" of "Leoncio Gomez"), and
-        # a ticker that is not the name may be the whole of it; gate() below weeds out the
-        # everyday words
-        support = " ".join(text for _, text in texts) + " " + ocr_text
-        # a whole-label name hit that gate() will drop ("West" trending as itself) must not
-        # stop the word-of-a-label lookup ("West" of "Kanye West")
-        if (
-            len(n.name_tokens) == 1
-            and len(n.name_tokens[0]) >= trends.MIN_WORD_LEN
-            and not any(h.where == "name" for h in trends.gate(list(trend_hits), support, k))
-        ):
-            word_hit = inp.trend_index.match_word(n.name_tokens[0], "name")
-            if word_hit is not None and word_hit.term.term not in seen_terms:
-                seen_terms.add(word_hit.term.term)
-                trend_hits.append(word_hit)
-        tick = (n.ticker or "").lower()
-        if (
-            len(tick) >= trends.MIN_TERM_LEN
-            and tick.isalpha()
-            and tick != n.name_compact
-            and tick not in n.name_tokens
-        ):
-            tick_hit = inp.trend_index.match_exact(tick, "symbol")
-            if tick_hit is not None and tick_hit.term.term not in seen_terms:
-                seen_terms.add(tick_hit.term.term)
-                trend_hits.append(tick_hit)
-        # the name searches (Google News, Bluesky) both search the name: each source keeps
-        # its own hit, but not one for a label the index already matched
-        index_terms = {t.lower() for t in seen_terms}
-        named: set[tuple[str, str]] = set()
-        for h in inp.news_hits or ():
-            key = (h.term.source, h.term.term.lower())
-            if key[1] not in index_terms and key not in named:
-                named.add(key)
-                seen_terms.add(h.term.term)
-                trend_hits.append(h)
-        # the coin's text may not spell the trend ("Elon", $PNUT): its referent can
-        shadowed: list[trends.TrendHit] = []
-        for h in trends.referent_hits(evidence, inp.trend_index, k):
-            if h.term.term not in seen_terms:
-                seen_terms.add(h.term.term)
-                trend_hits.append(h)
-            elif any(p.via is None and p.term.term == h.term.term for p in trend_hits):
-                shadowed.append(h)
-        trend_hits = trends.gate(trend_hits, support, k)
-        # a text hit that gate() dropped (a one-word name's partial "Trump" of "Donald Trump",
-        # or a coin named "Halloween" against the everyday word) gives way to the
-        # referent-backed hit on the same term, which "Trump Dog" and $TRUMP get; a text hit
-        # that survived stays as it is
-        kept = {h.term.term for h in trend_hits}
-        trend_hits += [h for h in shadowed if h.term.term not in kept]
-        for h in trend_hits:
-            h.score = trends.score(h, inp.trend_index)
+        trend_hits = trends.collect(
+            inp.trend_index,
+            k,
+            texts,
+            name_tokens=n.name_tokens,
+            name_compact=n.name_compact,
+            ticker=n.ticker,
+            evidence=evidence,
+            news_hits=inp.news_hits,
+            extra_support=ocr_text,
+        )
         evidence += trends.evidence(trend_hits, inp.trend_index)
 
     mt = meta.assess(
