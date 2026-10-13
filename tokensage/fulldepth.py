@@ -7,7 +7,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
@@ -493,9 +493,13 @@ async def trend_index(
         wiki_terms, wiki_status = await _wiki_trends(conn)
         g_terms, g_status = await _google_trends(conn, http)
         x_terms, x_status = await _x_trends(conn, http)
-        idx = trends.TrendIndex(
-            wiki_terms + g_terms + x_terms, load_knowledge(), [wiki_status, g_status, x_status]
-        )
+        all_terms = wiki_terms + g_terms + x_terms
+        statuses = [wiki_status, g_status, x_status]
+        try:
+            all_terms = await _with_history(conn, all_terms, statuses)
+        except (asyncpg.PostgresError, OSError) as e:
+            log.info("trends.history_failed", error=type(e).__name__)
+        idx = trends.TrendIndex(all_terms, load_knowledge(), statuses)
         for st in idx.sources:
             log.info(
                 "trends.source",
@@ -507,6 +511,62 @@ async def trend_index(
             )
         _trend_cache = (time.monotonic(), idx)
         return idx
+
+
+HISTORY_DAYS = 30  # trend.terms[].days_listed: the days before yesterday it looks back
+HISTORY_SOURCES = ("wikipedia", "google_trends", "x_trends")
+
+
+async def _with_history(
+    conn: asyncpg.Connection,
+    terms: list[trends.TrendTerm],
+    statuses: list[trends.SourceStatus],
+) -> list[trends.TrendTerm]:
+    """Each term with days_listed: the distinct UTC days in the HISTORY_DAYS before yesterday
+    on which any list source had it (trend_term). Today and yesterday are left out: they are
+    the run the term is on now. Each source status gets history_days, the days of its own
+    list kept in that window (Google Trends and X are recorded from rules 0.33.0 on, so a
+    term's days_listed undercounts until they have HISTORY_DAYS)."""
+    keys = sorted({t.term.lower() for t in terms})
+    rows = await conn.fetch(
+        """select lower(term) as t, count(distinct day) as n from trend_term
+           where source = any($2::text[]) and day >= current_date - $3::int - 1
+             and day < current_date - 1 and lower(term) = any($1::text[])
+           group by 1""",
+        keys,
+        list(HISTORY_SOURCES),
+        HISTORY_DAYS,
+    )
+    listed = {r["t"]: int(r["n"]) for r in rows}
+    cover = {
+        r["source"]: int(r["n"])
+        for r in await conn.fetch(
+            """select source, count(distinct day) as n from trend_term
+               where day >= current_date - $1::int - 1 and day < current_date - 1
+               group by source""",
+            HISTORY_DAYS,
+        )
+    }
+    for st in statuses:
+        st.history_days = cover.get(st.source, 0)
+    return [replace(t, days_listed=listed.get(t.term.lower(), 0)) for t in terms]
+
+
+async def _record_history(
+    conn: asyncpg.Connection, source: str, rows: list[tuple[str, float, date]]
+) -> None:
+    """One trend_term row per (term, day) a list source had it: the history days_listed
+    counts. score is the strongest reading of the day (Google Trends: searches; X: best
+    rank, lower is better, so stored negated)."""
+    if not rows:
+        return
+    await conn.executemany(
+        """insert into trend_term (term, source, score, first_seen, day, views)
+           values ($1, $2, $3, $4, $4, $5)
+           on conflict (term, source, day) do update
+             set score = greatest(trend_term.score, excluded.score)""",
+        [(term.lower(), source, score, day, int(abs(score))) for term, score, day in rows],
+    )
 
 
 def _day_start(d: date) -> datetime:
@@ -539,6 +599,7 @@ async def _wiki_trends(
             float(r["spike"] or 1.0),
             int(r["views"] or 0),
             seen_at=_day_start(r["day"]),
+            direction="rising" if r["day"] == latest else "falling",
         )
         for r in rows
     ]
@@ -592,6 +653,11 @@ async def _google_trends(
                 list(seen.values()),
             )
             polled_at = now
+            await _record_history(
+                conn,
+                "google_trends",
+                [(it.term, float(it.traffic), now.date()) for items in got for it in items],
+            )
             if len(got) < len(results):
                 detail = f"{len(results) - len(got)} of {len(results)} country feeds failed"
         else:
@@ -611,6 +677,7 @@ async def _google_trends(
             source="google_trends",
             seen_at=_parse_iso(v.get("seen_at"), now),
             headline=v.get("headline"),
+            direction=_search_direction(v, polled_at),
         )
         for v in seen.values()
         if now - _parse_iso(v.get("seen_at"), now) < GTRENDS_KEEP
@@ -657,6 +724,15 @@ async def _x_trends(
                 seen,
             )
             polled_at = now
+            await _record_history(
+                conn,
+                "x_trends",
+                [
+                    (str(v["term"]), -float(v["rank"]), _parse_iso(v.get(at), now).date())
+                    for v in seen
+                    for at in ("seen_at", "last_at")
+                ],
+            )
             if len(got) < len(results):
                 detail = f"{len(results) - len(got)} of {len(results)} region pages failed"
         else:
@@ -676,6 +752,7 @@ async def _x_trends(
             source="x_trends",
             seen_at=_parse_iso(v.get("seen_at"), now),
             rank=int(v.get("rank") or 50),
+            direction=v.get("direction"),
         )
         for v in seen
         if now - _parse_iso(v.get("last_at"), now) < XTRENDS_KEEP
@@ -689,32 +766,43 @@ async def _x_trends(
 
 def _merge_x_lists(pages: list[list[xtrends.TrendList]], now: datetime) -> list[dict[str, Any]]:
     """One record per topic across regions and hours: best rank, the distinct hours it was
-    listed in (any region), when it was first and last listed."""
+    listed in (any region), when it was first and last listed, and its direction (see
+    _x_direction)."""
     by: dict[str, dict[str, Any]] = {}
+    newest: datetime | None = None
     for lists in pages:
         for tl in lists:
             if now - tl.at >= XTRENDS_KEEP:
                 continue
+            newest = tl.at if newest is None else max(newest, tl.at)
             hour = tl.at.strftime("%Y-%m-%dT%H")
             for i, raw in enumerate(tl.terms, 1):
                 term = xtrends.readable(raw)
                 if term is None or gnews._CRYPTO.search(term):
                     continue
-                d = by.setdefault(
-                    term.lower(),
-                    {
+                d = by.get(term.lower())
+                if d is None:
+                    by[term.lower()] = {
                         "term": term,
                         "label": raw,
                         "rank": i,
-                        "hours": set(),
+                        "hours": {hour},
                         "first": tl.at,
+                        "first_rank": i,
                         "last": tl.at,
-                    },
-                )
+                        "last_rank": i,
+                    }
+                    continue
                 d["rank"] = min(d["rank"], i)
                 d["hours"].add(hour)
-                d["first"] = min(d["first"], tl.at)
-                d["last"] = max(d["last"], tl.at)
+                if tl.at < d["first"]:
+                    d["first"], d["first_rank"] = tl.at, i
+                elif tl.at == d["first"]:
+                    d["first_rank"] = min(d["first_rank"], i)
+                if tl.at > d["last"]:
+                    d["last"], d["last_rank"] = tl.at, i
+                elif tl.at == d["last"]:
+                    d["last_rank"] = min(d["last_rank"], i)
     return [
         {
             "term": d["term"],
@@ -723,9 +811,41 @@ def _merge_x_lists(pages: list[list[xtrends.TrendList]], now: datetime) -> list[
             "hours": len(d["hours"]),
             "seen_at": d["first"].isoformat(),
             "last_at": d["last"].isoformat(),
+            "direction": _x_direction(d, newest or now),
         }
         for d in by.values()
     ]
+
+
+XTRENDS_DROPPED = timedelta(minutes=90)  # not on the newest hourly list (with slack)
+XTRENDS_SLIPPED = 10  # places below its best rank on its latest list
+
+
+def _x_direction(d: dict[str, Any], newest: datetime) -> str:
+    """falling: off the newest hourly list, or 10+ places below its best rank on its latest
+    list; rising: on the newest list higher than where it first appeared; else steady."""
+    if newest - d["last"] > XTRENDS_DROPPED or d["last_rank"] >= d["rank"] + XTRENDS_SLIPPED:
+        return "falling"
+    if d["last_rank"] < d["first_rank"]:
+        return "rising"
+    return "steady"
+
+
+GTRENDS_DROPPED = timedelta(minutes=5)  # absent from the latest poll (with clock slack)
+
+
+def _search_direction(v: dict[str, Any], polled_at: datetime | None) -> str | None:
+    """falling: not on the feed at the latest poll; rising: more searches than when first
+    seen; else steady. None for searches stored before rules 0.33.0 kept last_at."""
+    last = v.get("last_at")
+    if last is None or polled_at is None:
+        return None
+    if polled_at - _parse_iso(last, polled_at) > GTRENDS_DROPPED:
+        return "falling"
+    first = v.get("first_traffic")
+    if first is not None and int(v.get("traffic") or 0) > int(first):
+        return "rising"
+    return "steady"
 
 
 def _merge_search(
@@ -738,11 +858,15 @@ def _merge_search(
         seen[key] = {
             "term": it.term,
             "traffic": it.traffic,
+            "first_traffic": it.traffic,
             "seen_at": started.isoformat(),
+            "last_at": now.isoformat(),
             "headline": it.headline,
             "geo": it.geo,
         }
         return
+    have.setdefault("first_traffic", int(have.get("traffic") or 0))
+    have["last_at"] = now.isoformat()
     have["traffic"] = max(int(have.get("traffic") or 0), it.traffic)
     if started < _parse_iso(have.get("seen_at"), now):
         have["seen_at"] = started.isoformat()
