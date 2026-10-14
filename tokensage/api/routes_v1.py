@@ -279,7 +279,12 @@ async def batch(
 @router.post(
     "/tokens:now",
     response_model=NowResponse,
-    responses={401: err("unauthorized"), 422: err("validation_error")},
+    responses={
+        401: err("unauthorized"),
+        422: err("validation_error"),
+        429: err("rate_limited | quota_exceeded"),
+        503: err("overloaded"),
+    },
     summary="Fresh trends and story heat for coins already read at full depth",
     description=(
         "Since rules 0.34.0. For each CA with a full-depth read: its trend block matched "
@@ -288,7 +293,9 @@ async def batch(
         "change and volume, minutes since its 24 h peak, and the summed volume of the coins on "
         "the story). A refresh younger than NOW_MAX_AGE_S (300 s) is served as is; an older "
         "one starts a new refresh (`pending`, with the previous values when there are any). "
-        "Free: refreshes count against no quota."
+        "Free of the read quotas; each new refresh counts against the key's NOW_PER_DAY "
+        "(429 quota_exceeded past it) and the job queue limit (503 overloaded). The call is "
+        "refused only when its first new refresh is; a later refusal leaves the rest unstarted."
     ),
 )
 async def tokens_now(

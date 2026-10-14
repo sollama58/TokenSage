@@ -144,6 +144,7 @@ class PoolQuote:
     volume_5m_usd: float
     volume_1h_usd: float
     created_at: str | None
+    dex: str | None = None  # GeckoTerminal's dex id ("pump-fun", "pumpswap", "raydium", ...)
 
 
 class RateLimited(Exception):
@@ -217,6 +218,10 @@ def parse_pools(doc: dict) -> list[PoolQuote]:
             base_id = str(pool["relationships"]["base_token"]["data"]["id"])
         except (KeyError, TypeError):
             continue
+        try:
+            dex = str(pool["relationships"]["dex"]["data"]["id"])
+        except (KeyError, TypeError):
+            dex = None
         if not isinstance(a, dict):
             continue
         t = tokens.get(base_id) or {}
@@ -239,6 +244,7 @@ def parse_pools(doc: dict) -> list[PoolQuote]:
                 volume_5m_usd=_num(vol.get("m5")) or 0.0,
                 volume_1h_usd=_num(vol.get("h1")) or 0.0,
                 created_at=created if isinstance(created, str) else None,
+                dex=dex,
             )
         )
     return out

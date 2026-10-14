@@ -11,7 +11,10 @@ import imagehash
 import numpy as np
 from PIL import Image, ImageFile
 
-MAX_PIXELS = 40_000_000
+# 16 Mpx (4000x4000, ~64 MB as RGBA): a logo is a few hundred pixels a side, and one read
+# decodes it up to three times (hashes, OCR, vision) with 8 jobs to a 2 GB worker; at 40 Mpx
+# a few hostile PNGs were an out-of-memory route (audit 2026-10-14 M9)
+MAX_PIXELS = 16_000_000
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 

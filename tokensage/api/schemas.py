@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SCHEMA_VERSION = "1"
+MAX_CA_LEN = 256
 
 Depth = Literal["basic", "full"]
 Status = Literal["complete", "partial", "pending", "failed"]
@@ -946,8 +947,12 @@ class TokenHints(_Model):
     )
 
 
+# a CA, or a pump.fun / explorer URL naming one (batch); far longer is not an address
+CaStr = Annotated[str, Field(max_length=MAX_CA_LEN)]
+
+
 class BatchRequestItem(_Model):
-    ca: str
+    ca: CaStr
     hints: TokenHints | None = None
 
 
@@ -958,7 +963,7 @@ class TokenRequest(_Model):
 
 
 class BatchRequest(_Model):
-    cas: list[str] = Field(
+    cas: list[CaStr] = Field(
         default=[],
         max_length=50,
         description="CAs to prefetch. Use `items` instead to pass hints; both may be combined "
@@ -1046,7 +1051,7 @@ class StoryHeat(_Model):
 
 
 class NowRequest(_Model):
-    cas: list[str] = Field(max_length=50, description="1-50 CAs that have a full-depth read")
+    cas: list[CaStr] = Field(max_length=50, description="1-50 CAs that have a full-depth read")
     wait: int = Field(
         default=0,
         ge=0,

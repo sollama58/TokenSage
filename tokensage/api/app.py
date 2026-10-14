@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tokensage import __version__, queue
 from tokensage.api import errors
@@ -41,6 +42,71 @@ async def _reload_keys_forever(app: FastAPI, stop: asyncio.Event) -> None:
                     await app.state.keys.reload(conn)
             except Exception as e:  # noqa: BLE001
                 log.warning("auth.key_reload_failed", error=f"{type(e).__name__}: {e}")
+
+
+# The largest legitimate body is a 50-item batch with full hints (about 650 KB); bodies are
+# parsed before the API key is checked, so anything bigger is refused unread (audit
+# 2026-10-14 M8).
+MAX_BODY_BYTES = 1024 * 1024
+
+
+class BodyLimit:
+    """413 for a request body over max_bytes: by Content-Length up front, and by counting
+    the bytes of a chunked body as they arrive."""
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        length = dict(scope.get("headers") or []).get(b"content-length")
+        if length is not None:
+            try:
+                too_big = int(length) > self.max_bytes
+            except ValueError:
+                too_big = False
+            if too_big:
+                await _too_large(scope, receive, send)
+                return
+        seen = 0
+        started = refused = False
+
+        async def counted() -> Message:
+            # past the cap: answer 413 now and tell the app the client went away (an
+            # exception raised here would reach it as a body parse error, a 400)
+            nonlocal seen, refused
+            if refused:
+                return {"type": "http.disconnect"}
+            msg = await receive()
+            if msg["type"] == "http.request":
+                seen += len(msg.get("body", b""))
+                if seen > self.max_bytes:
+                    refused = True
+                    if not started:
+                        await _too_large(scope, receive, send)
+                    return {"type": "http.disconnect"}
+            return msg
+
+        async def tracked(msg: Message) -> None:
+            nonlocal started
+            if refused:
+                return  # the 413 went out instead
+            if msg["type"] == "http.response.start":
+                started = True
+            await send(msg)
+
+        await self.app(scope, counted, tracked)
+
+
+async def _too_large(scope: Scope, receive: Receive, send: Send) -> None:
+    resp = JSONResponse(
+        status_code=413,
+        content={"error": {"code": "payload_too_large", "message": "request body too large"}},
+    )
+    await resp(scope, receive, send)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -122,6 +188,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 key=key.name if key else None,
             )
         return resp
+
+    app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)
 
     app.add_exception_handler(errors.ApiError, errors.api_error_handler)  # type: ignore[arg-type]
     # Starlette's router raises its own HTTPException (the parent of FastAPI's) for an

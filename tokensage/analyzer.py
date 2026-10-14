@@ -105,6 +105,7 @@ from tokensage.resolve.resolver import Resolved, ResolveError, curves_now, resol
 from tokensage.resolve.rpc import SolanaRpc
 from tokensage.sources import bluesky, gnews, lookups
 from tokensage.sources.x import TweetData
+from tokensage.versions import TREND_INPUTS_KEY
 
 log = structlog.get_logger("analyzer")
 
@@ -1164,6 +1165,40 @@ async def _store_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
         return version
 
 
+# the most referents trends.referent_hits matches, with room for the ones it skips
+TREND_INPUT_REFERENTS = 12
+
+
+async def _store_trend_inputs(conn: asyncpg.Connection, mint: str, out: EngineOutput) -> None:
+    """The referents the full read matched against the trends, for the `now` refresh
+    (tokensage.now.fresh_trend): the document keeps only the chosen referent."""
+    refs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ev in sorted(out.trend_referents, key=lambda e: -(e.referent.score if e.referent else 0)):
+        ref = ev.referent
+        if ref is None or ref.label in seen or ref.source.startswith(trends.TREND_REF_SOURCES):
+            continue
+        seen.add(ref.label)
+        refs.append(
+            {
+                "label": ref.label,
+                "kind": ref.kind,
+                "desc": (ref.desc or "")[:200] or None,
+                "source": ref.source,
+                "score": round(ref.score, 3),
+                "where": ev.where,
+            }
+        )
+        if len(refs) >= TREND_INPUT_REFERENTS:
+            break
+    await conn.execute(
+        """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
+           on conflict (key) do update set value=excluded.value, fetched_at=now()""",
+        TREND_INPUTS_KEY + mint,
+        {"rules": RULES_VERSION, "referents": refs},
+    )
+
+
 async def _store_read(conn: asyncpg.Connection, doc: Analysis) -> None:
     """The coin's latest read by launch time: what the referent and category waves count.
     A coin with no known launch time is not counted (it would look new on every re-read)."""
@@ -1599,7 +1634,10 @@ async def analyze(
         label=doc.referent.label if doc.referent else None,
     )
     await _store_xref(conn, r.mint, doc.x)
-    return await _store_analysis(conn, doc)
+    version = await _store_analysis(conn, doc)
+    if depth == "full":
+        await _store_trend_inputs(conn, r.mint, out)
+    return version
 
 
 # ----------------------------------------------------------------- full depth

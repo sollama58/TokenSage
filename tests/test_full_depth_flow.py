@@ -3,6 +3,7 @@ trend rows, through the API and the inline worker, with caching checks."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from datetime import date
 
@@ -136,7 +137,13 @@ async def test_full_depth_fills_x_trend_and_caches(
     assert await db.fetchval("select count(*) from x_profile") == 1
     # one news check for the trend hit; the name is not searched ("Peanut the Squirrel" is
     # everyday words, in some headline whatever is trending)
-    assert await db.fetchval("select count(*) from lookup_cache") == 1
+    assert (
+        await db.fetchval("select count(*) from lookup_cache where key not like 'trendin:%'") == 1
+    )
+    # the referents the trend match ran on, for the decision-time refresh (audit M5)
+    inputs = await db.fetchval("select value from lookup_cache where key like 'trendin:%'")
+    refs = json.loads(inputs)["referents"]
+    assert any("Peanut" in r["label"] for r in refs)
     assert [t.source for t in a.trend.terms] == ["wikipedia"]
     assert a.trend.terms[0].headline == "Peanut the squirrel story"
     # 40x its usual views: a strong spike, seen today, on the coin's own name

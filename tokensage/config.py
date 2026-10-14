@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     # A stored refresh (fresh trend block and story heat) is served while younger than this;
     # older, the request starts a new one.
     now_max_age_s: int = 300
+    # `now` jobs a key may start per UTC day (joining an open one is free); past it the call
+    # answers 429 quota_exceeded. TrenchScanner refreshes each band coin about every 4 min.
+    now_per_day: int = 50_000
 
     # --- full-depth job deadline (since rules 0.30.0) ---
     # The full-depth fetches (X, OCR, logo labels, trends, Wikipedia, news, Bluesky) run

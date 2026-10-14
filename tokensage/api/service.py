@@ -9,6 +9,7 @@ from typing import Any
 import asyncpg
 
 from tokensage import queue
+from tokensage.api import errors
 from tokensage.api.auth import ApiKey
 from tokensage.api.schemas import (
     Freshness,
@@ -19,7 +20,7 @@ from tokensage.api.schemas import (
 )
 from tokensage.api.usage import Usage
 from tokensage.config import Settings
-from tokensage.versions import NOW_KEY, RULES_VERSION
+from tokensage.versions import NOW_KEY, NOW_USAGE_KEY, RULES_VERSION
 
 DEPTH_RANK = {"basic": 0, "full": 1}
 # A request that misses the cache while an identical job is committing reuses that job.
@@ -399,8 +400,10 @@ async def now_items(
     requested_by: str,
 ) -> dict[str, NowItem]:
     """The stored refresh per mint (POST /v1/tokens:now), starting a `now` job for each one
-    older than NOW_MAX_AGE_S or made by older rules. Free: no quota is charged. A mint with
-    no full read is `unavailable` without a job."""
+    older than NOW_MAX_AGE_S or made by older rules. Free of the read quotas, but each new job
+    counts against the key's NOW_PER_DAY and the queue limit; when the first job of the call
+    is refused the call answers 429 / 503, and a later refusal leaves the rest unstarted. A
+    mint with no full read is `unavailable` without a job."""
 
     async def stored(conn: asyncpg.Connection) -> dict[str, tuple[dict[str, Any], datetime]]:
         rows = await conn.fetch(
@@ -433,20 +436,43 @@ async def now_items(
                 stale,
             )
         }
+
+        async def charge(j: queue.Job) -> None:
+            # as get_or_enqueue: only a new job counts against the queue limit and the key's
+            # daily `now` budget (audit 2026-10-14 M7); joining an open one is always allowed
+            from tokensage.api import usage
+
+            if not j.inserted:
+                return
+            if await queue.pending_count(conn) > settings.max_queue_depth:
+                raise errors.overloaded()
+            used = await usage.bump(conn, NOW_USAGE_KEY + requested_by, requests=1)
+            if used.requests > settings.now_per_day:
+                raise errors.quota_exceeded("now", usage.seconds_until_utc_midnight())
+
+        refused: Exception | None = None
         for m in stale:
             if m not in full:
                 continue
-            job = await queue.enqueue(
-                conn,
-                "now",
-                m,
-                "full",
-                priority=queue.PRIORITY_API,
-                requested_by=requested_by,
-                reuse_done_within_s=min(30, settings.now_max_age_s),
-            )
+            try:
+                job = await queue.enqueue(
+                    conn,
+                    "now",
+                    m,
+                    "full",
+                    priority=queue.PRIORITY_API,
+                    requested_by=requested_by,
+                    reuse_done_within_s=min(30, settings.now_max_age_s),
+                    before_commit=charge,
+                )
+            except errors.ApiError as e:
+                # the refused job is rolled back; the ones already started run
+                refused = e
+                break
             if job.status != "done":
                 jobs.append(job.id)
+        if refused is not None and not jobs:
+            raise refused
     if jobs and wait_s > 0:
         await asyncio.gather(*(waiter.wait(j, wait_s) for j in jobs))
     async with pool.acquire() as conn:
