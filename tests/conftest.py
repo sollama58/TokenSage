@@ -61,6 +61,15 @@ def _closed_breakers() -> None:
     breaker.states.clear()
 
 
+@pytest.fixture(autouse=True)
+def _empty_image_memo() -> None:
+    """Every test downloads its own logos: a previous test's shared download (or its failure)
+    must not stand in for the fetch a test counts."""
+    from tokensage.resolve.metadata import image_memo
+
+    image_memo.clear()
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> str:
     if not DB_AVAILABLE:

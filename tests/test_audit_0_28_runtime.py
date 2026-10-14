@@ -39,6 +39,7 @@ from tokensage import analyzer, queue
 from tokensage.config import Settings
 from tokensage.db import _init_connection, create_pool
 from tokensage.net import safe_fetch
+from tokensage.resolve import metadata as md
 from tokensage.worker import Worker
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -339,6 +340,7 @@ async def test_logo_that_failed_once_is_fetched_again_on_a_backoff(
             "update token_metadata set image_content_key = null where mint=$1", T22_MINT
         )
         await conn.execute("update token_metadata set image_attempts = 4 where mint=$1", T22_MINT)
+        md.image_memo.clear()  # the download just above is no longer fresh: hours have "passed"
         await _run(conn, ctx, chain, meta_ok=True, img_ok=False)
         delay = await conn.fetchval(
             "select extract(epoch from image_retry_at - now()) from token_metadata where mint=$1",
