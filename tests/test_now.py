@@ -24,7 +24,23 @@ LEADER = "MooDengLeader1111111111111111111111111pump"
 OTHER = "MooDengOther22222222222222222222222222pump"
 
 
-def _pool(addr: str, mint: str, name: str, sym: str, mcap: float, h1: float, v1: float) -> dict:
+RECENT = (datetime.now(UTC) - timedelta(days=1)).isoformat().replace("+00:00", "Z")
+OLD = (datetime.now(UTC) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
+CAT = "CatCoin44444444444444444444444444444444pump"
+NOT_PUMP = "MooDengRaydium5555555555555555555555555555"
+
+
+def _pool(
+    addr: str,
+    mint: str,
+    name: str,
+    sym: str,
+    mcap: float,
+    h1: float,
+    v1: float,
+    created: str = RECENT,
+    dex: str = "pump-fun",
+) -> dict:
     return {
         "id": f"solana_{addr}",
         "type": "pool",
@@ -33,11 +49,14 @@ def _pool(addr: str, mint: str, name: str, sym: str, mcap: float, h1: float, v1:
             "name": f"{sym} / SOL",
             "market_cap_usd": str(mcap) if mcap else None,
             "fdv_usd": str(mcap * 1.1),
-            "pool_created_at": "2026-09-10T00:00:00Z",
+            "pool_created_at": created,
             "price_change_percentage": {"m5": "1.5", "h1": str(h1)},
             "volume_usd": {"m5": str(v1 / 12), "h1": str(v1)},
         },
-        "relationships": {"base_token": {"data": {"id": f"solana_{mint}", "type": "token"}}},
+        "relationships": {
+            "base_token": {"data": {"id": f"solana_{mint}", "type": "token"}},
+            "dex": {"data": {"id": dex, "type": "dex"}},
+        },
     }
 
 
@@ -52,14 +71,22 @@ def _token(mint: str, name: str, sym: str) -> dict:
 SEARCH = {
     "data": [
         _pool("P1", LEADER, "Moo Deng", "MOODENG", 90_000_000, -4.0, 1_200_000),
-        _pool("P2", OTHER, "Baby Moo Deng", "BMD", 40_000, 25.0, 30_000),
+        _pool("P2", OTHER, "Baby Moo Deng", "MOODENG", 40_000, 25.0, 30_000, dex="pumpswap"),
         _pool("P3", LEADER, "Moo Deng", "MOODENG", 0, 0.0, 100_000),  # its second pool
         _pool("P4", "Unrelated3333333333333333333333333333pump", "Hippo", "HIPPO", 5e6, 1, 1),
+        # the name only contains the story
+        _pool("P5", CAT, "Moo Deng Cat", "MDCAT", 9e7, 1, 1),
+        # an older namesake, and one launched outside pump.fun
+        _pool("P6", "OldMooDeng66666666666666666666666666pump", "Moo Deng", "MD", 8e8, 1, 1, OLD),
+        _pool("P7", NOT_PUMP, "Moo Deng", "MOODENG", 7e8, 1, 1, dex="raydium"),
     ],
     "included": [
         _token(LEADER, "Moo Deng", "MOODENG"),
-        _token(OTHER, "Baby Moo Deng", "BMD"),
+        _token(OTHER, "Baby Moo Deng", "MOODENG"),
         _token("Unrelated3333333333333333333333333333pump", "Hippo", "HIPPO"),
+        _token(CAT, "Moo Deng Cat", "MDCAT"),
+        _token("OldMooDeng66666666666666666666666666pump", "Moo Deng", "MD"),
+        _token(NOT_PUMP, "Moo Deng", "MOODENG"),
     ],
 }
 
@@ -76,6 +103,7 @@ def _ohlcv(now_s: float) -> dict:
 def test_parse_pools_and_peak() -> None:
     pools = geckoterminal.parse_pools(SEARCH)
     assert [p.mint for p in pools][:2] == [LEADER, OTHER]
+    assert pools[0].dex == "pump-fun" and pools[1].dex == "pumpswap"
     assert pools[0].mcap_usd == 90_000_000 and pools[0].change_1h_pct == -4.0
     assert pools[2].mcap_usd == pytest.approx(0.0 * 1.1) or pools[2].mcap_usd is None
     peak = geckoterminal.parse_peak(_ohlcv(1_000_000.0), 1_000_000.0)
@@ -86,6 +114,8 @@ def test_parse_pools_and_peak() -> None:
 def test_heat_from_pools_keeps_the_story_and_sums_pools() -> None:
     pools = geckoterminal.parse_pools(SEARCH)
     heat, lead = now.heat_from_pools(pools, "Moo Deng", "referent", None)
+    # LEADER by name, OTHER by ticker; not the coin that only contains the story, the
+    # 30-day-old namesake or the one launched outside pump.fun (audit 2026-10-14 M4)
     assert heat.coins == 2 and lead is not None and heat.leader is not None
     assert heat.leader.mint == LEADER and heat.leader.pool == "P1"
     assert heat.leader.volume_1h_usd == 1_300_000

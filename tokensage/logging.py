@@ -11,6 +11,10 @@ import structlog
 def configure_logging(level: str = "info") -> None:
     lvl = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=lvl)
+    # httpx logs every request's full URL at INFO, and the RPC and callback URLs carry secrets
+    # (the Helius key is in SOLANA_RPC_URL), so keep the HTTP client loggers to warnings.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(max(lvl, logging.WARNING))
     renderer: structlog.types.Processor
     if sys.stdout.isatty():
         renderer = structlog.dev.ConsoleRenderer()

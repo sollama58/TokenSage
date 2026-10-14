@@ -152,6 +152,9 @@ class EngineOutput:
     ocr_error: str | None = None
     x: xsignals.XAssessment | None = None
     trend_hits: list[trends.TrendHit] = field(default_factory=list)
+    # the referent evidence the trend match ran on (full depth): the `now` refresh matches the
+    # same referents again (analyzer stores them under TREND_INPUTS_KEY)
+    trend_referents: list[Ev] = field(default_factory=list)
     # per-source status of the trend lookups (filled in by the analyzer, which ran them)
     trend_sources: list[trends.SourceStatus] = field(default_factory=list)
     x_match: xmatch.XMatch | None = None
@@ -1154,7 +1157,9 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         )
 
     trend_hits: list[trends.TrendHit] = []
+    trend_referents: list[Ev] = []
     if depth == "full" and inp.trend_index is not None:
+        trend_referents = [e for e in evidence if e.referent is not None and e.kind != "trend"]
         texts = [("name", " ".join(n.name_tokens)), ("description", n.desc_clean)]
         if xa and xa.text:
             texts.append(("x", xa.text))
@@ -1347,6 +1352,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         ocr_error=ocr_err,
         x=xa,
         trend_hits=trend_hits,
+        trend_referents=trend_referents,
         pair=pair,
         lineage=lin,
         referent_read=referent_read,

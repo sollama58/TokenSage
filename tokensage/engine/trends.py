@@ -391,6 +391,10 @@ def novelty(t: TrendTerm, now: datetime | None = None) -> float | None:
     return round(max(0.0, min(1.0, rare_ * fresh * move)), 3)
 
 
+# referents that a trend lookup itself proposed: never matched back against the trends
+TREND_REF_SOURCES = ("wikipedia:", "news:", "gtrends:", "xtrends:", "bsky:")
+
+
 def referent_hits(
     evidence: list[Ev], index: TrendIndex, k: Knowledge, max_referents: int = 6
 ) -> list[TrendHit]:
@@ -407,9 +411,7 @@ def referent_hits(
     for ev in refs:
         ref = ev.referent
         assert ref is not None
-        if ref.label in seen or ref.source.startswith(
-            ("wikipedia:", "news:", "gtrends:", "xtrends:", "bsky:")
-        ):
+        if ref.label in seen or ref.source.startswith(TREND_REF_SOURCES):
             continue
         seen.add(ref.label)
         if len(seen) > max_referents:

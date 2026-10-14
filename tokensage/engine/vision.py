@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 MAX_WEIGHT = 0.4  # hard ceiling, whatever the yaml says
 SIZE = 224
-MAX_PIXELS = 40_000_000
+MAX_PIXELS = 16_000_000  # as engine/image.py (audit 2026-10-14 M9)
 TOP_K = 3  # classes kept in the result (and cached), best first
 MODEL_ERROR = "model: "  # prefix of an error the model raised (worth retrying, never cached)
 

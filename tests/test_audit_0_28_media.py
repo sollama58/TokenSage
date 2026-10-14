@@ -80,7 +80,7 @@ def test_ocr_time_budget_gives_up_on_a_slow_engine(monkeypatch: pytest.MonkeyPat
 # ----------------------------------------------------------------- SEC-4: 16-bit PNG memory
 
 
-def _png16(side: int = 6300) -> bytes:
+def _png16(side: int = 3900) -> bytes:
     y = np.linspace(0, 65535, side, dtype=np.float64)
     arr = np.broadcast_to(y[:, None], (side, side)).astype(np.uint16)
     buf = io.BytesIO()
@@ -90,7 +90,7 @@ def _png16(side: int = 6300) -> bytes:
 
 def test_16bit_png_is_scaled_before_the_float_conversion() -> None:
     data = _png16()
-    assert len(data) < image_stage.MAX_PIXELS and 6300 * 6300 < image_stage.MAX_PIXELS
+    assert len(data) < image_stage.MAX_PIXELS and 3900 * 3900 < image_stage.MAX_PIXELS
     with Image.open(io.BytesIO(data)) as img:
         assert img.mode == "I;16"
     tracemalloc.start()
@@ -102,8 +102,8 @@ def test_16bit_png_is_scaled_before_the_float_conversion() -> None:
     finally:
         tracemalloc.stop()
     assert res.error is None and res.features is not None
-    assert res.features.width == 6300 and res.features.height == 6300
-    assert peak < 120 * 1024 * 1024, peak  # the float64 full frame alone was 317 MB
+    assert res.features.width == 3900 and res.features.height == 3900
+    assert peak < 120 * 1024 * 1024, peak  # the float64 full frame alone would be 122 MB
     assert elapsed < 5.0
     # the gradient still hashes as a gradient, not a flat near-white frame
     flat = image_stage.features(_png((300, 300), "L"))

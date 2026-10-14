@@ -452,6 +452,7 @@
             "default": [],
             "description": "CAs to prefetch. Use `items` instead to pass hints; both may be combined (at most 50 in total, at least one)",
             "items": {
+              "maxLength": 256,
               "type": "string"
             },
             "maxItems": 50,
@@ -484,6 +485,7 @@
         "additionalProperties": false,
         "properties": {
           "ca": {
+            "maxLength": 256,
             "title": "Ca",
             "type": "string"
           },
@@ -3101,6 +3103,7 @@
           "cas": {
             "description": "1-50 CAs that have a full-depth read",
             "items": {
+              "maxLength": 256,
               "type": "string"
             },
             "maxItems": 50,
@@ -7464,7 +7467,7 @@
     },
     "/v1/tokens:now": {
       "post": {
-        "description": "Since rules 0.34.0. For each CA with a full-depth read: its trend block matched against the trend lists as they are now, and how its story trades now (the leading coin of its lineage original or referent on GeckoTerminal: market cap, 5 min and 1 h change and volume, minutes since its 24 h peak, and the summed volume of the coins on the story). A refresh younger than NOW_MAX_AGE_S (300 s) is served as is; an older one starts a new refresh (`pending`, with the previous values when there are any). Free: refreshes count against no quota.",
+        "description": "Since rules 0.34.0. For each CA with a full-depth read: its trend block matched against the trend lists as they are now, and how its story trades now (the leading coin of its lineage original or referent on GeckoTerminal: market cap, 5 min and 1 h change and volume, minutes since its 24 h peak, and the summed volume of the coins on the story). A refresh younger than NOW_MAX_AGE_S (300 s) is served as is; an older one starts a new refresh (`pending`, with the previous values when there are any). Free of the read quotas; each new refresh counts against the key's NOW_PER_DAY (429 quota_exceeded past it) and the job queue limit (503 overloaded). The call is refused only when its first new refresh is; a later refusal leaves the rest unstarted.",
         "operationId": "tokens_now_v1_tokens_now_post",
         "requestBody": {
           "content": {
@@ -7506,6 +7509,26 @@
               }
             },
             "description": "validation_error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "rate_limited | quota_exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "overloaded"
           }
         },
         "security": [
