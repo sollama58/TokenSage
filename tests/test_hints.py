@@ -134,8 +134,30 @@ async def test_unsafe_hint_urls_are_refused(
             json={"hints": {**HINTS, "image_url": "http://127.0.0.1/admin.png"}},
         )
     a = TokenResponse.model_validate(r.json()).analysis
-    assert a is not None and a.image.status != "ok"
     assert not probe.called
+    # the refused URL is not the coin's logo: the one its own metadata names is used instead
+    assert a is not None and a.image.status == "ok" and a.image.source_url == IMG
+
+
+async def test_dead_hinted_logo_falls_back_to_the_onchain_one(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    dead = router.get("https://cdn.example.test/gone.png").mock(return_value=httpx.Response(404))
+    install_web(router, _chain())
+    async with make_client(migrated_db) as c:
+        r = await c.post(
+            f"/v1/tokens/{T22_MINT}",
+            params={"wait": 5},
+            json={"hints": {**HINTS, "image_url": "https://cdn.example.test/gone.png"}},
+        )
+    assert r.status_code == 200, r.text
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert dead.called
+    assert a is not None and a.image.status == "ok" and a.image.phash
+    assert a.image.source_url == IMG and a.raw.image_url == IMG
+    assert not any(c.startswith("image could not be fetched") for c in a.caveats)
 
 
 async def test_batch_items_carry_hints(

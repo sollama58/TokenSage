@@ -1320,7 +1320,7 @@ async def _retry_cached_image(
     attempts = int(row["image_attempts"]) if row else 0
     if row and row["image_retry_at"] is not None and row["image_retry_at"] > datetime.now(UTC):
         return None
-    await md.attach_image(ctx.http, m, ctx.settings)
+    await md.attach_image(ctx.http, m, ctx.settings, retry_failure=True)
     if not m.image_content_key:
         await _note_image_failure(conn, mint, m, attempts)
         log.info("image.retry_failed", mint=mint, attempts=attempts + 1, error=m.image_error)
@@ -1335,6 +1335,24 @@ async def _retry_cached_image(
     m.image_error = None
     log.info("image.retry_ok", mint=mint, attempts=attempts + 1)
     return m.image_bytes
+
+
+async def _onchain_logo_fallback(ctx: Context, uri: str, m: md.Metadata) -> None:
+    """The caller's logo URL could not be fetched: try the one the coin's own metadata names,
+    when it is a different file. Leaves m as it was when that fails too."""
+    onchain = await md.fetch_metadata(ctx.http, uri, ctx.settings)
+    if onchain.status != "ok" or not onchain.image_url:
+        return
+    if md.image_memo_key(onchain.image_url) == md.image_memo_key(m.image_url or ""):
+        return  # the same file: fetch_metadata already tried it (and shared the failure)
+    if onchain.image_content_key:
+        log.info("image.hint_fallback", hinted=m.image_url, onchain=onchain.image_url)
+        m.image_url = onchain.image_url
+        m.image_mime = onchain.image_mime
+        m.image_size = onchain.image_size
+        m.image_bytes = onchain.image_bytes
+        m.image_content_key = onchain.image_content_key
+        m.image_error = None
 
 
 async def _schedule_retry(
@@ -1491,6 +1509,8 @@ async def analyze(
             m.image_content_key = ipfs_key
         else:
             await md.attach_image(ctx.http, m, ctx.settings)
+            if not m.image_content_key and r.uri:
+                await _onchain_logo_fallback(ctx, r.uri, m)
             image_bytes = m.image_bytes
             if m.image_content_key:
                 # register the hinted logo so its hashes are cached and it can be matched

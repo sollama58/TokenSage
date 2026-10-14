@@ -3,8 +3,12 @@ header, cache by CID, and schedule retries when it cannot be resolved yet."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import time
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -278,13 +282,102 @@ def from_hints(hints: dict[str, Any]) -> Metadata:
     return m
 
 
-async def attach_image(client: httpx.AsyncClient, m: Metadata, settings: Settings) -> None:
-    """Download and sniff m.image_url (SSRF-guarded, size/time capped). Never raises."""
+# A logo is wanted by several reads of the same coin close together (the caller's basic read at
+# launch and again on its watchlist, a full read, the vision labels after cached hashes), often
+# concurrently. The download is shared: one in flight per logo, and its outcome kept briefly, so
+# a dead pin is not raced across every gateway again by each read that wants it.
+IMAGE_MEMO_OK_S = 300.0
+IMAGE_MEMO_FAIL_S = 30.0  # under the first logo retry (analyzer.IMAGE_RETRY_S)
+IMAGE_MEMO_MAX_BYTES = 32 * 1024 * 1024
+
+
+class _ImageMemo:
+    """Per-process single flight and short-lived memo of logo downloads, keyed by the CID for
+    IPFS (any gateway's URL for it shares one entry) and by the URL otherwise."""
+
+    def __init__(self) -> None:
+        self.done: OrderedDict[str, tuple[float, Fetched | None, Exception | None]] = OrderedDict()
+        self.inflight: dict[str, asyncio.Task[Fetched]] = {}
+        self.bytes = 0
+
+    def clear(self) -> None:
+        self.done.clear()
+        self.inflight.clear()
+        self.bytes = 0
+
+    def _drop(self, key: str) -> None:
+        entry = self.done.pop(key, None)
+        if entry and entry[1] is not None:
+            self.bytes -= len(entry[1].body)
+
+    def _keep(self, key: str, f: Fetched | None, e: Exception | None) -> None:
+        self._drop(key)
+        ttl = IMAGE_MEMO_OK_S if f is not None else IMAGE_MEMO_FAIL_S
+        self.done[key] = (time.monotonic() + ttl, f, e)
+        if f is not None:
+            self.bytes += len(f.body)
+        while self.done and (self.bytes > IMAGE_MEMO_MAX_BYTES or len(self.done) > 512):
+            self._drop(next(iter(self.done)))
+
+    async def get(
+        self, key: str, fetch: Callable[[], Awaitable[Fetched]], *, retry_failure: bool = False
+    ) -> Fetched:
+        hit = self.done.get(key)
+        if hit is not None:
+            if hit[0] > time.monotonic() and not (retry_failure and hit[1] is None):
+                if hit[1] is not None:
+                    return hit[1]
+                assert hit[2] is not None
+                raise hit[2]
+            self._drop(key)
+        loop = asyncio.get_running_loop()
+        task = self.inflight.get(key)
+        if task is None or task.get_loop() is not loop:
+            task = loop.create_task(self._run(key, fetch))
+            # retrieved here, so a failure nobody is left waiting for logs no warning
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+            self.inflight[key] = task
+        # shielded: a reader that gives up (its deadline) does not cancel the others' download
+        return await asyncio.shield(task)
+
+    async def _run(self, key: str, fetch: Callable[[], Awaitable[Fetched]]) -> Fetched:
+        try:
+            f = await fetch()
+        except Exception as e:
+            self._keep(key, None, e)
+            raise
+        else:
+            self._keep(key, f, None)
+            return f
+        finally:
+            if self.inflight.get(key) is asyncio.current_task():
+                del self.inflight[key]
+
+
+image_memo = _ImageMemo()
+
+
+def image_memo_key(url: str) -> str:
+    url = rewrite_dead_gateways(url)
+    return ipfs_content_key(url) or "url:" + url
+
+
+async def attach_image(
+    client: httpx.AsyncClient, m: Metadata, settings: Settings, *, retry_failure: bool = False
+) -> None:
+    """Download and sniff m.image_url (SSRF-guarded, size/time capped), shared with any other
+    read wanting the same logo just now (see _ImageMemo). retry_failure: a retry that is due on
+    its own schedule asks again even when the last try failed moments ago. Never raises."""
     if not m.image_url:
         return
+    url = m.image_url
     try:
-        img = await fetch_url(
-            client, m.image_url, settings, max_bytes=settings.image_max_bytes, accept="image/*,*/*"
+        img = await image_memo.get(
+            image_memo_key(url),
+            lambda: fetch_url(
+                client, url, settings, max_bytes=settings.image_max_bytes, accept="image/*,*/*"
+            ),
+            retry_failure=retry_failure,
         )
         mime = _sniff_image(img.body)
         if mime is None:
