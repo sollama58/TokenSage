@@ -95,9 +95,9 @@ def test_credibility_orders_accounts_sensibly() -> None:
     assert c[0] is not None and c[1] is not None and c[2] is not None
     assert c[0] < 0.1 < c[1] < c[2]
     assert c[2] >= 0.9
-    # renames, spoofing and late reuse all cost credibility
+    # renames and late reuse cost credibility; a URL handle unlike the author does not
     assert xcred.credibility(_acc(**{**big_old.__dict__, "name_changes": 2}), None, None) < c[2]  # type: ignore[operator]
-    assert xcred.credibility(big_old, "spoofed", None) < c[2]  # type: ignore[operator]
+    assert xcred.credibility(big_old, "spoofed", None) == xcred.credibility(big_old, None, None)
     first = xcred.credibility(big_old, None, 1)
     seventh = xcred.credibility(big_old, None, 7)
     assert first == c[2] and seventh is not None and seventh < first  # type: ignore[operator]

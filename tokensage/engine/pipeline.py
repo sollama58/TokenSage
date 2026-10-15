@@ -2071,7 +2071,7 @@ def _subject_posts(inp: EngineInput, xa: xsignals.XAssessment) -> list[xsubject.
     k = load_knowledge()
     out: list[xsubject.Post] = []
     own = (xa.author_handle or "").casefold()
-    if inp.tweet is not None and xa.text and xa.relation != "spoofed":
+    if inp.tweet is not None and xa.text:
         out.append(
             xsubject.Post(
                 inp.tweet.id,

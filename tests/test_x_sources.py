@@ -202,12 +202,13 @@ def test_narrative_reference_and_borrowed_narrative() -> None:
     assert any(e.label == "news_event" for e in a.evidence)
 
 
-def test_spoofed_handle_is_high_flag() -> None:
+def test_a_url_handle_unlike_the_author_is_not_flagged() -> None:
+    # rules 0.35.0: X ignores the URL's handle, so the fetched author is all that counts
     a = xsignals.assess(
         "tweet", "elonmusk", _tweet(author_handle="randomdev"), None, TOKEN_T, "PNUT", "mint", []
     )
-    assert a.relation == "spoofed"
-    assert ("spoofed_tweet_handle", "high") in {(f[0], f[1]) for f in a.flags}
+    assert a.relation == "narrative_reference"
+    assert "spoofed_tweet_handle" not in {f[0] for f in a.flags}
 
 
 def test_launch_announcement_and_fresh_account() -> None:

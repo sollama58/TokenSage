@@ -21,7 +21,7 @@ MENTION = re.compile(r"(?<![\w@])@([A-Za-z0-9_]{1,15})\b")
 
 @dataclass
 class XAssessment:
-    # narrative_reference | launch_announcement | official_account | spoofed | search_only
+    # narrative_reference | launch_announcement | official_account | search_only
     relation: str | None = None
     status: str = "none"
     flags: list[tuple[str, str, str]] = field(default_factory=list)  # (code, severity, detail)
@@ -118,16 +118,9 @@ def assess(
             a.joined = a.joined or profile.joined
             a.username_changes = profile.username_changes
             a.verified_type = a.verified_type or profile.verified_type
-        # spoofed handle: the URL claims one author, the tweet has another
-        if url_handle and tweet.author_handle and url_handle.lower() != tweet.author_handle.lower():
-            a.relation = "spoofed"
-            a.flags.append(
-                (
-                    "spoofed_tweet_handle",
-                    "high",
-                    f"URL says @{url_handle} but the tweet is by @{tweet.author_handle}",
-                )
-            )
+        # A status URL whose handle differs from the post's author is not raised any more
+        # (rules 0.35.0, TrenchScanner's call 2026-10-15): X ignores the handle in the URL, so
+        # the fetched author is what counts, and the post is read like any other.
         gap_days = _days(token_created, tweet.created_at)
         big = (a.followers or 0) >= BIG_ACCOUNT or a.verified_type in ("business", "government")
         text_l = (tweet.text or "").lower()
@@ -141,38 +134,37 @@ def assess(
         # mint by a bit; from a large account it is still someone else's narrative unless
         # it carries the CA itself
         is_launch = mentions and (not big or mint.lower() in text_l)
-        if a.relation != "spoofed":
-            if gap_days is not None and gap_days > 0 and not is_launch:
-                a.relation = "narrative_reference"
-                detail = (
-                    f"the linked tweet (by @{tweet.author_handle}) predates the token by "
-                    f"{_fmt_days(gap_days)}"
+        if gap_days is not None and gap_days > 0 and not is_launch:
+            a.relation = "narrative_reference"
+            detail = (
+                f"the linked tweet (by @{tweet.author_handle}) predates the token by "
+                f"{_fmt_days(gap_days)}"
+            )
+            a.evidence.append(
+                Ev("x_timing", "news_event", 0.45 if gap_days < 3 else 0.25, detail, "x", "x")
+            )
+            if big:
+                a.flags.append(
+                    (
+                        "borrowed_narrative",
+                        "info",
+                        f"@{tweet.author_handle} is a large/verified account unrelated to "
+                        "the deployer; the coin borrows the narrative",
+                    )
                 )
                 a.evidence.append(
-                    Ev("x_timing", "news_event", 0.45 if gap_days < 3 else 0.25, detail, "x", "x")
+                    Ev(
+                        "x_author",
+                        "celebrity",
+                        ACCOUNT_SIZE_WEIGHT,
+                        f"narrative tweet by a large account @{tweet.author_handle} "
+                        f"({a.followers or '?'} followers, {a.verified_type or 'unverified'})",
+                        "x",
+                        "x",
+                    )
                 )
-                if big:
-                    a.flags.append(
-                        (
-                            "borrowed_narrative",
-                            "info",
-                            f"@{tweet.author_handle} is a large/verified account unrelated to "
-                            "the deployer; the coin borrows the narrative",
-                        )
-                    )
-                    a.evidence.append(
-                        Ev(
-                            "x_author",
-                            "celebrity",
-                            ACCOUNT_SIZE_WEIGHT,
-                            f"narrative tweet by a large account @{tweet.author_handle} "
-                            f"({a.followers or '?'} followers, {a.verified_type or 'unverified'})",
-                            "x",
-                            "x",
-                        )
-                    )
-            else:
-                a.relation = "launch_announcement" if not mentions else "official_account"
+        else:
+            a.relation = "launch_announcement" if not mentions else "official_account"
         if mentions:
             a.evidence.append(
                 Ev(

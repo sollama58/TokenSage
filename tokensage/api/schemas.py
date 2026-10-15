@@ -661,7 +661,6 @@ class XInfo(_Model):
             "narrative_reference",
             "launch_announcement",
             "official_account",
-            "spoofed",
             "search_only",
             "unknown",
         ]

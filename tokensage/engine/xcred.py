@@ -130,7 +130,7 @@ def credibility(
 ) -> float | None:
     """0-1: how much the account behind the link is worth, apart from whether it matches.
     Age at launch, followers, post history and verification, with penalties for an account
-    made for the coin, renamed accounts, a spoofed link and being a late re-user of a link.
+    made for the coin, renamed accounts and being a late re-user of a link.
     None when no account is known."""
     if acc is None:
         return None
@@ -146,13 +146,12 @@ def credibility(
     score = sum(p[0] * p[1] for p in parts) / w if w else 0.0
     # Since rules 0.23.0 the account is context, not a verdict: a made-for-coin or renamed
     # account costs a little, not half. What the post says and the account's name carry the
-    # read. A spoofed link still costs most: the link itself lies about who posted.
+    # read. A URL handle that differs from the author costs nothing since rules 0.35.0: the
+    # fetched author is what counts.
     if acc.made_for_coin:
         score *= MADE_FOR_COIN_FACTOR
     if acc.name_changes:
         score *= RENAMED_FACTOR
-    if relation == "spoofed":
-        score *= 0.3
     if reuse_rank is not None and reuse_rank > 1:
         # the 7th coin to link a viral post borrows it; the first may be its own
         score *= max(REUSE_FLOOR, 1.0 / (1.0 + 0.05 * (reuse_rank - 1)))

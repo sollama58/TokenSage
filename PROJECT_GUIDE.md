@@ -50,7 +50,7 @@ consumer app ──GET /v1/tokens/{CA}──▶ TokenSage ──▶ Solana RPC (
 | **What is in the image?** | OCR text "$PNUT", dominant colours, near-duplicate of known logo X, optional visual labels |
 | **What is the linked X content, and how does it relate?** | "Links a tweet by @elonmusk from 3 h before launch. Borrowed narrative, not an official account" |
 | **Is it tied to something trending now?** | "'Peanut (squirrel)' Wikipedia views spiked 40× yesterday" |
-| **Red flags** (informational, not financial advice) | homoglyph ticker, recycled X account, spoofed handle in tweet URL, same tweet linked by 37 other tokens |
+| **Red flags** (informational, not financial advice) | homoglyph ticker, recycled X account, same tweet linked by 37 other tokens |
 
 ### 1.3 Non-goals (v1)
 - No trading, sniping, price prediction or "buy" signals.
@@ -430,6 +430,7 @@ If nothing fits, report "ticker unrelated to name" (itself mildly informative).
 - **Quiet namesakes are references (since rules 0.31.0, `engine/lineage.py` `_quiet_namesake`, knob `lineage.reference_quiet_h` in `data/meta.yaml`):** a coin late by its original's age alone (rank <= 10) is `reference`, not `late_copy`, when every name-agreeing namesake launched more than 24 h before it and no earlier coin shares its logo. The 30-day copycat window had made two thirds of all reads `late_copy` and left `reference` at under 1%: any coin reusing a name seen once in a month counted as a copy of it. One agreeing namesake in the last day, a reused logo or a late rank keeps it a late copy. `of_*` name the established coin when there is one; inheritance from the earlier namesake is unchanged.
 - **Trends match what the coin is (since rules 0.32.0, `engine/trends.py` `gate`, `identity_hit`):** every source's one-word whole-label match gets the everyday-word check (Google Trends and Wikipedia were let through, and "time", "news", "money" and "market" were most Google Trends hits on decision rows), and a description or X post match counts only for a multi-word label that is not an everyday phrase or a rare one-word label. A name hit that the gate drops gives way to the referent-backed hit on the same term (a coin named "Halloween").
 - **Trend novelty (since rules 0.33.0, `engine/trends.py` `novelty`, `fulldepth._with_history`):** every Google Trends and X poll writes one `trend_term` row per term and day (Wikipedia was already kept), so each term carries `days_listed` (distinct days in the 30 before yesterday on any list source), a `direction` from its rank or search count across polls, and `novelty` = rare x fresh x direction. A term on X's list every day ("Elon") scores near 0; one first listed an hour ago near 1.
+- **No spoofed-handle flag (since rules 0.35.0, `engine/xsignals.py`, `engine/xcred.py`):** a status URL whose handle is not the post's author no longer raises `spoofed_tweet_handle` (it was the only `high` flag), sets `relation: "spoofed"`, cuts credibility to ×0.3 or keeps the post's text out of the subject read. The post is read like any other (TrenchScanner's decision, 2026-10-15: on its decision rows the flag duplicated other signals and separated nothing).
 - **Decision-time refresh (since rules 0.34.0, `tokensage/now.py`, `POST /v1/tokens:now`):** a `now` job re-runs only the trend match (`engine/trends.collect`, shared with the full read) on a stored full read's trend inputs (its texts, quoted and replied-to posts, logo text, name-search hits, and the referents kept under `trendin:<mint>`) against the current index, and reads the story's heat from GeckoTerminal (`sources/geckoterminal.search_pools` and `pool_peak`, at most 20 calls a minute per process): the lineage original's name, else the referent label, its leading coin by market cap among pump.fun coins whose whole name or ticker is the story, in pools opened in the last 7 days, 5 min / 1 h change and volume, minutes since its 24 h peak, and the wave's summed volume. Refreshes live in lookup_cache (`now:<mint>`, `heat:<story>`, 5 min) and are pruned with the other lookup rows. Consumers keep a full read; this is how they see trends that started after it.
 
 ### 5.6 S6 Image analysis
@@ -480,7 +481,7 @@ Signals, with research-backed meanings:
 | tweet time < token time | **narrative source** (coin made *about* this tweet); a gap of minutes to hours is typical |
 | tweet after launch, author looks like the project account | launch announcement; account age and followers are context (`x.credibility`), not a verdict |
 | author is a big or verified account unrelated to the creator | **borrowed narrative** (`relation = narrative_reference`); never call it "official" |
-| URL handle ≠ fetched author | **spoof attempt**: strong red flag |
+| URL handle ≠ fetched author | ignored since rules 0.35.0 (was a high flag): X resolves the post whatever the handle, so the fetched author is what counts |
 | tweet mentions the ticker, CA or pump.fun link | direct link; rare and strong if the author is notable |
 | `verified_type` Business/Government vs paid blue check | gold or grey checks are strong; blue is weak |
 | account joined days ago, few posts | disposable dev account |
