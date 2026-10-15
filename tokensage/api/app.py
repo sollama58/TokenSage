@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -29,6 +30,8 @@ from tokensage.logging import configure_logging
 from tokensage.net import metrics
 
 log = structlog.get_logger("api")
+
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 KEY_RELOAD_S = 30.0  # how soon another instance's key changes reach this one
 
 
@@ -168,7 +171,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next: Any) -> Any:
-        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
+        # A caller's id is echoed and logged on every line, so only a short, plain one is kept.
+        sent = request.headers.get("x-request-id") or ""
+        rid = sent if _REQUEST_ID_RE.fullmatch(sent) else uuid.uuid4().hex[:16]
         request.state.request_id = rid
         structlog.contextvars.bind_contextvars(request_id=rid)
         t0 = time.perf_counter()

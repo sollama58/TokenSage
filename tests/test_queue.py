@@ -157,6 +157,25 @@ async def test_callback_for_finished_target_is_runnable_at_once(conn: asyncpg.Co
     assert cb is not None and cb.kind == "callback"
 
 
+async def test_repeat_joins_park_one_callback_per_job_and_key(conn: asyncpg.Connection) -> None:
+    """A key re-submitting a mint whose job is still open joins it; each join used to park one
+    more callback row, without limit."""
+    from tokensage import callbacks
+    from tokensage.db import _init_connection
+
+    await _init_connection(conn)
+    target = await queue.enqueue(conn, "analyze", MINT, "full")
+    for _ in range(5):
+        await callbacks.schedule(
+            conn, target_job_id=target.id, callback_url="https://hook.test/x", key_digest="00"
+        )
+    await callbacks.schedule(
+        conn, target_job_id=target.id, callback_url="https://hook.test/x", key_digest="11"
+    )
+    n = await conn.fetchval("select count(*) from job where kind = 'callback'")
+    assert n == 2
+
+
 async def test_pending_count_ignores_jobs_parked_on_a_future_run_after(
     conn: asyncpg.Connection,
 ) -> None:
