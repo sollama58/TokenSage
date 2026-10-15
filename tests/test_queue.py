@@ -32,6 +32,23 @@ async def test_enqueue_is_single_flight_and_bumps_priority(conn: asyncpg.Connect
     assert c.id != a.id
 
 
+async def test_batch_priority_bump_keeps_a_parked_retry_parked(conn: asyncpg.Connection) -> None:
+    """A batch re-send at a higher priority raises the job but does not cut short a retry
+    parked on a future run_after; only an interactive request does that."""
+    j = await queue.enqueue(conn, "analyze", MINT, "basic", priority=queue.PRIORITY_BATCH_LOW)
+    await conn.execute("update job set run_after = now() + interval '1 minute' where id=$1", j.id)
+    await queue.enqueue(conn, "analyze", MINT, "basic", priority=queue.PRIORITY_BATCH_HIGH)
+    row = await conn.fetchrow(
+        "select priority, run_after > now() as parked from job where id=$1", j.id
+    )
+    assert row["priority"] == queue.PRIORITY_BATCH_HIGH and row["parked"]
+    await queue.enqueue(conn, "analyze", MINT, "basic", priority=queue.PRIORITY_API)
+    row = await conn.fetchrow(
+        "select priority, run_after > now() as parked from job where id=$1", j.id
+    )
+    assert row["priority"] == queue.PRIORITY_API and not row["parked"]
+
+
 async def test_claim_orders_by_priority_and_respects_lease(conn: asyncpg.Connection) -> None:
     low = await queue.enqueue(conn, "analyze", MINT, "basic", priority=100)
     high = await queue.enqueue(conn, "analyze", MINT, "full", priority=10)

@@ -14,7 +14,7 @@ import respx
 
 from tests.conftest import ADMIN_KEY, API_KEY, needs_db
 from tests.fixtures.chain import CID_META, FakeChain, install_web, public_resolver
-from tokensage import callbacks
+from tokensage import callbacks, queue
 from tokensage.api.auth import sha256_hex
 from tokensage.config import Settings
 from tokensage.net import safe_fetch
@@ -135,6 +135,34 @@ async def test_queue_full_returns_503_overloaded(
         item = b.json()["items"][0]
         assert item["status"] == "failed" and item["error"] == "overloaded"
         assert item["job_id"] is None and item["retry_after_s"]
+
+
+async def test_batch_priority_orders_the_queue(
+    migrated_db: str, clean_tables: None, router: respx.MockRouter
+) -> None:
+    other = "457V2vvjqXTMFzivq9tvBqhDaxfke2523hHDB6brpump"
+    async with make_client(migrated_db, inline_analyzer=False) as c:
+        r = await c.post(
+            "/v1/tokens:batch",
+            json={"items": [{"ca": MINT}, {"ca": other, "priority": "high"}], "priority": "low"},
+        )
+        assert r.status_code == 200, r.text
+        # re-sent at a lower priority: never lowered; at a higher one: raised
+        r = await c.post("/v1/tokens:batch", json={"cas": [other], "priority": "low"})
+        assert r.status_code == 200, r.text
+        r = await c.post("/v1/tokens:batch", json={"cas": [MINT]})
+        assert r.status_code == 200, r.text
+        bad = await c.post("/v1/tokens:batch", json={"cas": [MINT], "priority": "urgent"})
+        assert bad.status_code == 422
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        rows = await conn.fetch("select mint, priority from job where kind='analyze'")
+        assert {r["mint"]: r["priority"] for r in rows} == {
+            MINT: queue.PRIORITY_BATCH,
+            other: queue.PRIORITY_BATCH_HIGH,
+        }
+    finally:
+        await conn.close()
 
 
 async def test_invalid_callback_url_is_rejected(

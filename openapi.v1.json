@@ -477,6 +477,17 @@
             "maxItems": 50,
             "title": "Items",
             "type": "array"
+          },
+          "priority": {
+            "default": "normal",
+            "description": "Queue order of the jobs this batch starts: high before normal before low, oldest first within one. Re-sending an open job at a higher priority raises it; a lower one never lowers it",
+            "enum": [
+              "high",
+              "normal",
+              "low"
+            ],
+            "title": "Priority",
+            "type": "string"
           }
         },
         "title": "BatchRequest",
@@ -499,6 +510,23 @@
                 "type": "null"
               }
             ]
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "normal",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Overrides the batch's `priority` for this CA",
+            "title": "Priority"
           }
         },
         "required": [
