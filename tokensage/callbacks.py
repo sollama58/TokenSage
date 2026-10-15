@@ -58,17 +58,28 @@ async def validate_callback_url(url: str) -> str:
 async def schedule(
     conn: asyncpg.Connection, *, target_job_id: int, callback_url: str, key_digest: str
 ) -> None:
+    # One open callback per (job, key, url): a key re-submitting a mint whose job is still open
+    # joins that job, and each join used to park another callback row behind it without limit.
     await conn.execute(
         """insert into job (kind, mint, depth, priority, payload, run_after)
-           values ('callback', null, null, $1, $2,
-                   case when exists (select 1 from job
-                                     where id = $3 and status in ('done', 'failed'))
-                        then now()
-                        else now() + make_interval(secs => $4) end)""",
+           select 'callback', null, null, $1::int, $2::jsonb,
+                  case when exists (select 1 from job
+                                    where id = $3 and status in ('done', 'failed'))
+                       then now()
+                       else now() + make_interval(secs => $4) end
+           where not exists (
+               select 1 from job
+               where kind = 'callback' and status in ('pending', 'running')
+                 and payload->>'target_job_id' = $7
+                 and payload->>'key_digest' = $5
+                 and payload->>'callback_url' = $6)""",
         queue.PRIORITY_BACKGROUND,
         {"target_job_id": target_job_id, "callback_url": callback_url, "key_digest": key_digest},
         target_job_id,
         float(CALLBACK_WAIT_S),
+        key_digest,
+        callback_url,
+        str(target_job_id),
     )
     await conn.execute("select pg_notify($1, '0')", queue.CHANNEL_NEW)
 

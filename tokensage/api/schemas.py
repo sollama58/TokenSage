@@ -973,6 +973,8 @@ class BatchRequest(_Model):
     depth: Depth = "basic"
     callback_url: str | None = Field(
         default=None,
+        # Copied into a job row per batch item: uncapped, 50 items of a 1 MB URL wrote 50 MB.
+        max_length=2048,
         description="Optional https URL that receives a signed JobResponse per finished job",
     )
 

@@ -439,6 +439,7 @@
           "callback_url": {
             "anyOf": [
               {
+                "maxLength": 2048,
                 "type": "string"
               },
               {
