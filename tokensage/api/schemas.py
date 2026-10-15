@@ -950,9 +950,19 @@ class TokenHints(_Model):
 CaStr = Annotated[str, Field(max_length=MAX_CA_LEN)]
 
 
+# Where a batch's new jobs sit in the analyzer's queue. Every batch job used to share one
+# priority, served oldest first, so a consumer reading every launch held the reads it was
+# about to act on behind hundreds it never would. "high" still yields to interactive requests.
+BatchPriority = Literal["high", "normal", "low"]
+
+
 class BatchRequestItem(_Model):
     ca: CaStr
     hints: TokenHints | None = None
+    priority: BatchPriority | None = Field(
+        default=None,
+        description="Overrides the batch's `priority` for this CA",
+    )
 
 
 class TokenRequest(_Model):
@@ -970,6 +980,14 @@ class BatchRequest(_Model):
     )
     items: list[BatchRequestItem] = Field(default=[], max_length=50)
     depth: Depth = "basic"
+    priority: BatchPriority = Field(
+        default="normal",
+        description=(
+            "Queue order of the jobs this batch starts: high before normal before low, "
+            "oldest first within one. Re-sending an open job at a higher priority raises it; "
+            "a lower one never lowers it"
+        ),
+    )
     callback_url: str | None = Field(
         default=None,
         # Copied into a job row per batch item: uncapped, 50 items of a 1 MB URL wrote 50 MB.

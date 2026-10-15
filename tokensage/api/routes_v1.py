@@ -244,7 +244,7 @@ async def batch(
                 refresh=False,
                 requested_by=key.name,
                 request_id=request.state.request_id,
-                priority=queue.PRIORITY_BATCH,
+                priority=queue.BATCH_PRIORITIES[entry.priority or body.priority],
                 key=key,
                 callback_url=cb,
                 hints=_hints_dict(entry.hints),

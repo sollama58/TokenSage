@@ -22,6 +22,14 @@ CHANNEL_DONE = "job_done"
 
 PRIORITY_API = 10  # interactive requests jump the queue
 PRIORITY_BATCH = 50
+# POST /v1/tokens:batch's `priority`: around PRIORITY_BATCH, all behind interactive requests.
+PRIORITY_BATCH_HIGH = 30
+PRIORITY_BATCH_LOW = 70
+BATCH_PRIORITIES = {
+    "high": PRIORITY_BATCH_HIGH,
+    "normal": PRIORITY_BATCH,
+    "low": PRIORITY_BATCH_LOW,
+}
 PRIORITY_BACKGROUND = 100
 
 
@@ -129,8 +137,10 @@ async def _enqueue_row(
                         -- a later caller's hints help a job that has none yet
                         payload = coalesce(job.payload, excluded.payload),
                         -- an interactive request joining a job parked for a retry does
-                        -- not wait out the park (a batch joiner does not lower priority)
+                        -- not wait out the park; a batch joiner never does, even one
+                        -- that raises the job's priority
                         run_after = case when excluded.priority < job.priority
+                                          and excluded.priority < $8
                                          then least(job.run_after, now())
                                          else job.run_after end
           returning *, (xmax = 0) as inserted
@@ -147,6 +157,7 @@ async def _enqueue_row(
         requested_by,
         float(reuse_done_within_s),
         payload,
+        PRIORITY_BATCH_HIGH,
     )
     assert row is not None
     return row
