@@ -22,6 +22,7 @@ TEST_DB = normalize_database_url(
 )
 API_KEY = "test-key-0123456789abcdef"
 ADMIN_KEY = "admin-key-0123456789abcdef"
+MONITOR_KEY = "monitor-key-0123456789abcdef"
 
 
 def _db_reachable() -> bool:
@@ -96,6 +97,7 @@ def settings(migrated_db: str) -> Settings:
         database_url=migrated_db,
         api_keys=f"tester:{API_KEY}",
         admin_key=ADMIN_KEY,
+        monitor_key=MONITOR_KEY,
         inline_analyzer=True,
         default_wait_s=5,
         solana_rpc_url="https://rpc.test/",

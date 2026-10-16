@@ -578,6 +578,12 @@ Everything under `/admin/v1` needs `Authorization: Bearer <ADMIN_KEY>` (on Rende
 forbidden`. Use it from your own server to issue keys and watch the service; never ship the
 admin key to a browser or app. All schemas are in `/openapi.json` under the `admin` tag.
 
+The read-only monitoring calls (`status`, `usage`, `recall`, `helius`, `upstreams`, `queue`
+and `signals`, all `GET`) also accept `Authorization: Bearer <MONITOR_KEY>`, so a service that
+only reads meters need not hold the admin key. Set `MONITOR_KEY` to a long random value to turn
+it on (unset or empty, it is off and matches nothing). It is refused with `403 forbidden` on
+everything else: key listing, create, limit changes, rotate and revoke, `/jobs` and job retry.
+
 | Call | Purpose |
 |---|---|
 | `GET /admin/v1/status` | Queue (pending, running, done and failed in the last 24 h, age of the oldest pending job), upstream source health, today's usage per key, the last day's referent recall, and versions |

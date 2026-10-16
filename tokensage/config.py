@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # "name:key,name2:key2". Keys are compared by SHA-256 in constant time.
     api_keys: str = ""
     admin_key: str = ""
+    # read-only key for the monitoring GETs under /admin/v1 (status, usage, recall, helius,
+    # upstreams, queue, signals); the admin key works there too. Empty = off.
+    monitor_key: str = ""
     rate_per_min_default: int = 60
     full_per_day_default: int = 2000
     refresh_per_day_default: int = 200

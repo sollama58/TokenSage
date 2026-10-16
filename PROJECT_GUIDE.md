@@ -880,6 +880,8 @@ services:
         sync: false
       - key: ADMIN_KEY
         generateValue: true
+      - key: MONITOR_KEY           # read-only monitoring key for /admin/v1 reads; unset = off
+        sync: false
       - key: INLINE_ANALYZER       # "true" = run the analyzer in this process (dev / tiny traffic)
         value: "false"
       - key: WEB_CONCURRENCY

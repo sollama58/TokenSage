@@ -86,6 +86,8 @@ class KeyStore:
             )
         self._by_digest: dict[str, ApiKey] = dict(self._env)
         self._admin_digest = sha256_hex(settings.admin_key) if settings.admin_key else None
+        # read-only monitoring key (MONITOR_KEY); empty means off and never matches
+        self._monitor_digest = sha256_hex(settings.monitor_key) if settings.monitor_key else None
         self.limiter = RateLimiter()
 
     def lookup(self, raw: str) -> ApiKey | None:
@@ -129,6 +131,12 @@ class KeyStore:
             self._admin_digest or "", sha256_hex(raw)
         )
 
+    def is_monitor(self, raw: str) -> bool:
+        """The read-only MONITOR_KEY. Never true while it is unset."""
+        return bool(self._monitor_digest) and hmac.compare_digest(
+            self._monitor_digest or "", sha256_hex(raw)
+        )
+
 
 def get_key_store(request: Request) -> KeyStore:
     return request.app.state.keys
@@ -164,3 +172,14 @@ async def require_admin(
 ) -> None:
     if creds is None or not store.is_admin(creds.credentials):
         raise errors.forbidden()
+
+
+async def require_monitor(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    store: Annotated[KeyStore, Depends(get_key_store)],
+) -> None:
+    """Read-only monitoring routes: the MONITOR_KEY or the ADMIN_KEY."""
+    if creds is None or not (
+        store.is_monitor(creds.credentials) or store.is_admin(creds.credentials)
+    ):
+        raise errors.forbidden("monitor or admin key required")

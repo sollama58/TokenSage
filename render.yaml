@@ -56,6 +56,8 @@ services:
         sync: false
       - key: ADMIN_KEY
         generateValue: true
+      - key: MONITOR_KEY # read-only key for the monitoring GETs under /admin/v1; unset = off
+        sync: false
       - key: INLINE_ANALYZER
         value: "false"
       - key: WEB_CONCURRENCY

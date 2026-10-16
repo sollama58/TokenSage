@@ -21,6 +21,7 @@ developer tool, not a product surface, and it carries no secrets.
 uv sync --all-extras                       # Python 3.12
 export DATABASE_URL=postgresql://tokensage@localhost:5432/tokensage
 export API_KEYS="dev:devkey123" ADMIN_KEY=adminkey INLINE_ANALYZER=true
+export MONITOR_KEY=monitorkey                 # optional: read-only key for the /admin/v1 meters
 uv run alembic upgrade head
 uv run uvicorn tokensage.api.app:app --port 10000
 curl -H "Authorization: Bearer devkey123" \

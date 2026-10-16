@@ -6042,7 +6042,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           },
           "422": {
             "content": {
@@ -6666,7 +6666,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           },
           "422": {
             "content": {
@@ -6729,7 +6729,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           },
           "422": {
             "content": {
@@ -6790,7 +6790,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           },
           "422": {
             "content": {
@@ -6837,7 +6837,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           }
         },
         "security": [
@@ -6888,7 +6888,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           },
           "422": {
             "content": {
@@ -6965,7 +6965,7 @@
                 }
               }
             },
-            "description": "forbidden (admin key required)"
+            "description": "forbidden (monitor or admin key required)"
           },
           "422": {
             "content": {

@@ -22,6 +22,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tokensage import __version__, queue
 from tokensage.api import errors
 from tokensage.api.auth import KeyStore, require_admin
+from tokensage.api.routes_admin import read_router as admin_read
 from tokensage.api.routes_admin import router as admin
 from tokensage.api.routes_monitor import router as monitor
 from tokensage.api.routes_v1 import router as v1
@@ -253,6 +254,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(v1)
+    app.include_router(admin_read)
     app.include_router(admin)
     app.include_router(monitor)
 
