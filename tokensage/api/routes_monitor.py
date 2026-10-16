@@ -1,6 +1,6 @@
 """Monitoring reads for the admin panel (/admin): Helius credits against the plan, every
 upstream's calls, errors and latency, queue and job timing, and the freshness of the
-knowledge the engine leans on. Same ADMIN_KEY bearer as the rest of /admin/v1.
+knowledge the engine leans on. Read-only: the MONITOR_KEY or the ADMIN_KEY as a bearer.
 
 Upstream numbers come from upstream_usage, which every process adds into every 30 s (see
 net/metrics.py), so they trail live traffic by up to that long."""
@@ -15,13 +15,13 @@ import asyncpg
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import Field
 
-from tokensage.api.auth import require_admin
-from tokensage.api.routes_admin import ADMIN_RESPONSES
+from tokensage.api.auth import require_monitor
+from tokensage.api.routes_admin import MONITOR_RESPONSES
 from tokensage.api.schemas import _Model
 from tokensage.net import metrics
 from tokensage.versions import PAID_X_USAGE_KEY
 
-router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(require_monitor)])
 
 RPC = "solana_rpc"
 
@@ -261,7 +261,7 @@ class SignalsResponse(_Model):
 # ---------------------------------------------------------------- helius
 
 
-@router.get("/helius", response_model=HeliusResponse, responses=ADMIN_RESPONSES)
+@router.get("/helius", response_model=HeliusResponse, responses=MONITOR_RESPONSES)
 async def helius(
     request: Request,
     response: Response,
@@ -426,7 +426,7 @@ async def helius(
 # ---------------------------------------------------------------- upstreams
 
 
-@router.get("/upstreams", response_model=UpstreamsResponse, responses=ADMIN_RESPONSES)
+@router.get("/upstreams", response_model=UpstreamsResponse, responses=MONITOR_RESPONSES)
 async def upstreams(
     request: Request,
     response: Response,
@@ -517,7 +517,7 @@ JOBS_HOURLY_SQL = """
     group by hour order by hour"""
 
 
-@router.get("/queue", response_model=JobsResponse, responses=ADMIN_RESPONSES)
+@router.get("/queue", response_model=JobsResponse, responses=MONITOR_RESPONSES)
 async def queue_stats(
     request: Request,
     response: Response,
@@ -622,7 +622,7 @@ async def queue_stats(
 # ---------------------------------------------------------------- signals
 
 
-@router.get("/signals", response_model=SignalsResponse, responses=ADMIN_RESPONSES)
+@router.get("/signals", response_model=SignalsResponse, responses=MONITOR_RESPONSES)
 async def signals(
     request: Request,
     response: Response,

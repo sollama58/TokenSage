@@ -14,6 +14,7 @@ from typing import Any
 import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -21,6 +22,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tokensage import __version__, queue
 from tokensage.api import errors
 from tokensage.api.auth import KeyStore, require_admin
+from tokensage.api.routes_admin import read_router as admin_read
 from tokensage.api.routes_admin import router as admin
 from tokensage.api.routes_monitor import router as monitor
 from tokensage.api.routes_v1 import router as v1
@@ -28,6 +30,9 @@ from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.logging import configure_logging
 from tokensage.net import metrics
+
+# An exact Swagger UI release for /docs, never a floating major.
+SWAGGER_UI_VERSION = "5.17.14"
 
 log = structlog.get_logger("api")
 
@@ -165,9 +170,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Deterministic analysis of name, ticker, image and linked X/Twitter content."
         ),
         lifespan=lifespan,
-        docs_url="/docs",
+        # Served below with a pinned Swagger UI: FastAPI's default page loads swagger-ui-dist@5,
+        # a floating version, on the origin whose console keeps the keys (security audit
+        # 2026-10-16, L1).
+        docs_url=None,
         redoc_url=None,
     )
+
+    @app.get("/docs", include_in_schema=False)
+    async def docs_page() -> Response:
+        return get_swagger_ui_html(
+            openapi_url=app.openapi_url or "/openapi.json",
+            title="TokenSage - API docs",
+            swagger_js_url=f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}/swagger-ui-bundle.js",
+            swagger_css_url=f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}/swagger-ui.css",
+        )
 
     @app.middleware("http")
     async def _request_id(request: Request, call_next: Any) -> Any:
@@ -237,6 +254,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(v1)
+    app.include_router(admin_read)
     app.include_router(admin)
     app.include_router(monitor)
 

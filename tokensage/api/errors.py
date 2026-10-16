@@ -22,8 +22,8 @@ def unauthorized() -> ApiError:
     return ApiError(401, "unauthorized", "missing or unknown API key")
 
 
-def forbidden() -> ApiError:
-    return ApiError(403, "forbidden", "admin key required")
+def forbidden(msg: str = "admin key required") -> ApiError:
+    return ApiError(403, "forbidden", msg)
 
 
 def not_found(code: str = "not_found", msg: str = "not found") -> ApiError:

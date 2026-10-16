@@ -1,5 +1,6 @@
 """The admin API (/admin/v1): manage consumer API keys, read usage, queue and source health,
-and retry failed jobs. Every route needs the ADMIN_KEY as a bearer token.
+and retry failed jobs. Every route needs the ADMIN_KEY as a bearer token, except the read-only
+monitoring GETs on `read_router` (status, usage, recall), which also take the MONITOR_KEY.
 
 Keys created here live in the api_key table; the raw key is returned once, at creation or
 rotation, and only its SHA-256 is stored. Keys from the API_KEYS env var are listed too but
@@ -17,12 +18,21 @@ from pydantic import Field
 
 from tokensage import __version__, queue, recall
 from tokensage.api import errors, usage
-from tokensage.api.auth import ApiKey, KeyStore, new_raw_key, require_admin, sha256_hex
+from tokensage.api.auth import (
+    ApiKey,
+    KeyStore,
+    new_raw_key,
+    require_admin,
+    require_monitor,
+    sha256_hex,
+)
 from tokensage.api.schemas import Depth, ErrorResponse, _Model
 from tokensage.versions import LEXICON_VERSION, RULES_VERSION
 
 log = structlog.get_logger("admin")
 router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(require_admin)])
+# read-only monitoring reads: the MONITOR_KEY or the ADMIN_KEY. Nothing that writes goes here.
+read_router = APIRouter(prefix="/admin/v1", tags=["admin"], dependencies=[Depends(require_monitor)])
 
 KeyName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")]
 Limit = Annotated[int, Field(ge=1, le=10_000_000)]
@@ -34,6 +44,7 @@ def err(description: str) -> dict:
 
 
 ADMIN_RESPONSES: dict[int | str, dict] = {403: err("forbidden (admin key required)")}
+MONITOR_RESPONSES: dict[int | str, dict] = {403: err("forbidden (monitor or admin key required)")}
 # a job id is a bigint: anything outside is no job (and must not reach the database)
 MAX_JOB_ID = 2**63 - 1
 
@@ -211,7 +222,7 @@ KEY_COLS = "name, rate_per_min, full_per_day, refresh_per_day, created_at, revok
 # ---------------------------------------------------------------- status
 
 
-@router.get("/status", response_model=StatusResponse, responses=ADMIN_RESPONSES)
+@read_router.get("/status", response_model=StatusResponse, responses=MONITOR_RESPONSES)
 async def status(request: Request, response: Response) -> StatusResponse:
     """Queue depth, upstream source health, today's usage per key and the last day's
     referent recall."""
@@ -449,7 +460,7 @@ async def revoke_key(request: Request, name: str) -> KeyInfo:
 # ---------------------------------------------------------------- usage
 
 
-@router.get("/usage", response_model=UsageResponse, responses=ADMIN_RESPONSES)
+@read_router.get("/usage", response_model=UsageResponse, responses=MONITOR_RESPONSES)
 async def get_usage(
     request: Request,
     days: Annotated[int, Query(ge=1, le=90)] = 7,
@@ -541,7 +552,7 @@ async def retry_job(request: Request, job_id: int) -> AdminJob:
 # ---------------------------------------------------------------- recall
 
 
-@router.get("/recall", responses=ADMIN_RESPONSES)
+@read_router.get("/recall", responses=MONITOR_RESPONSES)
 async def get_recall(request: Request, hours: Annotated[int, Query(ge=1, le=24 * 30)] = 24) -> dict:
     """How often the engine resolved what a coin refers to, per depth, over `hours`."""
     async with _pool(request).acquire() as conn:

@@ -5,6 +5,10 @@ on:
     branches: ["**"]
   pull_request:
 
+# Read-only token: CI only checks out and tests.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
