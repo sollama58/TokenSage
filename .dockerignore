@@ -1,0 +1,10 @@
+# Kept out of the image (security audit 2026-10-16, H4): history and local state never ship.
+.git
+.github
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+tests

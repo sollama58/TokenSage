@@ -155,10 +155,13 @@
 
   // ---- persisted inputs
   $("key").value = localStorage.getItem(LS.key) || "";
-  $("admin").value = localStorage.getItem(LS.admin) || "";
+  // The admin key lives only for this tab (sessionStorage), never on disk: anything that ever
+  // runs on this origin could otherwise read it (security audit 2026-10-16, L1).
+  localStorage.removeItem(LS.admin);
+  $("admin").value = sessionStorage.getItem(LS.admin) || "";
   $("depth").value = localStorage.getItem(LS.depth) || "full";
   $("key").addEventListener("change", () => localStorage.setItem(LS.key, $("key").value.trim()));
-  $("admin").addEventListener("change", () => localStorage.setItem(LS.admin, $("admin").value.trim()));
+  $("admin").addEventListener("change", () => sessionStorage.setItem(LS.admin, $("admin").value.trim()));
   $("depth").addEventListener("change", () => localStorage.setItem(LS.depth, $("depth").value));
 
   const recent = () => { try { return JSON.parse(localStorage.getItem(LS.recent) || "[]"); } catch { return []; } };
@@ -282,7 +285,7 @@
       const when = q.predates_token_by_s == null ? "" :
         (q.predates_token_by_s > 0 ? ` · ${fmtDur(q.predates_token_by_s)} before the token`
                                    : ` · ${fmtDur(-q.predates_token_by_s)} after the token`);
-      const link = q.url ? `<a href="${esc(q.url)}" target="_blank" rel="noopener noreferrer nofollow">post ${esc(q.id)}</a>` : esc(q.id || "");
+      const link = q.url && /^https:\/\//.test(q.url) ? `<a href="${esc(q.url)}" target="_blank" rel="noopener noreferrer nofollow">post ${esc(q.id)}</a>` : esc(q.id || "");
       return `<div class="post"><div class="who"><b>${esc(title)}</b> ${badge(q.status)} ${link}${esc(when)}</div>
         <div class="who">${who(q.author)}</div>
         ${q.text ? `<div class="txt">${esc(q.text)}</div>` : `<div class="muted">${q.status === "ok" ? "(no text)" : "post could not be read"}</div>`}</div>`;
@@ -415,7 +418,7 @@
     $("cardEvidence").innerHTML = `<h2>Evidence (${ev.length}) · what the analysis considered</h2>
       <div class="filters">${groups.map(g => `<button type="button" class="secondary ${g === evFilter ? "on" : ""}" data-where="${esc(g)}">${esc(g === "all" ? "all" : (WHERE_LABEL[g] || g))} ${g === "all" ? ev.length : evRows.filter(e => (e.where || "other") === g).length}</button>`).join("")}</div>` + (rows.length ? `
       <div class="tablewrap"><table><thead><tr><th>from</th><th>kind</th><th>label</th><th>weight</th><th>detail</th><th>source</th></tr></thead><tbody>
-      ${rows.map(e => `<tr><td>${esc(WHERE_LABEL[e.where] || e.where || "—")}</td><td>${esc(e.kind)}</td><td>${esc(e.label)}</td><td>${e.weight.toFixed(2)}</td><td>${esc(e.detail)}</td><td class="mono">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(e.source)}</a>` : esc(e.source)}</td></tr>`).join("")}
+      ${rows.map(e => `<tr><td>${esc(WHERE_LABEL[e.where] || e.where || "—")}</td><td>${esc(e.kind)}</td><td>${esc(e.label)}</td><td>${e.weight.toFixed(2)}</td><td>${esc(e.detail)}</td><td class="mono">${e.url && /^https:\/\//.test(e.url) ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(e.source)}</a>` : esc(e.source)}</td></tr>`).join("")}
       </tbody></table></div>` : `<p class="muted">none</p>`);
   }
   $("cardEvidence").addEventListener("click", (e) => {
