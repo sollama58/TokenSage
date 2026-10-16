@@ -164,6 +164,35 @@ async def test_fetch_ipfs_all_fail_is_retryable() -> None:
     assert e.value.retryable
 
 
+@respx.mock
+async def test_fetch_ipfs_overall_cap_gives_up_retryable() -> None:
+    """A CID no gateway has yet (each hangs) gives up at overall_s, not stagger + timeout."""
+    import asyncio
+    import time
+
+    cid = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
+
+    async def hang(_: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(10)
+        return httpx.Response(200, content=b"{}")
+
+    respx.get(url__regex=r"https://gw[12]\.test/.*").mock(side_effect=hang)
+    t0 = time.monotonic()
+    async with httpx.AsyncClient() as c:
+        with pytest.raises(FetchError) as e:
+            await fetch_ipfs(
+                c,
+                IpfsRef(cid),
+                [GW1, GW2],
+                max_bytes=100,
+                timeout=10,
+                stagger_s=0.05,
+                overall_s=0.3,
+            )
+    assert e.value.retryable and "within 0.3s" in str(e.value)
+    assert time.monotonic() - t0 < 2
+
+
 # ------------------------------------------------------------- metadata cleaning
 
 

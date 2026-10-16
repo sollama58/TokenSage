@@ -57,9 +57,12 @@ async def fetch_ipfs(
     timeout: float,
     stagger_s: float = 1.5,
     accept: str = "*/*",
+    overall_s: float | None = None,
 ) -> Fetched:
     """Try gateways in order, starting the next one after `stagger_s` while the previous is
-    still running. First success wins; the rest are cancelled."""
+    still running. First success wins; the rest are cancelled. With `overall_s`, the whole
+    race gives up after that long (retryable): each gateway's own `timeout` otherwise let a
+    CID no gateway has yet hold the caller for the last start plus a full timeout."""
     urls = gateway_urls(ref, gateways)
     if not urls:
         raise FetchError("no gateways configured", retryable=False)
@@ -69,19 +72,26 @@ async def fetch_ipfs(
     async def one(u: str) -> Fetched:
         return await safe_get(client, u, max_bytes=max_bytes, timeout=timeout, accept=accept)
 
+    loop = asyncio.get_running_loop()
+    give_up = None if overall_s is None else loop.time() + overall_s
     try:
         idx = 0
         pending: set[asyncio.Task[Fetched]] = set()
         while idx < len(urls) or pending:
+            left = None if give_up is None else give_up - loop.time()
+            if left is not None and left <= 0:
+                errors.append(f"no gateway answered within {overall_s:g}s")
+                break
             if idx < len(urls):
                 t = asyncio.create_task(one(urls[idx]))
                 tasks.append(t)
                 pending.add(t)
                 idx += 1
+            wait_s = stagger_s if idx < len(urls) else None
+            if left is not None:
+                wait_s = left if wait_s is None else min(wait_s, left)
             done, pending = await asyncio.wait(
-                pending,
-                timeout=stagger_s if idx < len(urls) else None,
-                return_when=asyncio.FIRST_COMPLETED,
+                pending, timeout=wait_s, return_when=asyncio.FIRST_COMPLETED
             )
             for t in done:
                 try:

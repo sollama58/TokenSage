@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import asyncpg
 import structlog
 
+from tokensage import cpu
 from tokensage.engine import gazetteer
 from tokensage.engine.gazetteer import GazEntry, Gazetteer
 from tokensage.engine.knowledge import load_knowledge
@@ -48,7 +49,7 @@ async def current(conn: asyncpg.Connection) -> Gazetteer:
             _cache = (now, sig, _cache[2])
             return _cache[2]
         if sig == "packaged":
-            g = await asyncio.to_thread(gazetteer.packaged)
+            g = await cpu.run(gazetteer.packaged)
         else:
             rows = await conn.fetch(
                 """select id, label, aliases, kind, description, categories, sitelinks
@@ -68,7 +69,7 @@ async def current(conn: asyncpg.Connection) -> Gazetteer:
                 for r in rows
             ]
             version = f"wikidata-{updated:%Y-%m-%d}" if updated else "wikidata-db"
-            g = await asyncio.to_thread(Gazetteer, entries, load_knowledge(), version)
+            g = await cpu.run(Gazetteer, entries, load_knowledge(), version)
             log.info("gazetteer.loaded", entities=len(entries), surfaces=g.size, version=version)
         _cache = (now, sig, g)
         return g

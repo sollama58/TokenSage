@@ -648,3 +648,41 @@ async def test_wiki_lookup_text_is_capped(monkeypatch: pytest.MonkeyPatch) -> No
     assert refs == []
     assert seen and len(seen[0]) == 2
     assert all(len(t) == analyzer.WIKI_TEXT_MAX_CHARS for t in seen[0])
+
+
+@needs_db
+@pytest.mark.parametrize("enable_ocr", [False, True])
+async def test_logo_ocr_runs_only_when_enabled(
+    conn: asyncpg.Connection,
+    migrated_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+    enable_ocr: bool,
+) -> None:
+    """OCR is off by default (the logo text carried no signal): a full read with a logo
+    must not call it, and ENABLE_OCR=true brings it back."""
+    from tokensage.engine import ocr
+
+    calls: list[bytes] = []
+
+    async def fake_read(data: bytes) -> tuple[list[Any], str | None]:
+        calls.append(data)
+        return [], None
+
+    monkeypatch.setattr(safe_fetch, "DEFAULT_RESOLVER", public_resolver)
+    monkeypatch.setattr(ocr, "read_async", fake_read)
+    settings = _settings(migrated_db)
+    assert settings.enable_ocr is False
+    settings.enable_ocr = enable_ocr
+    ctx = analyzer.Context.create(settings)
+    chain = _chain()
+    try:
+        with respx.mock(assert_all_called=False) as r:
+            _web(r, chain, meta_ok=True, img_ok=True)
+            version = await analyzer.analyze(conn, ctx, T22_MINT, "full")
+        doc = await conn.fetchval(
+            "select doc from analysis where mint=$1 and version=$2", T22_MINT, version
+        )
+        assert doc["image"]["status"] == "ok"
+        assert len(calls) == (1 if enable_ocr else 0)
+    finally:
+        await ctx.close()

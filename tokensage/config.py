@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # Optional logo labels from a local vision model (engine/vision.py), full depth only:
     # a SigLIP image tower in ONNX on disk (the Docker image ships one at /app/models/siglip).
     enable_clip: bool = False
+    # Logo OCR at full depth (engine/ocr.py). Off since 2026-10-16: OCR runs one image at a
+    # time, so concurrent deep reads held analyzer slots while queued on it, and the logo-derived
+    # inputs read no signal for TrenchScanner (AUC 0.49-0.55 on 3,886 graded decisions).
+    # Cached OCR text is still used. ENABLE_OCR=true turns it back on.
+    enable_ocr: bool = False
     vision_model_path: str = ""  # the .onnx file, or a directory holding vision_model*.onnx
     vision_threads: int = 2  # onnxruntime threads per image (one image at a time per process)
     # Optional local sentence-embedding classifier (engine/embed.py): guesses categories for
@@ -117,6 +122,12 @@ class Settings(BaseSettings):
     )
     fetch_connect_timeout_s: float = 5.0
     fetch_total_timeout_s: float = 10.0
+    # IPFS: the next gateway starts this long after the previous one, and the whole race gives
+    # up after ipfs_race_timeout_s. A CID no gateway has yet (a launch seconds old) used to hold
+    # an analyzer slot ~14.5 s for the metadata and again for the image; the metadata retry
+    # schedule (resolve/metadata.py RETRY_SCHEDULE_S) asks again later.
+    ipfs_stagger_s: float = 0.5
+    ipfs_race_timeout_s: float = 7.0
     metadata_max_bytes: int = 64 * 1024
     image_max_bytes: int = 5 * 1024 * 1024
 
@@ -124,7 +135,7 @@ class Settings(BaseSettings):
     worker_poll_interval_s: float = 2.0
     # Concurrent claim/process loops in the analyzer worker. Cold analyses wait mostly on
     # IPFS/X/RPC, so several in flight multiply throughput. Each loop holds one DB connection.
-    worker_concurrency: int = 8
+    worker_concurrency: int = 12
     # On SIGTERM, in-flight jobs get this long to finish before they are handed back to the
     # queue (Render waits maxShutdownDelaySeconds=60 before killing the process).
     worker_shutdown_grace_s: float = 45.0
@@ -132,6 +143,9 @@ class Settings(BaseSettings):
     inline_worker_concurrency: int = 2
     # OCR is CPU and memory heavy (RapidOCR ~250 MB); at most this many run at once.
     ocr_concurrency: int = 1
+    # Threads for CPU-bound work (tokensage/cpu.py), apart from the default executor that
+    # serves DNS lookups for every fetch.
+    cpu_threads: int = 3
     job_lease_s: int = 120
     job_max_attempts: int = 3
 

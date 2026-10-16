@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from tokensage import cpu
+
 _lock = threading.Lock()
 _engine = None
 _failed: str | None = None
@@ -85,7 +87,7 @@ async def read_async(data: bytes) -> tuple[list[OcrLine], str | None]:
     behind another OCR does not hold an executor thread (which other jobs' hashing and
     engine runs need) while it waits."""
     async with _async_semaphore():
-        return await asyncio.to_thread(read, data)
+        return await cpu.run(read, data)
 
 
 def read(data: bytes) -> tuple[list[OcrLine], str | None]:

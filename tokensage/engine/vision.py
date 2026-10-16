@@ -28,6 +28,7 @@ import numpy as np
 import structlog
 import yaml
 
+from tokensage import cpu
 from tokensage.engine.context import Ev
 from tokensage.taxonomy import DATA_DIR, category_labels
 
@@ -333,7 +334,7 @@ async def label_async(encoder: Encoder, data: bytes) -> VisionResult:
     if _async_slots is None or _async_slots[0] is not loop:
         _async_slots = (loop, asyncio.Semaphore(1))
     async with _async_slots[1]:
-        return await asyncio.to_thread(label_image, encoder, data)
+        return await cpu.run(label_image, encoder, data)
 
 
 def to_json(res: VisionResult) -> dict[str, Any]:

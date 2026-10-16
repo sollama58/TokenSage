@@ -13,7 +13,7 @@ import traceback
 import asyncpg
 import structlog
 
-from tokensage import queue
+from tokensage import cpu, fulldepth, queue
 from tokensage.analyzer import (
     AnalyzeFailed,
     Context,
@@ -45,6 +45,7 @@ class Worker:
         self._listen_conn: asyncpg.Connection | None = None
         self.ctx = Context.create(settings)
         ocr.set_concurrency(settings.ocr_concurrency)
+        cpu.set_threads(settings.cpu_threads)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -56,10 +57,15 @@ class Worker:
             # every other coin. Each loop takes its own pool connection per job.
             loops = [asyncio.create_task(self._loop(slot)) for slot in range(self.concurrency)]
             watchdog = asyncio.create_task(self._shutdown_watchdog(loops))
+            # the trend index is rebuilt here, never inside a job's deadline
+            trends_task = asyncio.create_task(
+                fulldepth.refresh_trend_index(self.pool, self.ctx.http)
+            )
             try:
                 await asyncio.gather(*loops, return_exceptions=True)
             finally:
                 watchdog.cancel()
+                trends_task.cancel()
         finally:
             await self._stop_listener()
             await self.ctx.close()
@@ -351,9 +357,9 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     concurrency = max(1, settings.worker_concurrency)
-    # one connection per concurrent job, plus the LISTEN connection, the metrics flusher's
-    # and a spare
-    pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 3)
+    # one connection per concurrent job, plus the LISTEN connection, the metrics flusher's, the
+    # trend refresher's, and spares for the job heartbeats
+    pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 6)
     w = Worker(pool, settings, concurrency=concurrency)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
