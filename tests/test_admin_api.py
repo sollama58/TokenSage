@@ -156,6 +156,8 @@ async def test_status_usage_and_jobs(client: httpx.AsyncClient, migrated_db: str
     assert s["queue"]["failed_24h"] == 1 and s["queue"]["done_24h"] == 1
     assert {u["key_name"] for u in s["usage_today"]} == {"tester"}
     assert "depths" in s["recall_24h"]
+    assert s["database"]["size_mb"] > 0
+    assert {"table", "mb"} <= set(s["database"]["tables"][0])
 
     u = (await client.get("/admin/v1/usage?days=1&key=tester", headers=ADMIN)).json()
     assert len(u["rows"]) == 1 and u["rows"][0]["requests"] >= 1

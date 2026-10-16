@@ -109,6 +109,19 @@ class SourceHealth(_Model):
     spend_today_usd: float
 
 
+class TableSize(_Model):
+    table: str
+    mb: float
+
+
+class DatabaseSize(_Model):
+    """pg_database_size and the largest tables (indexes and TOAST included), so the disk can
+    be watched from the panel: Render shows it only on the dashboard (audit 2026-10-16, I15)."""
+
+    size_mb: float
+    tables: list[TableSize]
+
+
 class StatusResponse(_Model):
     status: Literal["ok"] = "ok"
     service_version: str
@@ -120,6 +133,7 @@ class StatusResponse(_Model):
     sources: list[SourceHealth]
     usage_today: list[UsageDay]
     recall_24h: dict
+    database: DatabaseSize | None = None
 
 
 class AdminJob(_Model):
@@ -223,6 +237,13 @@ async def status(request: Request, response: Response) -> StatusResponse:
                where day=(now() at time zone 'utc')::date order by key_name"""
         )
         rec = await recall.summary(conn, 24)
+        size = await conn.fetchval("select pg_database_size(current_database())")
+        tables = await conn.fetch(
+            """select c.relname as table, pg_total_relation_size(c.oid) as bytes
+               from pg_class c join pg_namespace n on n.oid = c.relnamespace
+               where n.nspname = 'public' and c.relkind = 'r'
+               order by 2 desc limit 8"""
+        )
     response.headers["Cache-Control"] = "no-store"
     return StatusResponse(
         service_version=__version__,
@@ -252,6 +273,13 @@ async def status(request: Request, response: Response) -> StatusResponse:
         ],
         usage_today=[UsageDay(**dict(u)) for u in use],
         recall_24h=rec,
+        database=DatabaseSize(
+            size_mb=round(int(size) / 1_048_576, 1),
+            tables=[
+                TableSize(table=t["table"], mb=round(int(t["bytes"]) / 1_048_576, 1))
+                for t in tables
+            ],
+        ),
     )
 
 

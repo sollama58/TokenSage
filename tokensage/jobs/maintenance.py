@@ -1,11 +1,12 @@
-"""Cron entrypoint (hourly): requeue expired leases, prune old jobs, stale analyses and
-expired lookup_cache rows."""
+"""Cron entrypoint (hourly): requeue expired leases, prune old jobs, stale analyses, expired
+lookup_cache rows, and the token family past its retention (config.py, "retention")."""
 
 from __future__ import annotations
 
 import asyncio
 import sys
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -196,6 +197,178 @@ async def _prune_lookup_cache(conn: asyncpg.Connection) -> int:
             return deleted
 
 
+# ---------------------------------------------------------------- the token family
+# Database audit 2026-10-16 (I1). Two horizons, see Settings.token_detail_retention_days: a
+# token's heavy rows go first, the slim token row (which the meta and copycat counts read)
+# later. The detail prune walks token.created_at behind the `token_detail` cursor
+# (migration 0021), from the oldest token, one bounded slice per run, like the analysis
+# prune: no run reads the whole table, and a slow run leaves the rest for the next. A token
+# first read long after its launch arrives behind the cursor and keeps its heavy rows until
+# the row horizon takes the whole token.
+DETAIL_TABLES = ("analysis", "token_metadata", "token_read", "token_market")
+
+
+async def _prune_token_detail_batch(conn: asyncpg.Connection, days: int) -> int:
+    async with conn.transaction():
+        at = await conn.fetchval(
+            "select at from maintenance_cursor where name = 'token_detail' for update",
+            timeout=STEP_TIMEOUT_S,
+        )
+        if at is None:  # un-migrated: nothing to walk from
+            return -1
+        # the batch ends at the PRUNE_BATCH-th token's time; tokens sharing it go in too
+        end = await conn.fetchval(
+            """select max(created_at) from (
+                 select created_at from token
+                 where created_at > $1 and created_at <= now() - make_interval(days => $2)
+                 order by created_at limit $3) b""",
+            at,
+            days,
+            PRUNE_BATCH,
+            timeout=STEP_TIMEOUT_S,
+        )
+        if end is None:
+            return -1
+        mints = [
+            r["mint"]
+            for r in await conn.fetch(
+                "select mint from token where created_at > $1 and created_at <= $2",
+                at,
+                end,
+                timeout=STEP_TIMEOUT_S,
+            )
+        ]
+        deleted = 0
+        for table in DETAIL_TABLES:
+            deleted += _count(
+                await conn.execute(
+                    f"delete from {table} where mint = any($1::text[])",
+                    mints,
+                    timeout=STEP_TIMEOUT_S,
+                )
+            )
+        await conn.execute(
+            "update maintenance_cursor set at = $1 where name = 'token_detail'",
+            end,
+            timeout=STEP_TIMEOUT_S,
+        )
+        return deleted
+
+
+async def _prune_tokens(conn: asyncpg.Connection) -> dict[str, Any]:
+    settings = get_settings()
+    detail_days, row_days = settings.token_detail_retention_days, settings.token_retention_days
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PRUNE_BUDGET_S
+    out: dict[str, Any] = {"detail_rows": 0, "undated_tokens": 0, "tokens": 0, "batches": 0}
+    if detail_days > 0:
+        while loop.time() < deadline:
+            n = await _prune_token_detail_batch(conn, detail_days)
+            if n < 0:
+                break
+            out["detail_rows"] += n
+            out["batches"] += 1
+        # A token whose launch time could never be determined is outside every meta and
+        # copycat count (they filter on created_at), so it goes whole on the detail horizon,
+        # by when it was first seen (token_undated_idx).
+        while loop.time() < deadline:
+            n = _count(
+                await conn.execute(
+                    """delete from token where mint in (
+                         select mint from token
+                         where created_at is null
+                           and first_seen_at < now() - make_interval(days => $1)
+                         limit $2)""",
+                    detail_days,
+                    PRUNE_BATCH,
+                    timeout=STEP_TIMEOUT_S,
+                )
+            )
+            out["undated_tokens"] += n
+            out["batches"] += 1
+            if n < PRUNE_BATCH:
+                break
+    if row_days > 0:
+        # The oldest tokens first (token_created_at_idx); ON DELETE CASCADE takes x_ref and
+        # whatever heavy rows a late-read token still has. No cursor: a token read long
+        # after its launch sits behind any cursor, and this reads only rows it deletes.
+        while loop.time() < deadline:
+            n = _count(
+                await conn.execute(
+                    """delete from token where mint in (
+                         select mint from token
+                         where created_at < now() - make_interval(days => $1)
+                         order by created_at limit $2)""",
+                    row_days,
+                    PRUNE_BATCH,
+                    timeout=STEP_TIMEOUT_S,
+                )
+            )
+            out["tokens"] += n
+            out["batches"] += 1
+            if n < PRUNE_BATCH:
+                break
+    lag = await conn.fetchval(
+        """select extract(epoch from now() - make_interval(days => $1) - at)
+           from maintenance_cursor where name = 'token_detail'""",
+        detail_days,
+        timeout=STEP_TIMEOUT_S,
+    )
+    out["detail_lag_s"] = _secs(lag)
+    return out
+
+
+# The caches keyed by something other than a mint, on the detail horizon from their fetch
+# time, once a day: none of them has an index on that time, so each sweep reads its table,
+# which an hourly run would do 24 times for the same rows. image rows are shared between
+# coins with one logo and go only once no token_metadata points at them any more
+# (token_metadata_image_idx); a recurring logo whose row is gone is hashed again.
+CACHE_SWEEP_HOUR_UTC = 4
+CACHE_SWEEPS: list[tuple[str, str]] = [
+    (
+        "image",
+        """delete from image where ctid in (
+             select i.ctid from image i
+             where i.analyzed_at < now() - make_interval(days => $1)
+               and not exists (select 1 from token_metadata m
+                               where m.image_content_key = i.content_key)
+             limit $2)""",
+    ),
+    ("x_tweet", "fetched_at"),
+    ("x_profile", "fetched_at"),
+    ("x_profile_history", "seen_at"),
+    ("x_media", "fetched_at"),
+    ("pair_token", "fetched_at"),
+    ("fee_recipient", "resolved_at"),
+]
+
+
+async def _sweep_caches(conn: asyncpg.Connection, *, force: bool = False) -> dict[str, int] | None:
+    if not force and datetime.now(UTC).hour != CACHE_SWEEP_HOUR_UTC:
+        return None
+    days = get_settings().token_detail_retention_days
+    if days <= 0:
+        return None
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PRUNE_BUDGET_S
+    out: dict[str, int] = {}
+    for table, sql in CACHE_SWEEPS:
+        if " " not in sql:  # a column name: the plain time-to-live form
+            sql = f"""delete from {table} where ctid in (
+                        select ctid from {table}
+                        where {sql} < now() - make_interval(days => $1) limit $2)"""
+        deleted = 0
+        while True:
+            n = _count(await conn.execute(sql, days, PRUNE_BATCH, timeout=STEP_TIMEOUT_S))
+            deleted += n
+            if n < PRUNE_BATCH or loop.time() >= deadline:
+                break
+        out[table] = deleted
+        if loop.time() >= deadline:
+            break
+    return out
+
+
 # token.logo_phash is kept by triggers (migration 0017); this re-derives it for the coins
 # inside the logo scan window (data/meta.yaml logo_scan_days, 7) in case two concurrent
 # writes for one logo still left a copy behind. The window's coins come from
@@ -244,6 +417,8 @@ STEPS: list[tuple[str, Callable[[asyncpg.Connection], Awaitable[Any]], bool]] = 
     ("pruned_analyses", _prune_analyses, True),
     ("pruned_usage_rows", _prune_usage, True),
     ("pruned_lookup_cache", _prune_lookup_cache, True),
+    ("pruned_tokens", _prune_tokens, True),
+    ("swept_caches", _sweep_caches, True),
     ("repaired_logo_hashes", _repair_logo_hashes, False),
     ("recall", _recall, False),
 ]
