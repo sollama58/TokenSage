@@ -191,3 +191,127 @@ async def test_repair_logo_hashes_fixes_a_missed_copy_inside_the_window(
     rows = dict(await db.fetch("select mint, logo_phash from token"))  # type: ignore[arg-type]
     assert rows == {"recent": 42, "old": None}  # only the logo scan window is repaired
     assert await maintenance._repair_logo_hashes(db) == 0
+
+
+# ---------------------------------------------------------------- the token family
+
+
+async def _token(
+    conn: asyncpg.Connection, mint: str, created: str | None, *, first_seen: str = "1 hour"
+) -> None:
+    await conn.execute(
+        """insert into token (mint, name, created_at, first_seen_at)
+           values ($1, $1, case when $2::text is null then null
+                                else now() - $2::text::interval end,
+                   now() - $3::text::interval)""",
+        mint,
+        created,
+        first_seen,
+    )
+    await conn.execute(
+        """insert into token_metadata (mint, status, image_content_key)
+           values ($1, 'ok', 'logo-' || $1)""",
+        mint,
+    )
+    await conn.execute(
+        """insert into image (content_key, analyzed_at)
+           values ('logo-' || $1, now() - interval '1 year')""",
+        mint,
+    )
+    await conn.execute(
+        """insert into token_read (mint, launched_at, referent_key, categories)
+           values ($1, now(), 'ref', '{}')""",
+        mint,
+    )
+    await conn.execute("insert into x_ref (mint, kind) values ($1, 'tweet')", mint)
+    await conn.execute(
+        """insert into analysis (mint, version, depth, doc, categories, flags, created_at)
+           values ($1, 1, 'basic', '{}'::jsonb, '{}', '{}', now())""",
+        mint,
+    )
+
+
+async def _mints(conn: asyncpg.Connection, table: str) -> set[str]:
+    return {r["mint"] for r in await conn.fetch(f"select mint from {table}")}
+
+
+@needs_db
+async def test_prune_tokens_drops_detail_at_30_days_and_the_row_at_90(
+    db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await db.execute("truncate token_metadata, token_read, x_ref, image cascade")
+    await db.execute(
+        """update maintenance_cursor set at = now() - interval '1000 days'
+           where name = 'token_detail'"""
+    )
+    await _token(db, "ancient", "100 days")
+    await _token(db, "aged", "40 days")
+    await _token(db, "undated-old", None, first_seen="40 days")
+    await _token(db, "undated-new", None, first_seen="10 days")
+    await _token(db, "young", "10 days")
+    monkeypatch.setattr(maintenance, "PRUNE_BATCH", 1)  # several batches, one token each
+
+    out = await maintenance._prune_tokens(db)
+    # ancient and aged lost analysis, token_metadata, token_read and token_market (4 tables,
+    # 3 rows each here); ancient then went whole, as did the undated token seen 40 days ago
+    assert out["tokens"] == 1 and out["undated_tokens"] == 1
+    assert out["detail_rows"] == 6
+    # the cursor rests on the aged token, ten days behind the 30-day line
+    assert out["detail_lag_s"] is not None and out["detail_lag_s"] <= 11 * 86400
+    assert await _mints(db, "token") == {"aged", "undated-new", "young"}
+    assert await _mints(db, "x_ref") == {"aged", "undated-new", "young"}  # slim rows stay
+    assert await _mints(db, "analysis") == {"undated-new", "young"}
+    assert await _mints(db, "token_metadata") == {"undated-new", "young"}
+    assert await _mints(db, "token_read") == {"undated-new", "young"}
+    # a second run finds nothing: the cursor has passed the aged token
+    again = await maintenance._prune_tokens(db)
+    assert again["detail_rows"] == 0 and again["tokens"] == 0 and again["batches"] <= 2
+
+    # a token first read long after its launch arrives behind the cursor: the detail walk
+    # does not go back for it, and with the row horizon off (0) it stays whole
+    await _token(db, "late-read", "100 days")
+    monkeypatch.setenv("TOKEN_RETENTION_DAYS", "0")
+    maintenance.get_settings.cache_clear()
+    out = await maintenance._prune_tokens(db)
+    assert out["tokens"] == 0 and out["detail_rows"] == 0
+    assert "late-read" in await _mints(db, "analysis")
+    # ...and goes whole once the row horizon is back on
+    monkeypatch.delenv("TOKEN_RETENTION_DAYS")
+    maintenance.get_settings.cache_clear()
+    assert (await maintenance._prune_tokens(db))["tokens"] == 1
+    assert "late-read" not in await _mints(db, "token")
+
+
+@needs_db
+async def test_cache_sweep_drops_orphan_images_and_expired_caches_once_a_day(
+    db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await db.execute("truncate token_metadata, image, pair_token, x_profile_history cascade")
+    await _token(db, "live", "10 days")  # its logo row is old but still pointed at
+    await db.execute(
+        """insert into image (content_key, analyzed_at)
+           values ('orphan-old', now() - interval '40 days'),
+                  ('orphan-new', now() - interval '10 days')"""
+    )
+    await db.execute(
+        """insert into pair_token (mint, source, fetched_at)
+           values ('pair-old', 'none', now() - interval '40 days'),
+                  ('pair-new', 'none', now() - interval '1 day')"""
+    )
+    await db.execute(
+        """insert into x_profile_history (user_id, handle, followers, seen_at)
+           values ('u1', 'h', 1, now() - interval '40 days'),
+                  ('u1', 'h', 2, now() - interval '1 day')"""
+    )
+    monkeypatch.setattr(maintenance, "PRUNE_BATCH", 1)
+    # outside the sweep hour the step is a no-op...
+    monkeypatch.setattr(maintenance, "CACHE_SWEEP_HOUR_UTC", -1)
+    assert await maintenance._sweep_caches(db) is None
+    # ...and forced (or at the hour) it sweeps every cache on the detail horizon
+    out = await maintenance._sweep_caches(db, force=True)
+    assert out is not None
+    assert out["image"] == 1 and out["pair_token"] == 1 and out["x_profile_history"] == 1
+    keys = {r["content_key"] for r in await db.fetch("select content_key from image")}
+    assert keys == {"logo-live", "orphan-new"}
+    assert await _mints(db, "pair_token") == {"pair-new"}
+    assert await db.fetchval("select count(*) from x_profile_history") == 1

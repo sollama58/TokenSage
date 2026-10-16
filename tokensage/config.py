@@ -75,6 +75,21 @@ class Settings(BaseSettings):
     # launched within this many days before it; older namesakes are references, not copies.
     copycat_window_days: int = 30
 
+    # --- retention (the hourly maintenance cron, tokensage/jobs/maintenance.py) ---
+    # Database audit 2026-10-16 (I1): nothing in the token family was ever pruned, and at
+    # 36-49k reads a day of 4-6 KB each the 15 GB default disk had weeks left. Two horizons:
+    # a token's heavy rows (analysis, token_metadata, token_read, token_market) go after
+    # token_detail_retention_days, the slim token row itself (name, symbol, creator,
+    # created_at, logo hash) and its x_ref after token_retention_days. The row is what the
+    # current-meta baseline (data/meta.yaml history_days, 90) and the copycat window
+    # (copycat_window_days, 30) count, so token_retention_days must stay at or above both;
+    # the heavy rows feed nothing older than a week (token_read's referent waves) and are
+    # re-read on demand. The caches keyed by something other than the mint (image, x_tweet,
+    # x_profile, x_profile_history, x_media, pair_token, fee_recipient) go on the detail
+    # horizon too, from their fetch time. 0 turns a horizon off.
+    token_detail_retention_days: int = 30
+    token_retention_days: int = 90
+
     # --- behaviour flags ---
     accept_non_pump: bool = True
     # Optional logo labels from a local vision model (engine/vision.py), full depth only:

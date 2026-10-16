@@ -129,6 +129,12 @@ services:
 databases:
   - name: tokensage-db
     plan: basic-256mb # 'free' expires after 30 days
+    # Disk: Render's default 15 GB (no diskSizeGB here). Nothing was pruned until 2026-10-16
+    # (database audit, I1); the hourly maintenance now keeps a token's heavy rows 30 days and
+    # the slim token row 90 (TOKEN_DETAIL_RETENTION_DAYS, TOKEN_RETENTION_DAYS in config.py),
+    # which should settle well under 15 GB at today's read volume. The admin status reports
+    # the database size and its largest tables; raise diskSizeGB (a multiple of 5) or set
+    # storageAutoscalingEnabled: true before it nears the disk.
     region: oregon
     databaseName: tokensage
     user: tokensage
