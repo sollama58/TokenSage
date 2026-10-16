@@ -18,7 +18,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage import fulldepth, gazetteer_db, queue, recall
+from tokensage import cpu, fulldepth, gazetteer_db, queue, recall
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -103,7 +103,7 @@ from tokensage.resolve import pair as pair_lookup
 from tokensage.resolve.fees import creator_fee_to_dict
 from tokensage.resolve.resolver import Resolved, ResolveError, curves_now, resolve
 from tokensage.resolve.rpc import SolanaRpc
-from tokensage.sources import bluesky, gnews, lookups
+from tokensage.sources import bluesky, gnews, lookups, wikipedia
 from tokensage.sources.x import TweetData
 from tokensage.versions import TREND_INPUTS_KEY
 
@@ -654,7 +654,7 @@ async def _vision_labels(
     if m is None or not m.image_url:
         return None
     # first call loads the ONNX model from disk: keep that off the event loop
-    enc = await asyncio.to_thread(vision.default_encoder, ctx.settings)
+    enc = await cpu.run(vision.default_encoder, ctx.settings)
     if enc is None:
         return None
     key = m.image_content_key
@@ -1583,7 +1583,7 @@ async def analyze(
     if logo_feats is None and image_bytes:
         # hash the logo up front: the database looks up its near-duplicates (lineage), and
         # the engine reuses these hashes instead of decoding the image again
-        logo_feats = (await asyncio.to_thread(image_stage.analyze, image_bytes, [], 0)).features
+        logo_feats = (await cpu.run(image_stage.analyze, image_bytes, [], 0)).features
     dbc = await _db_context(
         conn,
         ctx,
@@ -1611,13 +1611,13 @@ async def analyze(
     inp.logo_features = logo_feats  # hashed above or cached: compared with other logos
     if ctx.settings.enable_embed:
         # first call loads the ONNX model from disk: keep that off the event loop
-        inp.encoder = await asyncio.to_thread(embed.default_encoder, ctx.settings)
+        inp.encoder = await cpu.run(embed.default_encoder, ctx.settings)
     await _queue_pair_analysis(conn, inp.pair)
     timed_out: list[str] = []
     if depth == "full":
         out, timed_out = await _full_depth(conn, ctx, r, m, x, inp, image_bytes)
     else:
-        out = await asyncio.to_thread(run_basic, inp)
+        out = await cpu.run(run_basic, inp)
     if x is not None:
         x.reuse_count = dbc.x_reuse_count
         x.reuse_rank = dbc.x_reuse_rank
@@ -1777,7 +1777,9 @@ async def _full_depth(
         nonlocal ran_ocr, ocr_error
         async with steps.run("ocr"):
             lines = await fulldepth.ocr_cached(sconn, m.image_content_key if m else None)
-            if lines is None and image_bytes:
+            if lines is None and not ctx.settings.enable_ocr:
+                lines = []  # not None: the engine must not run OCR itself either
+            elif lines is None and image_bytes:
                 # OCR here rather than inside run_full: waiting for the single OCR slot then
                 # happens on the event loop, not on a blocked executor thread
                 ran_ocr = True
@@ -1812,14 +1814,14 @@ async def _full_depth(
     inp.news_hits = news[0] + bsky[0]
     # CPU-bound (normalisation, image hashing): keep it off the event loop so the
     # worker's other concurrent jobs keep making network progress meanwhile.
-    out = await asyncio.to_thread(run_full, inp)
+    out = await cpu.run(run_full, inp)
     if ran_ocr and m and m.image_content_key and not ocr_error:
         await fulldepth.persist_ocr(conn, m.image_content_key, out.ocr_lines)
     # the Google News check of the Wikipedia hits needs the engine's hits: it gets what is
     # left of the deadline (usually cached lookups)
     try:
         async with asyncio.timeout(max(0.0, deadline - loop.time())):
-            await _attach_news(conn, ctx, out)
+            await _attach_news(sconn, ctx, out)
     except TimeoutError:
         timed_out.append("news_check")
     if inp.trend_index is not None:
@@ -2064,24 +2066,30 @@ async def _wiki_refs(
                 texts.append((other.text or "")[:WIKI_TEXT_MAX_CHARS])
     try:
         n = normalize(inp.name, inp.symbol, None)
-        spans = await asyncio.to_thread(
-            wikilookup.spans, n, texts, load_knowledge(), inp.ctx.gazetteer
-        )
+        spans = await cpu.run(wikilookup.spans, n, texts, load_knowledge(), inp.ctx.gazetteer)
     except Exception as e:  # noqa: BLE001 - an optional enrichment
         log.info("wiki.spans_failed", error=str(e)[:120])
         return []
+
+    # all searches at once (cached ones answer from the db; wikipedia.py caps the live
+    # ones): then pick in span order, as a sequential walk would
+    async def search(text: str) -> list[wikipedia.WikiPage] | None:
+        try:
+            return await fulldepth.wiki_search(conn, ctx.http, text)
+        except Exception as e:  # noqa: BLE001 - an optional enrichment
+            log.info("wiki.search_failed", error=str(e)[:120])
+            return None
+
+    results = await asyncio.gather(*(search(span.text) for span in spans))
     refs: list[wikilookup.WikiRef] = []
     titles: set[str] = set()
     found_in_name: set[str] = set()
-    for span in spans:
+    for span, pages in zip(spans, results, strict=True):
         if any(span.text in f for f in found_in_name):
-            continue  # "sydney sweeney" found: its sub-spans need no lookup
-        try:
-            pages = await fulldepth.wiki_search(conn, ctx.http, span.text)
-        except Exception as e:  # noqa: BLE001 - an optional enrichment
-            log.info("wiki.search_failed", error=str(e)[:120])
+            continue  # "sydney sweeney" found: its sub-spans are not separate names
+        if pages is None:
             continue
-        ref = wikilookup.pick(span, pages or [])
+        ref = wikilookup.pick(span, pages)
         if ref is None or ref.title in titles:
             continue
         titles.add(ref.title)
@@ -2190,8 +2198,8 @@ async def _attach_news(conn: asyncpg.Connection, ctx: Context, out: EngineOutput
     count, and the first headline on the hit (trend.terms[].headline)."""
     wiki = [h for h in out.trend_hits if h.term.source not in ("news", "bluesky")]
     hits = sorted(wiki, key=lambda h: -h.term.spike)[: fulldepth.MAX_NEWS_LOOKUPS]
-    for h in hits:
-        heads = await fulldepth.news_for(conn, ctx.http, h.term.term)
+    found = await asyncio.gather(*(fulldepth.news_for(conn, ctx.http, h.term.term) for h in hits))
+    for h, heads in zip(hits, found, strict=True):
         if heads is None:
             continue
         if heads:

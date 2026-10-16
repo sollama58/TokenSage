@@ -211,6 +211,8 @@ async def fetch_url(
             max_bytes=max_bytes,
             timeout=settings.fetch_total_timeout_s,
             accept=accept,
+            stagger_s=settings.ipfs_stagger_s,
+            overall_s=settings.ipfs_race_timeout_s,
         )
     source = "host:" + (urlsplit(url).hostname or "?")
     if not breaker.allow(source):

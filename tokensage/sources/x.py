@@ -8,8 +8,10 @@ compare it with the fetched author.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -613,16 +615,11 @@ def _paid_status(t: dict[str, Any], tweet_id: str) -> TweetData:
     )
 
 
-async def _supplement_links(http: httpx.AsyncClient, t: TweetData) -> None:
-    """A mirror that shows neither a reply nor a quote may simply not report them (its
-    format changes, or it drops replies). X's syndication CDN reports both, with the
-    parent and quoted tweets inline, so ask it and fill in what the mirror missed."""
+def _merge_links(t: TweetData, s: TweetData | None) -> None:
+    """A mirror that shows neither a reply nor a quote may simply not report them (its format
+    changes, or it drops replies). X's syndication CDN reports both, with the parent and
+    quoted tweets inline: fill in from its answer `s` what the mirror's copy `t` missed."""
     if t.replying_to_id or t.quoted_tweet_id or t.quoted is not None:
-        return
-    try:
-        s = await syndication_tweet(http, t.id)
-    except Exception as e:  # noqa: BLE001 - only a supplement
-        log.info("x.supplement.error", error=str(e)[:120])
         return
     if s is None or s.status != "ok":
         return
@@ -640,25 +637,43 @@ async def _supplement_links(http: httpx.AsyncClient, t: TweetData) -> None:
 async def fetch_tweet(
     http: httpx.AsyncClient, tweet_id: str, paid_key: str = "", allow_paid: bool = False
 ) -> TweetData:
-    """Walk the chain; first definitive answer wins (ok or deleted)."""
-    deleted: TweetData | None = None
-    asked_syndication = False
-    for fn in (fx_tweet, vx_tweet, syndication_tweet, oembed_tweet):
+    """First definitive answer wins (ok, else deleted), in the order FxTwitter, VxTwitter,
+    syndication, oEmbed. The first three are asked at once: walking them one by one cost a
+    full timeout per mirror that was down. The syndication answer also fills in a reply or
+    quote a mirror's copy left out (see _merge_links), without a second request."""
+
+    async def ask(
+        fn: Callable[[httpx.AsyncClient, str], Awaitable[TweetData | None]],
+    ) -> TweetData | None:
         try:
-            t = await fn(http, tweet_id)
+            return await fn(http, tweet_id)
         except Exception as e:  # noqa: BLE001 - one broken mirror must not stop the chain
             log.info("x.fetch_tweet.error", fn=fn.__name__, error=str(e)[:120])
-            t = None
-        asked_syndication = asked_syndication or fn is syndication_tweet
-        if t is not None:
-            # a deleted verdict from a mirror can be stale; keep walking for an "ok"
-            if t.status == "ok":
-                # the syndication CDN was already asked in this walk: no second request
-                if not asked_syndication:
-                    await _supplement_links(http, t)
-                return t
-            deleted = t
-            continue
+            return None
+
+    tasks = [asyncio.ensure_future(ask(fn)) for fn in (fx_tweet, vx_tweet, syndication_tweet)]
+    deleted: TweetData | None = None
+    try:
+        synd_task = tasks[2]
+        for task in tasks:
+            t = await task
+            if t is None:
+                continue
+            # a deleted verdict from a mirror can be stale; keep looking for an "ok"
+            if t.status != "ok":
+                deleted = deleted or t
+                continue
+            if task is not synd_task:
+                _merge_links(t, await synd_task)
+            return t
+    finally:
+        for task in tasks:
+            task.cancel()
+    t = await ask(oembed_tweet)
+    if t is not None:
+        if t.status == "ok":
+            return t
+        deleted = deleted or t
     if allow_paid and paid_key:
         try:
             t = await paid_tweet(http, tweet_id, paid_key)

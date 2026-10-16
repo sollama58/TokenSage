@@ -68,7 +68,7 @@ services:
   - type: worker
     name: tokensage-analyzer
     runtime: docker
-    plan: standard # 2 GB: 8 concurrent jobs + RapidOCR (~250 MB) + SigLIP (~220 MB) outgrow 512 MB
+    plan: standard # 2 GB: 12 concurrent jobs (OCR off since 2026-10-16) + RapidOCR (~250 MB) + SigLIP (~220 MB) outgrow 512 MB
     region: oregon
     dockerfilePath: ./Dockerfile
     numInstances: 1
@@ -82,7 +82,7 @@ services:
       - key: TOKENSAGE_ROLE # picks the entrypoint (tokensage/run.py); no dockerCommand
         value: worker
       - key: WORKER_CONCURRENCY # jobs in flight at once; each holds one DB connection
-        value: "8"
+        value: "12"
       - key: OCR_CONCURRENCY # RapidOCR is ~250 MB per concurrent read
         value: "1"
       - key: DATABASE_URL

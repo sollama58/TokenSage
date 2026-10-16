@@ -15,6 +15,7 @@ import asyncpg
 import httpx
 import structlog
 
+from tokensage import cpu
 from tokensage.api.schemas import XInfo
 from tokensage.config import Settings
 from tokensage.engine import ocr, trends, vision
@@ -477,10 +478,14 @@ async def trend_index(
     """Wikipedia's spiking articles (daily, from the knowledge cron) plus the Google Trends
     searches of the last two days and X's trending topics of the last day (both polled here,
     when an http client is given), with each source's status. Rebuilt every
-    TREND_INDEX_TTL_S; concurrent jobs reuse the old index while one of them rebuilds it."""
+    TREND_INDEX_TTL_S; concurrent jobs reuse the old index while one of them rebuilds it.
+
+    In the analyzer worker a background task (refresh_trend_index) keeps the index fresh, so a
+    job only builds it when there is none yet (just after a start). A rebuild inside a job used
+    to run within that job's deadline, cancelled with it and so retried by the next job."""
     global _trend_cache
     now = time.monotonic()
-    if _trend_cache and now - _trend_cache[0] < TREND_INDEX_TTL_S:
+    if _trend_cache and (_refresher_running or now - _trend_cache[0] < TREND_INDEX_TTL_S):
         return _trend_cache[1]
     if _trend_cache:
         # expired: serve the old index unless nobody is rebuilding it yet
@@ -490,27 +495,62 @@ async def trend_index(
         # the first jobs after a worker start all arrive here with no index: one builds it
         if _trend_cache and time.monotonic() - _trend_cache[0] < TREND_INDEX_TTL_S:
             return _trend_cache[1]
-        wiki_terms, wiki_status = await _wiki_trends(conn)
-        g_terms, g_status = await _google_trends(conn, http)
-        x_terms, x_status = await _x_trends(conn, http)
-        all_terms = wiki_terms + g_terms + x_terms
-        statuses = [wiki_status, g_status, x_status]
-        try:
-            all_terms = await _with_history(conn, all_terms, statuses)
-        except (asyncpg.PostgresError, OSError) as e:
-            log.info("trends.history_failed", error=type(e).__name__)
-        idx = trends.TrendIndex(all_terms, load_knowledge(), statuses)
-        for st in idx.sources:
-            log.info(
-                "trends.source",
-                source=st.source,
-                status=st.status,
-                terms=st.terms,
-                as_of=st.as_of.isoformat() if st.as_of else None,
-                detail=st.detail,
-            )
-        _trend_cache = (time.monotonic(), idx)
-        return idx
+        return await _build_trend_index(conn, http)
+
+
+# Set while a worker's refresher keeps the index fresh (jobs then never rebuild an old one).
+_refresher_running = False
+
+
+async def refresh_trend_index(pool: asyncpg.Pool, http: httpx.AsyncClient) -> None:
+    """Rebuild the trend index every half TREND_INDEX_TTL_S, off every job's path. Runs until
+    cancelled; a failed rebuild keeps the old index and tries again next time."""
+    global _refresher_running
+    _refresher_running = True
+    try:
+        while True:
+            age = None if _trend_cache is None else time.monotonic() - _trend_cache[0]
+            if age is None or age >= TREND_INDEX_TTL_S / 2:
+                try:
+                    # the connection first: jobs waiting on the lock at a start hold theirs
+                    async with pool.acquire() as conn, _trend_lock:
+                        await _build_trend_index(conn, http)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001 - the old index serves until the next try
+                    log.warning("trends.refresh_failed", error=f"{type(e).__name__}: {e}"[:300])
+            await asyncio.sleep(30)
+    finally:
+        _refresher_running = False
+
+
+async def _build_trend_index(
+    conn: asyncpg.Connection, http: httpx.AsyncClient | None
+) -> trends.TrendIndex:
+    """Fetch the sources and build the index (call with _trend_lock held)."""
+    global _trend_cache
+    wiki_terms, wiki_status = await _wiki_trends(conn)
+    g_terms, g_status = await _google_trends(conn, http)
+    x_terms, x_status = await _x_trends(conn, http)
+    all_terms = wiki_terms + g_terms + x_terms
+    statuses = [wiki_status, g_status, x_status]
+    try:
+        all_terms = await _with_history(conn, all_terms, statuses)
+    except (asyncpg.PostgresError, OSError) as e:
+        log.info("trends.history_failed", error=type(e).__name__)
+    # the matcher build is CPU work: off the event loop, so the other jobs keep moving
+    idx = await cpu.run(trends.TrendIndex, all_terms, load_knowledge(), statuses)
+    for st in idx.sources:
+        log.info(
+            "trends.source",
+            source=st.source,
+            status=st.status,
+            terms=st.terms,
+            as_of=st.as_of.isoformat() if st.as_of else None,
+            detail=st.detail,
+        )
+    _trend_cache = (time.monotonic(), idx)
+    return idx
 
 
 HISTORY_DAYS = 30  # trend.terms[].days_listed: the days before yesterday it looks back
@@ -1082,7 +1122,7 @@ async def media_hashes(
             f = await fetch_url(
                 http, _small(url), settings, max_bytes=settings.image_max_bytes, accept="image/*"
             )
-            feats = await asyncio.to_thread(image_stage.features, f.body)
+            feats = await cpu.run(image_stage.features, f.body)
             return (
                 MediaHash(url=url, status="ok", phash=feats.phash, phash_mirror=feats.phash_mirror),
                 feats.dhash,

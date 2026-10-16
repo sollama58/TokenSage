@@ -15,6 +15,7 @@ import base64
 import struct
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import asyncpg
 import httpx
@@ -309,6 +310,18 @@ async def _created_from_history(
     return (datetime.fromtimestamp(bt, tz=UTC) if bt else None), None, None
 
 
+async def _all(*tasks: asyncio.Future[Any]) -> None:
+    """Wait for every task; on the first failure cancel and wait out the rest (one of them may
+    be using the job's connection), then raise it."""
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 # ----------------------------------------------------------------- main
 
 
@@ -361,18 +374,26 @@ async def resolve(
     graduated_pool: str | None = None
     creator_onchain = creator_kind = None
     creator_fee: CreatorFee | None = None
-    if curve:
-        complete, curve_progress = await _curve_state(rpc, curve)
-        creator = curve.get("creator")
-        if creator and set(creator) == {"1"}:
-            creator = None
-        creator_onchain = creator
-        is_mayhem = curve.get("is_mayhem_mode")
-        quote_mint = _quote_label(curve.get("quote_mint")) or "SOL"
-        if complete:
-            graduated_pool = await _graduated_pool(rpc, mint, curve, sol_pool, pool_acc)
-        # where the creator fee goes; the curve's creator may be a PDA rather than a wallet
-        creator_fee = await resolve_creator_fee(
+
+    # The stored row first (one indexed read): it says whether the creation time still has
+    # to be looked up. The steps after it don't depend on each other and ran one after another,
+    # each an RPC or HTTP round trip: the curve's state (and graduated pool), the creator fee,
+    # the on-chain metadata and the frontend API's creation time now run together. Only the
+    # fee lookup uses `conn`, so the connection is never shared between them.
+    row = await conn.fetchrow(
+        "select created_at, created_at_source, creator from token where mint=$1", mint
+    )
+    need_created = not (row and row["created_at"] and row["created_at_source"] != "hints")
+
+    async def curve_part() -> tuple[bool | None, float | None, str | None]:
+        assert curve is not None
+        done, progress = await _curve_state(rpc, curve)
+        pool = await _graduated_pool(rpc, mint, curve, sol_pool, pool_acc) if done else None
+        return done, progress, pool
+
+    async def fee_part() -> CreatorFee:
+        assert curve is not None
+        return await resolve_creator_fee(
             mint,
             curve,
             sharing_acc if sharing_acc and sharing_acc.get("owner") else None,
@@ -380,6 +401,32 @@ async def resolve(
             conn=conn,
             cache_max_age=timedelta(days=settings.fee_recipient_cache_days),
         )
+
+    async def frontend_part() -> tuple[datetime | None, str | None]:
+        if not (need_created and is_pumpfun):
+            return None, None
+        return await _created_from_frontend_api(http, mint)
+
+    meta_task = _onchain_metadata(
+        rpc, mint, token_program, info, metaplex_acc=md_acc, metaplex_read=True
+    )
+    if curve:
+        curve_t = asyncio.ensure_future(curve_part())
+        fee_t = asyncio.ensure_future(fee_part())
+        meta_t = asyncio.ensure_future(meta_task)
+        fe_t = asyncio.ensure_future(frontend_part())
+        await _all(curve_t, fee_t, meta_t, fe_t)
+        complete, curve_progress, graduated_pool = curve_t.result()
+        creator_fee = fee_t.result()
+        meta, meta_source = meta_t.result()
+        fe = fe_t.result()
+        creator = curve.get("creator")
+        if creator and set(creator) == {"1"}:
+            creator = None
+        creator_onchain = creator
+        is_mayhem = curve.get("is_mayhem_mode")
+        quote_mint = _quote_label(curve.get("quote_mint")) or "SOL"
+        # where the creator fee goes; the curve's creator may be a PDA rather than a wallet
         if creator_fee.mechanism == "sharing_config":
             creator_kind = "sharing_config"
             creator = creator_fee.admin  # the wallet that opted the coin into fee sharing
@@ -388,25 +435,23 @@ async def resolve(
             creator = None  # a pump.fun-controlled PDA; the launch wallet is found below
         else:
             creator_kind = "wallet" if creator else "unknown"
+    else:
+        meta_t = asyncio.ensure_future(meta_task)
+        fe_t = asyncio.ensure_future(frontend_part())
+        await _all(meta_t, fe_t)
+        meta, meta_source = meta_t.result()
+        fe = fe_t.result()
 
-    # 3. on-chain name / symbol / uri
-    meta, meta_source = await _onchain_metadata(
-        rpc, mint, token_program, info, metaplex_acc=md_acc, metaplex_read=True
-    )
-
-    # 4. creation time + creator
+    # creation time + creator
     created: datetime | None = None
     created_src: str | None = None
-    row = await conn.fetchrow(
-        "select created_at, created_at_source, creator from token where mint=$1", mint
-    )
     if row and row["creator"] and row["creator"] != creator_onchain:
         # a row stored by older rules may hold the curve's PDA as creator: never reuse that
         creator = creator or row["creator"]
     if row and row["created_at"] and row["created_at_source"] != "hints":
         created, created_src = row["created_at"], row["created_at_source"]
     if created is None and is_pumpfun:
-        c, cr = await _created_from_frontend_api(http, mint)
+        c, cr = fe
         if c:
             created, created_src = c, "frontend_api"
             creator = creator or cr
