@@ -129,10 +129,12 @@ async def test_claim_fails_a_job_whose_worker_died_too_often(
         await asyncio.sleep(0.1)
         assert await queue.claim(conn, lease_s=60, kinds=["analyze"], max_attempts=2) is None
         row = await conn.fetchrow(
-            "select status, attempts, last_error, finished_at from job where id=$1", j.id
+            "select status, attempts, last_error, error_code, finished_at from job where id=$1",
+            j.id,
         )
         assert row and row["status"] == "failed" and row["attempts"] == 2
         assert row["last_error"] == queue.WORKER_DIED and row["finished_at"] is not None
+        assert row["error_code"] == queue.WORKER_DIED_CODE
         assert await waiting is True  # CHANNEL_DONE was notified
         cb = await queue.claim(conn, lease_s=60, max_attempts=3)
         assert cb is not None and cb.kind == "callback"  # the callback was released

@@ -99,9 +99,6 @@
   <label>Admin key
     <input class="key" id="key" type="password" placeholder="ADMIN_KEY" autocomplete="off">
   </label>
-  <label style="flex-direction:row;display:flex;align-items:center;gap:6px;margin-top:16px">
-    <input id="remember" type="checkbox"> remember
-  </label>
   <label>Refresh
     <select id="every"><option value="0">off</option><option value="15">15 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="300">5 min</option></select>
   </label>
@@ -115,7 +112,7 @@
 </nav>
 <main>
   <section class="panel hidden" id="login">
-    <p>Paste the <span class="mono">ADMIN_KEY</span> above to load the panel. It is kept in this tab only, or in this browser if you tick <em>remember</em>. Every number here comes from <span class="mono">/admin/v1</span>.</p>
+    <p>Paste the <span class="mono">ADMIN_KEY</span> above to load the panel. It is kept in this tab only, never on disk. Every number here comes from <span class="mono">/admin/v1</span>.</p>
     <p class="error" id="loginErr"></p>
   </section>
 
@@ -217,14 +214,15 @@ const ago = (iso) => {
 const hhmm = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const md = (iso) => new Date(iso + (iso.length === 10 ? "T00:00:00Z" : "")).toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
 
+// The admin key lives only for this tab (sessionStorage), never on disk: anything that ever
+// runs on this origin could otherwise read it (security audit 2026-10-16, L1). An older
+// "remember" copy in localStorage is removed on load.
 function storedKey() {
-  try { return sessionStorage.getItem(LS_KEY) || localStorage.getItem(LS_KEY) || ""; } catch { return ""; }
+  try { localStorage.removeItem(LS_KEY); } catch { /* blocked */ }
+  try { return sessionStorage.getItem(LS_KEY) || ""; } catch { return ""; }
 }
 function saveKey(k) {
-  try {
-    sessionStorage.setItem(LS_KEY, k);
-    if ($("remember").checked) localStorage.setItem(LS_KEY, k); else localStorage.removeItem(LS_KEY);
-  } catch { /* storage blocked: the key lives in the input only */ }
+  try { sessionStorage.setItem(LS_KEY, k); } catch { /* storage blocked: the key lives in the input only */ }
 }
 
 async function api(path, opts = {}) {
@@ -544,9 +542,7 @@ function schedule() {
   if (s) timer = setInterval(() => { if (!document.hidden) load(); }, s * 1000);
 }
 $("key").value = storedKey();
-try { $("remember").checked = !!localStorage.getItem(LS_KEY); } catch { /* blocked */ }
 $("key").addEventListener("change", () => { saveKey($("key").value.trim()); $("loginErr").textContent = ""; load(); });
-$("remember").addEventListener("change", () => saveKey($("key").value.trim()));
 $("every").addEventListener("change", schedule);
 $("uHours").addEventListener("change", load);
 $("reload").addEventListener("click", load);

@@ -33,6 +33,7 @@ log = structlog.get_logger("now")
 
 HEAT_KEY = "heat:"  # lookup_cache: a story's heat, shared by every coin on it
 HEAT_TTL = timedelta(minutes=5)
+HEAT_STALE_MAX = 2 * HEAT_TTL  # a failed refresh falls back to cached heat only this young
 HEAT_FAILED_TTL = timedelta(minutes=1)  # retry a failed or rate-limited lookup soon
 # a lineage original counts as the story only for these kinds: an "original" has none
 LINEAGE_STORY_KINDS = ("early_copy", "copy", "late_copy", "reference")
@@ -283,8 +284,10 @@ async def story_heat(
     if found is None:
         return None
     story, kind, story_mint = found
-    # v2: exact pump.fun matches only (audit 2026-10-14 M4); older rows matched substrings
-    key = f"{HEAT_KEY}v2:{kind}:{_compact(story)}"
+    # v2: exact pump.fun matches only (audit 2026-10-14 M4); older rows matched substrings.
+    # v3: the lineage original is part of the key, so stories that share a name but not an
+    # original don't share a leader
+    key = f"{HEAT_KEY}v3:{kind}:{_compact(story)}:{story_mint or ''}"
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and isinstance(row["value"], dict):
         cached = StoryHeat.model_validate(row["value"])
@@ -307,8 +310,13 @@ async def story_heat(
                     heat.leader.from_peak_pct = peak.from_peak_pct
     except geckoterminal.RateLimited:
         heat = StoryHeat(story=story, story_kind=kind, status="rate_limited", as_of=None)  # type: ignore[arg-type]
-    if heat.status != "ok" and row and isinstance(row["value"], dict):
-        return StoryHeat.model_validate(row["value"])  # the last good one
+    if (
+        heat.status != "ok"
+        and row
+        and isinstance(row["value"], dict)
+        and datetime.now(UTC) - row["fetched_at"] <= HEAT_STALE_MAX
+    ):
+        return StoryHeat.model_validate(row["value"])  # the last good one, if still recent
     await conn.execute(
         """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
            on conflict (key) do update set value=excluded.value, fetched_at=now()""",

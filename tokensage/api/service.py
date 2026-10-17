@@ -125,9 +125,11 @@ def _failed_response(
     job_id: int,
     last_error: str | None,
     request_id: str,
+    error_code: str | None = None,
 ) -> TokenResponse:
     """status=failed, the same shape whether the failure happened while this request waited
-    or on an earlier one: the stale analysis (if any) and how the retry works."""
+    or on an earlier one: the stale analysis (if any) and how the retry works. The job's
+    error_code (such as worker_died), when it has one, is the error's code."""
     return TokenResponse(
         ca=mint,
         status="failed",
@@ -136,7 +138,7 @@ def _failed_response(
         errors=[
             UpstreamError(
                 source="analyzer",
-                code="failed",
+                code=error_code or "failed",
                 detail=(last_error or "analysis failed")
                 + f"; retried automatically after {FAILED_COOLDOWN_S} s, or now "
                 "with refresh=true",
@@ -290,7 +292,7 @@ async def get_or_enqueue(
 
                     status, api_code = DEFINITIVE_CODES[code]
                     raise errors.ApiError(status, api_code, last_error or api_code)
-                return _failed_response(mint, depth, cached, fid, last_error, request_id)
+                return _failed_response(mint, depth, cached, fid, last_error, request_id, code)
 
         async def charge(j: queue.Job) -> None:
             # Only a newly created job costs quota or counts against the queue limit.
@@ -375,7 +377,9 @@ async def get_or_enqueue(
                 status, code = DEFINITIVE_CODES[j.error_code]
                 raise errors.ApiError(status, code, j.last_error or code)
             if j and j.status == "failed":
-                return _failed_response(mint, depth, cached, job.id, j.last_error, request_id)
+                return _failed_response(
+                    mint, depth, cached, job.id, j.last_error, request_id, j.error_code
+                )
         stale = cached[0] if cached else None
         return TokenResponse(
             ca=mint,

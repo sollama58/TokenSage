@@ -197,7 +197,12 @@ async def test_repair_logo_hashes_fixes_a_missed_copy_inside_the_window(
 
 
 async def _token(
-    conn: asyncpg.Connection, mint: str, created: str | None, *, first_seen: str = "1 hour"
+    conn: asyncpg.Connection,
+    mint: str,
+    created: str | None,
+    *,
+    first_seen: str = "1 hour",
+    read: str | None = None,
 ) -> None:
     await conn.execute(
         """insert into token (mint, name, created_at, first_seen_at)
@@ -226,8 +231,9 @@ async def _token(
     await conn.execute("insert into x_ref (mint, kind) values ($1, 'tweet')", mint)
     await conn.execute(
         """insert into analysis (mint, version, depth, doc, categories, flags, created_at)
-           values ($1, 1, 'basic', '{}'::jsonb, '{}', '{}', now())""",
+           values ($1, 1, 'basic', '{}'::jsonb, '{}', '{}', now() - $2::text::interval)""",
         mint,
+        read or created or first_seen,  # read when it was launched, unless told otherwise
     )
 
 
@@ -249,18 +255,31 @@ async def test_prune_tokens_drops_detail_at_30_days_and_the_row_at_90(
     await _token(db, "undated-old", None, first_seen="40 days")
     await _token(db, "undated-new", None, first_seen="10 days")
     await _token(db, "young", "10 days")
+    # launched long ago but read yesterday (a pair token, an old coin looked up): kept whole
+    await _token(db, "ancient-read", "100 days", read="1 day")
+    # aged has a newer full read and a newer basic one: only the superseded basic v1 goes
+    for v, depth in [(2, "full"), (3, "basic")]:
+        await db.execute(
+            """insert into analysis (mint, version, depth, doc, categories, flags, created_at)
+               values ('aged', $1, $2, '{}'::jsonb, '{}', '{}', now() - interval '35 days')""",
+            v,
+            depth,
+        )
     monkeypatch.setattr(maintenance, "PRUNE_BATCH", 1)  # several batches, one token each
 
     out = await maintenance._prune_tokens(db)
-    # ancient and aged lost analysis, token_metadata, token_read and token_market (4 tables,
-    # 3 rows each here); ancient then went whole, as did the undated token seen 40 days ago
+    # ancient, ancient-read and aged lost token_metadata and token_read (2 rows each), aged
+    # also its superseded analysis; each kept its newest analysis per depth. ancient then
+    # went whole, as did the undated token seen 40 days ago; ancient-read was read recently
     assert out["tokens"] == 1 and out["undated_tokens"] == 1
-    assert out["detail_rows"] == 6
+    assert out["detail_rows"] == 7
     # the cursor rests on the aged token, ten days behind the 30-day line
     assert out["detail_lag_s"] is not None and out["detail_lag_s"] <= 11 * 86400
-    assert await _mints(db, "token") == {"aged", "undated-new", "young"}
-    assert await _mints(db, "x_ref") == {"aged", "undated-new", "young"}  # slim rows stay
-    assert await _mints(db, "analysis") == {"undated-new", "young"}
+    kept = {"aged", "ancient-read", "undated-new", "young"}
+    assert await _mints(db, "token") == kept
+    assert await _mints(db, "x_ref") == kept  # slim rows stay
+    assert await _mints(db, "analysis") == kept
+    assert await _versions(db, "aged") == [2, 3]
     assert await _mints(db, "token_metadata") == {"undated-new", "young"}
     assert await _mints(db, "token_read") == {"undated-new", "young"}
     # a second run finds nothing: the cursor has passed the aged token

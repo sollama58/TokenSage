@@ -205,7 +205,13 @@ async def _prune_lookup_cache(conn: asyncpg.Connection) -> int:
 # prune: no run reads the whole table, and a slow run leaves the rest for the next. A token
 # first read long after its launch arrives behind the cursor and keeps its heavy rows until
 # the row horizon takes the whole token.
-DETAIL_TABLES = ("analysis", "token_metadata", "token_read", "token_market")
+# Each mint keeps its newest analysis at each depth (audit 2026-10-17 M4): pair tokens and
+# lineage originals are read back from it (resolve/pair.py, analyzer._prior_reads) whatever
+# their age, and /v1/tokens:now needs the full read. And a token read within the detail
+# horizon (a new analysis row) is not taken by the row prune, however old its launch.
+DETAIL_TABLES = ("token_metadata", "token_read", "token_market")
+_NOT_RECENTLY_READ = """not exists (select 1 from analysis a where a.mint = token.mint
+                          and a.created_at > now() - make_interval(days => $3))"""
 
 
 async def _prune_token_detail_batch(conn: asyncpg.Connection, days: int) -> int:
@@ -238,7 +244,15 @@ async def _prune_token_detail_batch(conn: asyncpg.Connection, days: int) -> int:
                 timeout=STEP_TIMEOUT_S,
             )
         ]
-        deleted = 0
+        deleted = _count(
+            await conn.execute(
+                """delete from analysis a where a.mint = any($1::text[])
+                     and exists (select 1 from analysis n where n.mint = a.mint
+                                 and n.depth = a.depth and n.version > a.version)""",
+                mints,
+                timeout=STEP_TIMEOUT_S,
+            )
+        )
         for table in DETAIL_TABLES:
             deleted += _count(
                 await conn.execute(
@@ -261,6 +275,7 @@ async def _prune_tokens(conn: asyncpg.Connection) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + PRUNE_BUDGET_S
     out: dict[str, Any] = {"detail_rows": 0, "undated_tokens": 0, "tokens": 0, "batches": 0}
+    read_days = detail_days or row_days  # "recently read": an analysis row this young
     if detail_days > 0:
         while loop.time() < deadline:
             n = await _prune_token_detail_batch(conn, detail_days)
@@ -274,13 +289,15 @@ async def _prune_tokens(conn: asyncpg.Connection) -> dict[str, Any]:
         while loop.time() < deadline:
             n = _count(
                 await conn.execute(
-                    """delete from token where mint in (
+                    f"""delete from token where mint in (
                          select mint from token
                          where created_at is null
                            and first_seen_at < now() - make_interval(days => $1)
+                           and {_NOT_RECENTLY_READ}
                          limit $2)""",
                     detail_days,
                     PRUNE_BATCH,
+                    read_days,
                     timeout=STEP_TIMEOUT_S,
                 )
             )
@@ -295,12 +312,14 @@ async def _prune_tokens(conn: asyncpg.Connection) -> dict[str, Any]:
         while loop.time() < deadline:
             n = _count(
                 await conn.execute(
-                    """delete from token where mint in (
+                    f"""delete from token where mint in (
                          select mint from token
                          where created_at < now() - make_interval(days => $1)
+                           and {_NOT_RECENTLY_READ}
                          order by created_at limit $2)""",
                     row_days,
                     PRUNE_BATCH,
+                    read_days,
                     timeout=STEP_TIMEOUT_S,
                 )
             )
