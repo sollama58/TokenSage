@@ -375,7 +375,7 @@ async def test_condense_strips_heavy_parts_of_old_reads_once(
             json.dumps(full),
             age,
         )
-    monkeypatch.setattr(maintenance, "PRUNE_BATCH", 1)  # one row per batch
+    monkeypatch.setattr(maintenance, "CONDENSE_BATCH", 1)  # one row per batch
 
     out = await maintenance._condense_analyses(db)
     assert out is not None and out["condensed"] == 2
@@ -404,3 +404,41 @@ async def test_condense_strips_heavy_parts_of_old_reads_once(
     monkeypatch.setenv("ANALYSIS_CONDENSE_DAYS", "0")
     maintenance.get_settings.cache_clear()
     assert await maintenance._condense_analyses(db) is None
+
+
+@needs_db
+async def test_condense_halves_a_batch_that_times_out(
+    db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await db.execute(
+        """update maintenance_cursor set at = now() - interval '1000 days'
+           where name = 'analysis_condense'"""
+    )
+    for v in range(1, 6):
+        await _analysis(db, "slow", v, "basic", f"{10 + v} days")
+    real = maintenance._condense_batch
+    sizes: list[int] = []
+
+    async def slow_db(conn: asyncpg.Connection, days: int, size: int) -> int:
+        sizes.append(size)
+        if size > 50:  # the production database, too slow for a big batch
+            raise TimeoutError
+        return await real(conn, days, size)
+
+    monkeypatch.setattr(maintenance, "_condense_batch", slow_db)
+    out = await maintenance._condense_analyses(db)
+    assert out is not None and out["condensed"] == 5 and out["batch"] == 50
+    assert sizes[:3] == [200, 100, 50]
+
+    # still timing out at the smallest batch: the step fails, and nothing moved
+    await db.execute(
+        """update maintenance_cursor set at = now() - interval '1000 days'
+           where name = 'analysis_condense'"""
+    )
+
+    async def stuck(conn: asyncpg.Connection, days: int, size: int) -> int:
+        raise TimeoutError
+
+    monkeypatch.setattr(maintenance, "_condense_batch", stuck)
+    with pytest.raises(TimeoutError):
+        await maintenance._condense_analyses(db)

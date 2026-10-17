@@ -173,9 +173,18 @@ async def _prune_usage(conn: asyncpg.Connection) -> int:
 CONDENSE_DROP = ["evidence", "market"]
 CONDENSE_DROP_BASIC = ["x", "image", "trend"]
 CONDENSED_CAVEAT = "condensed: evidence and market detail left out of this older read"
+# Rows rewritten per batch. Each one is a cold, TOASTed document read and written back with
+# every index entry: 5,000 at a time (PRUNE_BATCH) ran past STEP_TIMEOUT_S on the production
+# database (2026-10-17 17:27 run). A batch that still times out is retried at half the size,
+# down to CONDENSE_MIN_BATCH, before the step fails.
+CONDENSE_BATCH = 200
+CONDENSE_MIN_BATCH = 25
+# The condensing backlog (every row past the horizon when it shipped) gets more room than the
+# prunes: at the batch size above it still clears it within days.
+CONDENSE_BUDGET_S = 120.0
 
 
-async def _condense_batch(conn: asyncpg.Connection, days: int) -> int:
+async def _condense_batch(conn: asyncpg.Connection, days: int, size: int) -> int:
     """Condense one batch past the cursor and move it. Returns the rows rewritten, or -1
     when the cursor has caught up with the horizon."""
     async with conn.transaction():
@@ -192,7 +201,7 @@ async def _condense_batch(conn: asyncpg.Connection, days: int) -> int:
                  order by created_at limit $3) b""",
             at,
             days,
-            PRUNE_BATCH,
+            size,
             timeout=STEP_TIMEOUT_S,
         )
         if end is None:
@@ -227,10 +236,18 @@ async def _condense_analyses(conn: asyncpg.Connection) -> dict[str, Any] | None:
     if days <= 0:
         return None
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + PRUNE_BUDGET_S
+    deadline = loop.time() + CONDENSE_BUDGET_S
     out: dict[str, Any] = {"condensed": 0, "batches": 0}
+    size = CONDENSE_BATCH
     while loop.time() < deadline:
-        n = await _condense_batch(conn, days)
+        try:
+            n = await _condense_batch(conn, days, size)
+        except TimeoutError:
+            # rolled back with its cursor: the same rows go again, fewer at a time
+            if size <= CONDENSE_MIN_BATCH:
+                raise
+            size = max(CONDENSE_MIN_BATCH, size // 2)
+            continue
         if n < 0:
             break
         out["condensed"] += n
@@ -242,6 +259,7 @@ async def _condense_analyses(conn: asyncpg.Connection) -> dict[str, Any] | None:
         timeout=STEP_TIMEOUT_S,
     )
     out["lag_s"] = _secs(lag)
+    out["batch"] = size
     return out
 
 
