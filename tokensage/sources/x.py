@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 import structlog
 
-from tokensage.engine.xref import syndication_token
+from tokensage.engine.xref import ID, syndication_token
 from tokensage.net.breaker import breaker
 from tokensage.resolve.metadata import clean_url
 
@@ -194,7 +194,9 @@ def _id(v: Any) -> str | None:
     if v is None or isinstance(v, bool):
         return None
     s = str(v).strip()
-    return s if s.isdigit() else None
+    # ASCII digits only (str.isdigit also takes "²" and Arabic-Indic digits): upstream ids go
+    # into mirror URL paths and stored post links.
+    return s if ID.fullmatch(s) else None
 
 
 def _handle(v: Any) -> str | None:
@@ -378,7 +380,7 @@ def _fx_status(st: dict[str, Any], tweet_id: str) -> TweetData:
     media = st.get("media") or {}
     quote = st.get("quote") or {}
     return TweetData(
-        id=str(st.get("id") or tweet_id),
+        id=_id(st.get("id")) or tweet_id,
         status="ok",
         source="fxtwitter",
         text=st.get("text"),
@@ -392,7 +394,7 @@ def _fx_status(st: dict[str, Any], tweet_id: str) -> TweetData:
         media_count=len(media.get("photos") or []) + len(media.get("videos") or []),
         media_urls=_fx_media(st),
         media=_fx_media_items(st),
-        quoted_tweet_id=str(quote.get("id")) if quote.get("id") else None,
+        quoted_tweet_id=_id(quote.get("id")),
         likes=_int(st.get("likes")),
         replies=_int(st.get("replies")),
         reposts=_int(st.get("reposts") if st.get("reposts") is not None else st.get("retweets")),
@@ -430,7 +432,7 @@ async def vx_tweet(http: httpx.AsyncClient, tweet_id: str) -> TweetData | None:
 
 def _vx_status(j: dict[str, Any], tweet_id: str) -> TweetData:
     return TweetData(
-        id=str(j.get("tweetID") or tweet_id),
+        id=_id(j.get("tweetID")) or tweet_id,
         status="ok",
         source="vxtwitter",
         text=j.get("text"),
@@ -440,9 +442,7 @@ def _vx_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         media_count=len(j.get("mediaURLs") or []),
         media_urls=_vx_media(j),
         media=_vx_media_items(j),
-        quoted_tweet_id=(j.get("qrt") or {}).get("tweetID")
-        if isinstance(j.get("qrt"), dict)
-        else None,
+        quoted_tweet_id=_id(j["qrt"].get("tweetID")) if isinstance(j.get("qrt"), dict) else None,
         likes=_int(j.get("likes")),
         replies=_int(j.get("replies")),
         reposts=_int(j.get("retweets")),
@@ -491,7 +491,7 @@ def _synd_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         vt = "legacy"
     q = j.get("quoted_tweet") or {}
     return TweetData(
-        id=str(j.get("id_str") or tweet_id),
+        id=_id(j.get("id_str")) or tweet_id,
         status="ok",
         source="syndication",
         text=j.get("text"),
@@ -503,7 +503,7 @@ def _synd_status(j: dict[str, Any], tweet_id: str) -> TweetData:
         media_count=len(j.get("mediaDetails") or []),
         media_urls=_synd_media(j),
         media=_synd_media_items(j),
-        quoted_tweet_id=q.get("id_str"),
+        quoted_tweet_id=_id(q.get("id_str")),
         likes=_int(j.get("favorite_count")),
         replies=_int(j.get("conversation_count")),
         possibly_sensitive=j.get("possibly_sensitive"),
@@ -584,7 +584,7 @@ async def paid_tweet(http: httpx.AsyncClient, tweet_id: str, api_key: str) -> Tw
     out = _paid_status(tweets[0], tweet_id)
     q = tweets[0].get("quoted_tweet")
     if isinstance(q, dict) and q.get("text"):
-        out.quoted = _paid_status(q, str(q.get("id") or ""))
+        out.quoted = _paid_status(q, _id(q.get("id")) or "")
         out.quoted_tweet_id = out.quoted_tweet_id or out.quoted.id or None
     return out
 
@@ -592,7 +592,7 @@ async def paid_tweet(http: httpx.AsyncClient, tweet_id: str, api_key: str) -> Tw
 def _paid_status(t: dict[str, Any], tweet_id: str) -> TweetData:
     au = t.get("author") or {}
     return TweetData(
-        id=str(t.get("id") or tweet_id),
+        id=_id(t.get("id")) or tweet_id,
         status="ok",
         source="twitterapi_io",
         text=t.get("text"),

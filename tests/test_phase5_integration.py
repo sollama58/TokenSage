@@ -173,6 +173,9 @@ async def test_invalid_callback_url_is_rejected(
             r = await c.post("/v1/tokens:batch", json={"cas": [MINT], "callback_url": bad})
             assert r.status_code == 400, (bad, r.text)
             assert r.json()["error"]["code"] == "invalid_callback_url"
+            # never echoes what the host resolved to (an internal-DNS oracle)
+            assert "127.0.0.1" not in r.json()["error"]["message"] or bad == "https://127.0.0.1/x"
+            assert "resolves" not in r.json()["error"]["message"]
     conn = await asyncpg.connect(migrated_db)
     try:
         assert await conn.fetchval("select count(*) from job") == 0
