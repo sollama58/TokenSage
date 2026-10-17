@@ -114,7 +114,9 @@ newest analysis at each depth (pair tokens and lineage originals are read back f
 copycat window count these rows, so keep it at or above `data/meta.yaml` `history_days` and
 `COPYCAT_WINDOW_DAYS`) unless the token was read within the detail horizon, and once a day the caches keyed by something other than a mint
 (`image` rows no metadata points at, `x_tweet`, `x_profile`, `x_profile_history`, `x_media`,
-`pair_token`, `fee_recipient`) on the 30-day horizon from their fetch time. `0` turns a horizon
+`pair_token`, `fee_recipient`) on the 30-day horizon from their fetch time. Every analysis is
+condensed after `ANALYSIS_CONDENSE_DAYS` (7): its evidence list and market snapshot go, and a
+basic read's `x`, `image` and `trend` blocks too, with a `condensed:` caveat. `0` turns a horizon
 off. `GET /admin/v1/status` reports the database size and its largest tables; Render's disk is
 the default 15 GB (see `render.yaml`).
 

@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     # from their fetch time. 0 turns a horizon off.
     token_detail_retention_days: int = 30
     token_retention_days: int = 90
+    # Every analysis is condensed once it is this old (TrenchScanner's pattern: a bug
+    # report's screenshot goes after a week, the report stays): its evidence list and market
+    # snapshot are dropped, and a basic read's x, image and trend blocks too, about 60% of
+    # a stored read. What later reads use stays: raw, normalized, referent, categories,
+    # lineage and copy_of (pair tokens, lineage originals), and a full read's x, image and
+    # trend (/v1/tokens:now). A read this old is stale on every max_age, so a request re-runs
+    # it. 0 turns it off.
+    analysis_condense_days: int = 7
 
     # --- behaviour flags ---
     accept_non_pump: bool = True
