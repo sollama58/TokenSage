@@ -26,7 +26,18 @@ MIN_ROWS = 1000  # fewer rows than this is a broken refresh, not a gazetteer
 # query service: keep the old rows rather than shrink the gazetteer.
 MIN_KEEP_SHARE = 0.6
 
-_lock = asyncio.Lock()
+_lock_slot: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
+
+
+def _lock() -> asyncio.Lock:
+    """The rebuild lock, one per event loop (a lock is bound to the loop that first waits on it)."""
+    global _lock_slot
+    loop = asyncio.get_running_loop()
+    if _lock_slot is None or _lock_slot[0] is not loop:
+        _lock_slot = (loop, asyncio.Lock())
+    return _lock_slot[1]
+
+
 _cache: tuple[float, str, Gazetteer] | None = None
 
 
@@ -37,7 +48,7 @@ async def current(conn: asyncpg.Connection) -> Gazetteer:
     now = time.monotonic()
     if _cache and now - _cache[0] < CHECK_EVERY_S:
         return _cache[2]
-    async with _lock:
+    async with _lock():
         if _cache and now - _cache[0] < CHECK_EVERY_S:
             return _cache[2]
         row = await conn.fetchrow(
