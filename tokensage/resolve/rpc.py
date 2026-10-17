@@ -33,7 +33,7 @@ class SolanaRpc:
         self.commitment = commitment
         self._id = 0
 
-    async def call(self, method: str, params: list[Any]) -> Any:
+    async def call(self, method: str, params: list[Any] | dict[str, Any]) -> Any:
         """One JSON-RPC call, metered under solana_rpc with its Helius credit cost. A call
         counts as billed when the provider answered it (a result or a JSON-RPC error); HTTP
         errors, 429s and transport errors are counted as calls but not as credits."""
@@ -58,7 +58,7 @@ class SolanaRpc:
                 credits=metrics.credits_for(method) if billed else 0,
             )
 
-    async def _call(self, method: str, params: list[Any]) -> Any:
+    async def _call(self, method: str, params: list[Any] | dict[str, Any]) -> Any:
         self._id += 1
         body = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
         try:
@@ -116,11 +116,16 @@ class SolanaRpc:
         return value
 
     async def get_asset(self, mint: str) -> dict | None:
-        """DAS getAsset (Helius and some others). Returns None when unsupported."""
+        """DAS getAsset (Helius and some others). Returns None when unsupported.
+
+        DAS takes named params (an object), not a positional list: Helius answered the list
+        form with -32602 "invalid type: map, expected a string" on every call, each one billed
+        and each failing its analyze job. Any JSON-RPC error is a fallback lookup's miss, not a
+        reason to fail the job; transport errors and 429s still raise so the job is retried."""
         try:
-            return await self.call("getAsset", [{"id": mint}])
+            return await self.call("getAsset", {"id": mint})
         except RpcError as e:
-            if e.code == -32601 or not e.retryable:
+            if e.code is not None or not e.retryable:
                 return None
             raise
 

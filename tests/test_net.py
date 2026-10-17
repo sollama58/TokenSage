@@ -155,6 +155,18 @@ async def test_fetch_ipfs_falls_back_to_second_gateway() -> None:
 
 
 @respx.mock
+async def test_fetch_ipfs_skips_a_gateway_that_answered_429() -> None:
+    cid = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
+    gw1 = respx.get(f"{GW1}/ipfs/{cid}").mock(return_value=httpx.Response(429))
+    respx.get(f"{GW2}/ipfs/{cid}").mock(return_value=httpx.Response(200, content=b"{}"))
+    async with httpx.AsyncClient() as c:
+        await fetch_ipfs(c, IpfsRef(cid), [GW1, GW2], max_bytes=100, timeout=5, stagger_s=0.01)
+        f = await fetch_ipfs(c, IpfsRef(cid), [GW1, GW2], max_bytes=100, timeout=5, stagger_s=0.01)
+    assert f.url.startswith(GW2)
+    assert gw1.call_count == 1  # the second race left the throttled gateway out
+
+
+@respx.mock
 async def test_fetch_ipfs_all_fail_is_retryable() -> None:
     cid = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
     respx.get(url__regex=r"https://gw[12]\.test/.*").mock(return_value=httpx.Response(504))

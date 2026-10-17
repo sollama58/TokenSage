@@ -34,7 +34,7 @@ log = structlog.get_logger("now")
 HEAT_KEY = "heat:"  # lookup_cache: a story's heat, shared by every coin on it
 HEAT_TTL = timedelta(minutes=5)
 HEAT_STALE_MAX = 2 * HEAT_TTL  # a failed refresh falls back to cached heat only this young
-HEAT_FAILED_TTL = timedelta(minutes=1)  # retry a failed or rate-limited lookup soon
+HEAT_FAILED_TTL = timedelta(minutes=3)  # retry a failed or rate-limited lookup soon
 # a lineage original counts as the story only for these kinds: an "original" has none
 LINEAGE_STORY_KINDS = ("early_copy", "copy", "late_copy", "reference")
 MIN_STORY_LEN = 3
@@ -304,7 +304,12 @@ async def story_heat(
             # a coin that leads its own story finds its mint in leader.mint
             heat, lead = heat_from_pools(pools, story, kind, story_mint)
             if lead is not None and heat.leader is not None and lead.pool:
-                peak = await geckoterminal.pool_peak(http, lead.pool)
+                # A 429 on the peak alone keeps the search's heat, without the peak timing;
+                # it used to throw the paid-for search away.
+                try:
+                    peak = await geckoterminal.pool_peak(http, lead.pool)
+                except geckoterminal.RateLimited:
+                    peak = None
                 if peak is not None:
                     heat.leader.peak_minutes_ago = peak.minutes_ago
                     heat.leader.from_peak_pct = peak.from_peak_pct

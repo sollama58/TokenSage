@@ -639,6 +639,9 @@ async def signals(
                from analysis a,
                     jsonb_array_elements(coalesce(a.doc->'trend'->'sources', '[]'::jsonb)) src
                where a.created_at > now() - make_interval(hours => $1)
+                 -- Only full reads carry a trend block; depth is in analysis_recent_idx's
+                 -- INCLUDE, so basic rows are skipped before their documents are read.
+                 and a.depth = 'full'
                group by 1, 2 order by 1, 2""",
             hours,
         )

@@ -240,7 +240,11 @@ async def status(request: Request, response: Response) -> StatusResponse:
                                              filter (where status='pending'
                                                      and run_after <= now()))
                    as oldest_pending_s
-               from job"""
+               from job
+               -- Every count above is of live jobs or ones finished in the last day; without
+               -- this the read was a scan of the whole 7-day job table (5-12 s in production).
+               where status in ('pending', 'running')
+                  or finished_at > now() - interval '1 day'"""
         )
         sources = await conn.fetch("select * from source_health order by source")
         use = await conn.fetch(
