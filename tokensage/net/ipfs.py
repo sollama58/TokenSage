@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -52,6 +53,19 @@ def gateway_urls(ref: IpfsRef, gateways: Sequence[str]) -> list[str]:
     return [f"{g.rstrip('/')}/ipfs/{ref.cid}{ref.path}" for g in gateways]
 
 
+# A gateway that answered 429 is left out of races for
+# this long: the race used to start it again on the next fetch and draw another 429 - 9.5 k of
+# 27 k IPFS calls a day were rate-limited (audit 2026-10-17).
+GATEWAY_COOLDOWN_S = 60.0
+_gateway_cooldown: dict[str, float] = {}
+
+
+def _usable_gateways(gateways: Sequence[str], now: float) -> list[str]:
+    """The gateways not cooling down, in order; all of them when every one is."""
+    ok = [g for g in gateways if _gateway_cooldown.get(g, 0.0) <= now]
+    return ok or list(gateways)
+
+
 async def fetch_ipfs(
     client: httpx.AsyncClient,
     ref: IpfsRef,
@@ -67,14 +81,20 @@ async def fetch_ipfs(
     still running. First success wins; the rest are cancelled. With `overall_s`, the whole
     race gives up after that long (retryable): each gateway's own `timeout` otherwise let a
     CID no gateway has yet hold the caller for the last start plus a full timeout."""
-    urls = gateway_urls(ref, gateways)
+    usable = _usable_gateways(gateways, time.monotonic())
+    urls = gateway_urls(ref, usable)
     if not urls:
         raise FetchError("no gateways configured", retryable=False)
     errors: list[str] = []
     tasks: list[asyncio.Task[Fetched]] = []
 
-    async def one(u: str) -> Fetched:
-        return await safe_get(client, u, max_bytes=max_bytes, timeout=timeout, accept=accept)
+    async def one(gateway: str, u: str) -> Fetched:
+        try:
+            return await safe_get(client, u, max_bytes=max_bytes, timeout=timeout, accept=accept)
+        except FetchError as e:
+            if e.status == 429:
+                _gateway_cooldown[gateway] = time.monotonic() + GATEWAY_COOLDOWN_S
+            raise
 
     loop = asyncio.get_running_loop()
     give_up = None if overall_s is None else loop.time() + overall_s
@@ -87,7 +107,7 @@ async def fetch_ipfs(
                 errors.append(f"no gateway answered within {overall_s:g}s")
                 break
             if idx < len(urls):
-                t = asyncio.create_task(one(urls[idx]))
+                t = asyncio.create_task(one(usable[idx], urls[idx]))
                 tasks.append(t)
                 pending.add(t)
                 idx += 1

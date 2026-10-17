@@ -176,6 +176,7 @@ async def test_tokens_now_end_to_end(client: httpx.AsyncClient, migrated_db: str
 
     fulldepth._trend_cache = None
     geckoterminal._calls.clear()
+    geckoterminal._cooldown_until = 0.0
     conn = await asyncpg.connect(migrated_db)
     try:
         await conn.execute("delete from lookup_cache where key like 'now:%' or key like 'heat:%'")
@@ -232,3 +233,16 @@ async def test_tokens_now_without_a_full_read(client: httpx.AsyncClient, migrate
         "story_heat": None,
         "error": "no_full_read",
     }
+
+
+@respx.mock
+async def test_geckoterminal_cools_down_after_a_429() -> None:
+    route = respx.get(url__startswith="https://api.geckoterminal.com/").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "30"})
+    )
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(geckoterminal.RateLimited):
+            await geckoterminal.search_pools(http, "moo deng")
+        with pytest.raises(geckoterminal.RateLimited):
+            await geckoterminal.search_pools(http, "moo deng")
+    assert route.call_count == 1  # the second lookup never left the process

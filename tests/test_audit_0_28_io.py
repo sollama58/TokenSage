@@ -504,3 +504,41 @@ async def test_callback_delivery_reads_only_a_few_kb_and_logs_no_url() -> None:
     delivered = [e for e in logs if e["event"] == "callback.delivered"]
     assert delivered and delivered[0]["host"] == "consumer.example"
     assert "s3cret" not in json.dumps(delivered, default=str)
+
+
+@respx.mock
+async def test_get_asset_sends_named_params_and_misses_on_rpc_error() -> None:
+    """DAS getAsset takes an object; the list form was answered -32602 on every call and the
+    error failed the analyze job. A JSON-RPC error is now a miss, not a job failure."""
+    sent: list[object] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        sent.append(body["params"])
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": body["id"],
+                "error": {"code": -32602, "message": "invalid type: map, expected a string"},
+            },
+        )
+
+    respx.post(RPC).mock(side_effect=handle)
+    async with httpx.AsyncClient() as http:
+        assert await SolanaRpc(RPC, http).get_asset("MintA") is None
+    assert sent == [{"id": "MintA"}]
+
+
+@respx.mock
+async def test_pumpfun_search_404_turns_the_route_off() -> None:
+    from tokensage.net.breaker import breaker
+
+    route = respx.get(url__startswith=lookups.PUMP_SEARCH).mock(
+        return_value=httpx.Response(404, json={"message": "Cannot GET /coins/search"})
+    )
+    async with httpx.AsyncClient() as http:
+        assert await lookups.pumpfun_search(http, "pepe") == []
+        assert await lookups.pumpfun_search(http, "doge") == []
+    assert route.call_count == 1
+    assert not breaker.allow("pumpfun_search")

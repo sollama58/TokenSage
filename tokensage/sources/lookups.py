@@ -17,6 +17,8 @@ from tokensage.net.breaker import breaker
 log = structlog.get_logger("lookups")
 
 PUMP_SEARCH = "https://frontend-api-v3.pump.fun/coins/search"
+# How long a 404 from the search route keeps it off (see pumpfun_search).
+PUMP_SEARCH_GONE_S = 6 * 3600.0
 DEX_SEARCH = "https://api.dexscreener.com/latest/dex/search"
 
 
@@ -47,6 +49,12 @@ async def pumpfun_search(
             headers={"Origin": "https://pump.fun", "Accept": "application/json"},
             timeout=5.0,
         )
+        if r.status_code == 404:
+            # The route itself is gone ("Cannot GET /coins/search", seen 2026-10-17), not the
+            # term: probing it every breaker cooldown was ~720 failed calls a day.
+            breaker.open_for(src, PUMP_SEARCH_GONE_S)
+            log.warning("lookups.pumpfun_search_gone", status=404)
+            return []
         if r.status_code != 200:
             breaker.failure(src)
             return []
@@ -84,6 +92,12 @@ async def dexscreener_search(http: httpx.AsyncClient, term: str) -> list[SameNam
         return []
     try:
         r = await http.get(DEX_SEARCH, params={"q": term}, timeout=5.0)
+        if r.status_code == 404:
+            # The route itself is gone ("Cannot GET /coins/search", seen 2026-10-17), not the
+            # term: probing it every breaker cooldown was ~720 failed calls a day.
+            breaker.open_for(src, PUMP_SEARCH_GONE_S)
+            log.warning("lookups.pumpfun_search_gone", status=404)
+            return []
         if r.status_code != 200:
             breaker.failure(src)
             return []

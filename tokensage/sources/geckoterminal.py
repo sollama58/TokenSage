@@ -152,13 +152,30 @@ class RateLimited(Exception):
 
 
 # The free tier allows about 30 calls a minute per IP; the story-heat lookups keep under
-# this many in any 60 s so the daily top-volume pull still gets through.
-HEAT_CALLS_PER_MIN = 20
+# this many in any 60 s so the daily top-volume pull still gets through. From Render's egress
+# the real allowance is far lower: at 20 a minute 58% of calls came back 429 (audit 2026-10-17).
+HEAT_CALLS_PER_MIN = 10
+# After a 429 no call goes out until this passes (Retry-After, else COOLDOWN_S): the next lookup
+# used to call again at once and draw another 429.
+COOLDOWN_S = 60.0
+COOLDOWN_MAX_S = 300.0
 _calls: list[float] = []
+_cooldown_until = 0.0
+
+
+def _start_cooldown(retry_after: str | None) -> None:
+    global _cooldown_until
+    try:
+        wait = float(retry_after) if retry_after else COOLDOWN_S
+    except ValueError:
+        wait = COOLDOWN_S
+    _cooldown_until = time.monotonic() + min(max(wait, 1.0), COOLDOWN_MAX_S)
 
 
 def _spend() -> None:
     now = time.monotonic()
+    if now < _cooldown_until:
+        raise RateLimited("cooling down after a 429")
     while _calls and now - _calls[0] >= 60:
         _calls.pop(0)
     if len(_calls) >= HEAT_CALLS_PER_MIN:
@@ -181,6 +198,7 @@ async def _get(http: httpx.AsyncClient, path: str, params: dict) -> dict | None:
         log.info("geckoterminal.error", error=str(e)[:120])
         return None
     if r.status_code == 429:
+        _start_cooldown(r.headers.get("retry-after"))
         raise RateLimited("429")
     if r.status_code != 200:
         if r.status_code != 404:

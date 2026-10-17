@@ -31,6 +31,13 @@ class CircuitBreaker:
         # closed == absent: healthy hosts (attacker-chosen ones included) leave no entry
         self.states.pop(source, None)
 
+    def open_for(self, source: str, seconds: float) -> None:
+        """Open the breaker now for `seconds`, whatever the failure count: for an answer that
+        says the route is gone (a 404 from a fixed API path), not a passing failure."""
+        st = self.states.setdefault(source, _State())
+        st.failures = max(st.failures, self.threshold)
+        st.open_until = time.monotonic() + seconds
+
     def failure(self, source: str) -> bool:
         """Record a failure; True if the breaker just opened."""
         if source not in self.states and len(self.states) >= self.MAX_SOURCES:

@@ -63,6 +63,17 @@ def _closed_breakers() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_upstream_cooldowns() -> None:
+    """A 429 a previous test provoked must not leave an IPFS gateway or GeckoTerminal cooling
+    down for the next."""
+    from tokensage.net import ipfs
+    from tokensage.sources import geckoterminal
+
+    ipfs._gateway_cooldown.clear()
+    geckoterminal._cooldown_until = 0.0
+
+
+@pytest.fixture(autouse=True)
 def _empty_image_memo() -> None:
     """Every test downloads its own logos: a previous test's shared download (or its failure)
     must not stand in for the fetch a test counts."""

@@ -148,7 +148,9 @@ class Settings(BaseSettings):
     # up after ipfs_race_timeout_s. A CID no gateway has yet (a launch seconds old) used to hold
     # an analyzer slot ~14.5 s for the metadata and again for the image; the metadata retry
     # schedule (resolve/metadata.py RETRY_SCHEDULE_S) asks again later.
-    ipfs_stagger_s: float = 0.5
+    # 0.5 s was about the first gateway's average answer (489 ms), so half the fetches also
+    # started the public gateways, which throttle (audit 2026-10-17).
+    ipfs_stagger_s: float = 1.0
     ipfs_race_timeout_s: float = 7.0
     metadata_max_bytes: int = 64 * 1024
     image_max_bytes: int = 5 * 1024 * 1024
