@@ -85,11 +85,15 @@ class Settings(BaseSettings):
     # token_detail_retention_days, the slim token row itself (name, symbol, creator,
     # created_at, logo hash) and its x_ref after token_retention_days. The row is what the
     # current-meta baseline (data/meta.yaml history_days, 90) and the copycat window
-    # (copycat_window_days, 30) count, so token_retention_days must stay at or above both;
-    # the heavy rows feed nothing older than a week (token_read's referent waves) and are
-    # re-read on demand. The caches keyed by something other than the mint (image, x_tweet,
-    # x_profile, x_profile_history, x_media, pair_token, fee_recipient) go on the detail
-    # horizon too, from their fetch time. 0 turns a horizon off.
+    # (copycat_window_days, 30) count, so token_retention_days must stay at or above both.
+    # Each mint keeps its newest analysis at each depth past the detail horizon: pair tokens
+    # (resolve/pair.py) and lineage originals (analyzer._prior_reads, any age for top-volume
+    # coins) are read back from it, and /v1/tokens:now needs the full read. A token with an
+    # analysis newer than token_detail_retention_days (read recently) is exempt from the row
+    # horizon, however old its launch. The other heavy rows are re-read on demand. The
+    # caches keyed by something other than the mint (image, x_tweet, x_profile,
+    # x_profile_history, x_media, pair_token, fee_recipient) go on the detail horizon too,
+    # from their fetch time. 0 turns a horizon off.
     token_detail_retention_days: int = 30
     token_retention_days: int = 90
 

@@ -58,7 +58,7 @@ def _verb(score: float) -> str:
     if score >= 0.8:
         return "refers to"
     if score >= 0.6:
-        return "most likely refers to"
+        return "probably refers to"
     return "may refer to"
 
 

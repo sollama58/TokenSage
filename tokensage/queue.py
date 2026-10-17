@@ -180,6 +180,7 @@ async def pending_count(conn: asyncpg.Connection) -> int:
 # crash, a restart mid-job) as many times as a surviving worker may fail, so it is failed
 # instead of being re-run every lease period for ever.
 WORKER_DIED = "worker died"
+WORKER_DIED_CODE = "worker_died"  # its error_code, so the batch answer says "worker_died: ..."
 
 
 async def claim(
@@ -226,11 +227,12 @@ async def _fail_exhausted(conn: asyncpg.Connection, max_attempts: int) -> list[i
     each time); waiters and callbacks are released as for any final failure."""
     rows = await conn.fetch(
         """update job set status='failed', finished_at=now(), locked_until=null,
-             lease_token=null, last_error=$2
+             lease_token=null, last_error=$2, error_code=$3
            where status='running' and locked_until < now() and attempts >= $1
            returning id""",
         max_attempts,
         WORKER_DIED,
+        WORKER_DIED_CODE,
     )
     ids = [r["id"] for r in rows]
     for job_id in ids:

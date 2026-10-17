@@ -108,10 +108,11 @@ uv run python scripts/load_test.py --base http://127.0.0.1:10000 --key <key> --c
 
 The hourly `tokensage-maintenance` cron (`tokensage/jobs/maintenance.py`) keeps the database
 bounded (database audit 2026-10-16): a token's heavy rows (`analysis`, `token_metadata`,
-`token_read`, `token_market`) go after `TOKEN_DETAIL_RETENTION_DAYS` (30), the slim `token` row
-and its `x_ref` after `TOKEN_RETENTION_DAYS` (90; the current-meta baseline and the copycat
-window count these rows, so keep it at or above `data/meta.yaml` `history_days` and
-`COPYCAT_WINDOW_DAYS`), and once a day the caches keyed by something other than a mint
+`token_read`, `token_market`) go after `TOKEN_DETAIL_RETENTION_DAYS` (30), except each mint's
+newest analysis at each depth (pair tokens and lineage originals are read back from it), the slim
+`token` row and its `x_ref` after `TOKEN_RETENTION_DAYS` (90; the current-meta baseline and the
+copycat window count these rows, so keep it at or above `data/meta.yaml` `history_days` and
+`COPYCAT_WINDOW_DAYS`) unless the token was read within the detail horizon, and once a day the caches keyed by something other than a mint
 (`image` rows no metadata points at, `x_tweet`, `x_profile`, `x_profile_history`, `x_media`,
 `pair_token`, `fee_recipient`) on the 30-day horizon from their fetch time. `0` turns a horizon
 off. `GET /admin/v1/status` reports the database size and its largest tables; Render's disk is

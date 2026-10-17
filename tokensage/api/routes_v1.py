@@ -269,11 +269,21 @@ async def batch(
                 analysis=res.analysis,
                 job_id=res.job_id,
                 # a failed analysis: say why, as the single-CA response does in `errors`
-                error=res.errors[0].detail if res.status == "failed" and res.errors else None,
+                error=_batch_error(res) if res.status == "failed" else None,
             )
         )
     response.headers.update(await service.quota_headers(request.app.state.pool, key))
     return BatchResponse(items=items, request_id=request.state.request_id)
+
+
+def _batch_error(res: TokenResponse) -> str | None:
+    """A failed item's error, "<code>: <detail>" when the job has a code (worker_died, ...),
+    the shape /v1/jobs uses, so a client can match the code by prefix."""
+    if not res.errors:
+        return None
+    e = res.errors[0]
+    detail = e.detail or e.code
+    return f"{e.code}: {detail}" if e.code != "failed" else detail
 
 
 @router.post(

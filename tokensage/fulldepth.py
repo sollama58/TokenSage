@@ -41,8 +41,10 @@ MAX_NEWS_LOOKUPS = 2
 
 # ----------------------------------------------------------------- single flight
 
-_inflight_locks: dict[str, asyncio.Lock] = {}
-_inflight_refs: dict[str, int] = {}
+# keyed by event loop too: a lock is bound to its loop, and one a closed loop left held must
+# not block (or break) the same key on a later loop
+_inflight_locks: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Lock] = {}
+_inflight_refs: dict[tuple[asyncio.AbstractEventLoop, str], int] = {}
 
 
 @asynccontextmanager
@@ -50,16 +52,17 @@ async def _single_flight(key: str) -> AsyncIterator[None]:
     """Serialise the read-fetch-upsert of one cache key inside this process: the 8 worker
     slots analysing a copycat wave all want the same tweet / profile / search at once, and
     only the first should fetch (and pay); the others then find it in the cache."""
-    lock = _inflight_locks.setdefault(key, asyncio.Lock())
-    _inflight_refs[key] = _inflight_refs.get(key, 0) + 1
+    slot = (asyncio.get_running_loop(), key)
+    lock = _inflight_locks.setdefault(slot, asyncio.Lock())
+    _inflight_refs[slot] = _inflight_refs.get(slot, 0) + 1
     try:
         async with lock:
             yield
     finally:
-        _inflight_refs[key] -= 1
-        if _inflight_refs[key] <= 0:
-            _inflight_refs.pop(key, None)
-            _inflight_locks.pop(key, None)
+        _inflight_refs[slot] -= 1
+        if _inflight_refs[slot] <= 0:
+            _inflight_refs.pop(slot, None)
+            _inflight_locks.pop(slot, None)
 
 
 # ----------------------------------------------------------------- one connection, shared
@@ -463,7 +466,20 @@ async def persist_vision(
 
 
 _trend_cache: tuple[float, trends.TrendIndex] | None = None
-_trend_lock = asyncio.Lock()
+_trend_lock_slot: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
+
+
+def _trend_lock() -> asyncio.Lock:
+    """The trend-index lock, one per event loop: a lock is bound to its loop, and one left held
+    by a loop that closed mid-rebuild (a test's, or a restarted worker's) would otherwise make
+    every later loop's acquire fail."""
+    global _trend_lock_slot
+    loop = asyncio.get_running_loop()
+    if _trend_lock_slot is None or _trend_lock_slot[0] is not loop:
+        _trend_lock_slot = (loop, asyncio.Lock())
+    return _trend_lock_slot[1]
+
+
 GTRENDS_KEY = "gtrends:seen"  # lookup_cache row: the Google Trends searches seen lately
 GTRENDS_KEEP = timedelta(hours=48)
 GTRENDS_POLL = timedelta(minutes=9)  # just under the index TTL: one poll per rebuild
@@ -489,9 +505,9 @@ async def trend_index(
         return _trend_cache[1]
     if _trend_cache:
         # expired: serve the old index unless nobody is rebuilding it yet
-        if _trend_lock.locked():
+        if _trend_lock().locked():
             return _trend_cache[1]
-    async with _trend_lock:
+    async with _trend_lock():
         # the first jobs after a worker start all arrive here with no index: one builds it
         if _trend_cache and time.monotonic() - _trend_cache[0] < TREND_INDEX_TTL_S:
             return _trend_cache[1]
@@ -513,7 +529,7 @@ async def refresh_trend_index(pool: asyncpg.Pool, http: httpx.AsyncClient) -> No
             if age is None or age >= TREND_INDEX_TTL_S / 2:
                 try:
                     # the connection first: jobs waiting on the lock at a start hold theirs
-                    async with pool.acquire() as conn, _trend_lock:
+                    async with pool.acquire() as conn, _trend_lock():
                         await _build_trend_index(conn, http)
                 except asyncio.CancelledError:
                     raise
