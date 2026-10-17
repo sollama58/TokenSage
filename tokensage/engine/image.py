@@ -18,6 +18,10 @@ MAX_PIXELS = 16_000_000
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+# The only decoders attacker bytes reach (logos, X media, CoinGecko images): Pillow otherwise
+# tries every plugin it has (PSD, TGA, SGI, EPS...) on whatever a URL returns.
+SAFE_FORMATS = ("PNG", "JPEG", "GIF", "WEBP", "AVIF")
+
 _CSS = {
     "black": (0, 0, 0),
     "white": (255, 255, 255),
@@ -138,7 +142,7 @@ def _frame(img: Image.Image, index: int) -> Image.Image:
 
 
 def features(data: bytes) -> ImageFeatures:
-    with Image.open(io.BytesIO(data)) as img:
+    with Image.open(io.BytesIO(data), formats=SAFE_FORMATS) as img:
         w, h = img.size
         if w * h > MAX_PIXELS:
             raise ValueError("image too large")

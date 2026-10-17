@@ -207,6 +207,8 @@ async def main() -> None:
     )
     async with httpx.AsyncClient(
         headers={"User-Agent": settings.http_user_agent},
+        # never through an env proxy: it would resolve hosts past safe_fetch's IP checks
+        trust_env=False,
         follow_redirects=False,
         transport=metrics.MeteredTransport(),
     ) as http:

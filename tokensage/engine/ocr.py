@@ -122,9 +122,9 @@ def _read(data: bytes) -> tuple[list[OcrLine], str | None]:
     if eng is None:
         return [], _failed or "ocr unavailable"
     try:
-        with Image.open(io.BytesIO(data)) as img:
-            from tokensage.engine.image import MAX_PIXELS, to_rgb
+        from tokensage.engine.image import MAX_PIXELS, SAFE_FORMATS, to_rgb
 
+        with Image.open(io.BytesIO(data), formats=SAFE_FORMATS) as img:
             if img.size[0] * img.size[1] > MAX_PIXELS:
                 return [], "image too large"
             try:

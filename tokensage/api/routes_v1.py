@@ -222,8 +222,12 @@ async def batch(
 
         try:
             cb = await callbacks.validate_callback_url(body.callback_url)
-        except (UnsafeUrl, FetchError) as e:
-            raise errors.ApiError(400, "invalid_callback_url", str(e)) from None
+        except (UnsafeUrl, FetchError):
+            # Generic on purpose: the guard's own message names the address a host resolved
+            # to, which would let a caller map internal DNS names.
+            raise errors.ApiError(
+                400, "invalid_callback_url", "callback_url must be a public https URL"
+            ) from None
     items: list[BatchItem] = []
     for entry in entries:
         raw = entry.ca

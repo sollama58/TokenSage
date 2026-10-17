@@ -157,6 +157,8 @@ class Context:
     def create(cls, settings: Settings) -> Context:
         http = httpx.AsyncClient(
             headers={"User-Agent": settings.http_user_agent},
+            # never through an env proxy: it would resolve hosts past safe_fetch's IP checks
+            trust_env=False,
             timeout=httpx.Timeout(
                 connect=settings.fetch_connect_timeout_s,
                 read=settings.fetch_total_timeout_s,

@@ -35,7 +35,11 @@ def parse_ipfs(url: str) -> IpfsRef | None:
     for rx in (_SCHEME_RE, _SUBDOMAIN_RE, _PATH_RE):
         m = rx.search(u)
         if m:
-            return IpfsRef(m.group("cid"), (m.group("rest") or "").rstrip("/"))
+            rest = (m.group("rest") or "").rstrip("/")
+            # no dot segments: the path is appended to our own gateways' URLs
+            if any(seg in (".", "..") for seg in rest.split("/")) or "%2e" in rest.lower():
+                return None
+            return IpfsRef(m.group("cid"), rest)
     return None
 
 
