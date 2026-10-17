@@ -1,5 +1,6 @@
-"""Cron entrypoint (hourly): requeue expired leases, prune old jobs, stale analyses, expired
-lookup_cache rows, and the token family past its retention (config.py, "retention")."""
+"""Cron entrypoint (hourly): requeue expired leases, prune old jobs and stale analyses,
+condense old analyses, prune expired lookup_cache rows and the token family past its
+retention (config.py, "retention")."""
 
 from __future__ import annotations
 
@@ -162,6 +163,86 @@ async def _prune_usage(conn: asyncpg.Connection) -> int:
             timeout=STEP_TIMEOUT_S,
         )
     )
+
+
+# Condensing (see Settings.analysis_condense_days): every analysis past that age loses the
+# parts no later read uses, behind the `analysis_condense` cursor (migration 0023) through
+# analysis.created_at, a bounded slice per run like the prunes above. The caveat marks a
+# condensed read, so a row is never rewritten twice, and tells a caller who gets one back
+# as a stale_analysis why its evidence is empty.
+CONDENSE_DROP = ["evidence", "market"]
+CONDENSE_DROP_BASIC = ["x", "image", "trend"]
+CONDENSED_CAVEAT = "condensed: evidence and market detail left out of this older read"
+
+
+async def _condense_batch(conn: asyncpg.Connection, days: int) -> int:
+    """Condense one batch past the cursor and move it. Returns the rows rewritten, or -1
+    when the cursor has caught up with the horizon."""
+    async with conn.transaction():
+        at = await conn.fetchval(
+            "select at from maintenance_cursor where name = 'analysis_condense' for update",
+            timeout=STEP_TIMEOUT_S,
+        )
+        if at is None:  # un-migrated: nothing to walk from
+            return -1
+        end = await conn.fetchval(
+            """select max(created_at) from (
+                 select created_at from analysis
+                 where created_at > $1 and created_at <= now() - make_interval(days => $2)
+                 order by created_at limit $3) b""",
+            at,
+            days,
+            PRUNE_BATCH,
+            timeout=STEP_TIMEOUT_S,
+        )
+        if end is None:
+            return -1
+        n = _count(
+            await conn.execute(
+                """update analysis set doc =
+                     (doc - $3::text[]
+                          - (case when depth = 'basic' then $4::text[] else '{}'::text[] end))
+                     || jsonb_build_object('caveats',
+                          coalesce(doc->'caveats', '[]'::jsonb) || to_jsonb($5::text))
+                   where created_at > $1 and created_at <= $2
+                     and not coalesce(doc->'caveats', '[]'::jsonb) ? $5""",
+                at,
+                end,
+                CONDENSE_DROP,
+                CONDENSE_DROP_BASIC,
+                CONDENSED_CAVEAT,
+                timeout=STEP_TIMEOUT_S,
+            )
+        )
+        await conn.execute(
+            "update maintenance_cursor set at = $1 where name = 'analysis_condense'",
+            end,
+            timeout=STEP_TIMEOUT_S,
+        )
+        return n
+
+
+async def _condense_analyses(conn: asyncpg.Connection) -> dict[str, Any] | None:
+    days = get_settings().analysis_condense_days
+    if days <= 0:
+        return None
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PRUNE_BUDGET_S
+    out: dict[str, Any] = {"condensed": 0, "batches": 0}
+    while loop.time() < deadline:
+        n = await _condense_batch(conn, days)
+        if n < 0:
+            break
+        out["condensed"] += n
+        out["batches"] += 1
+    lag = await conn.fetchval(
+        """select extract(epoch from now() - make_interval(days => $1) - at)
+           from maintenance_cursor where name = 'analysis_condense'""",
+        days,
+        timeout=STEP_TIMEOUT_S,
+    )
+    out["lag_s"] = _secs(lag)
+    return out
 
 
 # lookup_cache rows for one name or phrase (Google News, Bluesky, Wikipedia) are upserted on
@@ -434,6 +515,7 @@ STEPS: list[tuple[str, Callable[[asyncpg.Connection], Awaitable[Any]], bool]] = 
     ("requeued", _requeue, True),
     ("pruned_jobs", _prune_jobs, True),
     ("pruned_analyses", _prune_analyses, True),
+    ("condensed_analyses", _condense_analyses, True),
     ("pruned_usage_rows", _prune_usage, True),
     ("pruned_lookup_cache", _prune_lookup_cache, True),
     ("pruned_tokens", _prune_tokens, True),

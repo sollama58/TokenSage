@@ -24,12 +24,13 @@ envVarGroups:
         value: "1.00"
       - key: IPFS_GATEWAYS
         value: "https://pump.mypinata.cloud,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"
-      # Helius plan for the admin panel's credit gauge (/admin). Free: 1000000 and 10;
-      # Developer: 10000000 and 50. BILLING_DAY is the day of the month credits reset.
+      # Helius plan for the admin panel's credit gauge (/admin); nothing throttles on it.
+      # Free: 1000000 and 10; Developer: 10000000 and 50 (the plan since 2026-10-17).
+      # BILLING_DAY is the day of the month credits reset.
       - key: HELIUS_PLAN_CREDITS
-        value: "1000000"
+        value: "10000000"
       - key: HELIUS_RPS_LIMIT
-        value: "10"
+        value: "50"
       - key: HELIUS_BILLING_DAY
         value: "1"
 
@@ -132,9 +133,10 @@ databases:
   - name: tokensage-db
     plan: basic-256mb # 'free' expires after 30 days
     # Disk: Render's default 15 GB (no diskSizeGB here). Nothing was pruned until 2026-10-16
-    # (database audit, I1); the hourly maintenance now keeps a token's heavy rows 30 days and
-    # the slim token row 90 (TOKEN_DETAIL_RETENTION_DAYS, TOKEN_RETENTION_DAYS in config.py),
-    # which should settle well under 15 GB at today's read volume. The admin status reports
+    # (database audit, I1); the hourly maintenance now condenses every analysis after 7 days
+    # (about 60% of it), keeps a token's heavy rows 30 days and the slim token row 90
+    # (ANALYSIS_CONDENSE_DAYS, TOKEN_DETAIL_RETENTION_DAYS, TOKEN_RETENTION_DAYS in config.py),
+    # which should settle around 6-9 GB at the 2026-10-17 read volume. The admin status reports
     # the database size and its largest tables; raise diskSizeGB (a multiple of 5) or set
     # storageAutoscalingEnabled: true before it nears the disk.
     region: oregon

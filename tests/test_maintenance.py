@@ -3,6 +3,7 @@ depth without sweeping the whole table, and one failing step does not stop the o
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -334,3 +335,72 @@ async def test_cache_sweep_drops_orphan_images_and_expired_caches_once_a_day(
     assert keys == {"logo-live", "orphan-new"}
     assert await _mints(db, "pair_token") == {"pair-new"}
     assert await db.fetchval("select count(*) from x_profile_history") == 1
+
+
+@needs_db
+async def test_condense_strips_heavy_parts_of_old_reads_once(
+    db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await db.execute(
+        """update maintenance_cursor set at = now() - interval '1000 days'
+           where name = 'analysis_condense'"""
+    )
+    full = {
+        "mint": "m",
+        "summary": "s",
+        "raw": {"name": "Dog"},
+        "referent": {"label": "dog"},
+        "categories": [{"label": "animal", "confidence": 0.9}],
+        "lineage": {"original": "o"},
+        "evidence": [{"kind": "k"}],
+        "market": {"mc": 1},
+        "x": {"handle": "h"},
+        "image": {"ocr": ["x"]},
+        "trend": {"terms": []},
+        "caveats": ["partial: x"],
+    }
+    rows = [
+        ("old", 1, "basic", "10 days"),
+        ("old", 2, "full", "9 days"),
+        ("new", 1, "basic", "1 day"),
+    ]
+    for mint, v, depth, age in rows:
+        await db.execute("insert into token (mint) values ($1) on conflict do nothing", mint)
+        await db.execute(
+            """insert into analysis (mint, version, depth, doc, categories, flags, created_at)
+               values ($1, $2, $3, $4::jsonb, '{}', '{}', now() - $5::text::interval)""",
+            mint,
+            v,
+            depth,
+            json.dumps(full),
+            age,
+        )
+    monkeypatch.setattr(maintenance, "PRUNE_BATCH", 1)  # one row per batch
+
+    out = await maintenance._condense_analyses(db)
+    assert out is not None and out["condensed"] == 2
+    assert out["lag_s"] is not None and out["lag_s"] <= 2 * 86400 + 60
+
+    async def doc(mint: str, v: int) -> dict[str, Any]:
+        return json.loads(
+            await db.fetchval("select doc from analysis where mint=$1 and version=$2", mint, v)
+        )
+
+    basic, fullread, young = await doc("old", 1), await doc("old", 2), await doc("new", 1)
+    kept = {"mint", "summary", "raw", "referent", "categories", "lineage", "caveats"}
+    assert set(basic) == kept
+    assert set(fullread) == kept | {"x", "image", "trend"}  # what /v1/tokens:now reads
+    assert basic["caveats"] == ["partial: x", maintenance.CONDENSED_CAVEAT]
+    assert young == full
+    # a rerun finds nothing new, and a cursor put back rewrites nothing twice
+    assert (await maintenance._condense_analyses(db))["condensed"] == 0  # type: ignore[index]
+    await db.execute(
+        """update maintenance_cursor set at = now() - interval '1000 days'
+           where name = 'analysis_condense'"""
+    )
+    assert (await maintenance._condense_analyses(db))["condensed"] == 0  # type: ignore[index]
+    assert await doc("old", 1) == basic
+
+    monkeypatch.setenv("ANALYSIS_CONDENSE_DAYS", "0")
+    maintenance.get_settings.cache_clear()
+    assert await maintenance._condense_analyses(db) is None
