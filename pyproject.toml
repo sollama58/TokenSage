@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Explains what a pump.fun token means, given its contract address."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "MIT" }
+license = { text = "MIT with Commons Clause (no selling or paid-product use without permission); see LICENSE" }
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
