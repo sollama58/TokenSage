@@ -141,3 +141,7 @@ scripts/             smoke_test.py, export_openapi.py, load_test.py, fake_chain_
 tokensage/callbacks.py  signed webhook delivery for batch jobs
 tests/golden/        hand-written meaning cases the engine must satisfy
 ```
+
+## License
+
+Source-available under MIT with the Commons Clause and a paid-product condition: you may use, study and modify the code, but you may not sell it, or build it into any paid product or service, without our express written permission. See [LICENSE](LICENSE).
