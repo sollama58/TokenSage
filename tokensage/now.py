@@ -64,15 +64,28 @@ def _parse_dt(v: object) -> datetime | None:
         return None
 
 
-def _name_search_hits(doc: dict[str, Any]) -> list[trends.TrendHit]:
+# How long a name-search hit from the full read still counts in a refresh: the window each
+# search covers in the full read itself.
+_NAME_SEARCH_WINDOWS = {"news": fulldepth.NEWS_WINDOW, "bluesky": trends.BLUESKY_WINDOW}
+
+
+def _name_search_hits(doc: dict[str, Any], now: datetime | None = None) -> list[trends.TrendHit]:
     """The full read's Google News and Bluesky hits, from its trend block: the name searches
-    are not repeated, but what they found stays in the match as it was in the full read."""
+    are not repeated, but what they found stays in the match as it was in the full read, for as
+    long as the full read's own search window would still have found it. Past that a refresh
+    stamped "now" would report a days-old headline as trending (audit 2026-10-19). A hit with
+    no date of its own is dated by the read."""
+    now = now or datetime.now(UTC)
+    read_at = _parse_dt(doc.get("analyzed_at"))
     out: list[trends.TrendHit] = []
     for t in (doc.get("trend") or {}).get("terms") or []:
         if not isinstance(t, dict) or t.get("source") not in ("news", "bluesky"):
             continue
         term = str(t.get("term") or "")
         if not term:
+            continue
+        seen = _parse_dt(t.get("seen_at")) or read_at
+        if seen is not None and now - seen >= _NAME_SEARCH_WINDOWS[str(t["source"])]:
             continue
         if t["source"] == "bluesky":
             views = int(t.get("posts") or 0)

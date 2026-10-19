@@ -961,6 +961,7 @@ def build_document(
                     followers=xa.followers,
                     joined=xa.joined,
                     username_changes=xa.username_changes,
+                    as_of=xa.author_as_of,
                 )
             if xa.quoted is not None:
                 x.quoted = _quoted_out(xa.quoted, r.created_at)
