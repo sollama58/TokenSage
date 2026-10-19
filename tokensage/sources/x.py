@@ -117,9 +117,11 @@ class ProfileData:
     avatar_url: str | None = None
     banner_url: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+    # When this snapshot was read from X (set by the profile cache; not part of the snapshot).
+    fetched_at: datetime | None = None
 
     def to_json(self) -> dict[str, Any]:
-        d = {k: v for k, v in self.__dict__.items() if k != "raw"}
+        d = {k: v for k, v in self.__dict__.items() if k not in ("raw", "fetched_at")}
         if d.get("joined") is not None:
             d["joined"] = d["joined"].isoformat()
         return d

@@ -78,6 +78,27 @@ def test_fresh_trend_keeps_the_full_reads_name_search_hits() -> None:
     assert by["bluesky"].headline == "he did it"
 
 
+def test_fresh_trend_drops_name_search_hits_past_their_window() -> None:
+    """Audit 2026-10-19: a refresh re-added a three-day-old headline as trending now."""
+    idx = trends.TrendIndex([], load_knowledge())
+    old = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+    doc: dict[str, Any] = {
+        "raw": {"name": "Glasnow", "symbol": "GLAS"},
+        "trend": {
+            "terms": [
+                {"term": "Glasnow", "source": "news", "score": 1.0, "seen_at": old},
+                {"term": "Glasnow", "source": "bluesky", "posts": 40},
+            ]
+        },
+        "analyzed_at": (datetime.now(UTC) - timedelta(hours=30)).isoformat(),
+    }
+    # the dateless Bluesky hit is dated by the read, 30 h ago: past Bluesky's 24 h
+    assert not now.fresh_trend(doc, idx).matched
+    doc["analyzed_at"] = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    t = now.fresh_trend(doc, idx)
+    assert t.matched and {x.source for x in t.terms} == {"bluesky"}
+
+
 def test_fresh_trend_matches_every_stored_referent() -> None:
     idx = trends.TrendIndex([_term("Peanut the Squirrel")], load_knowledge())
     doc = {
@@ -171,3 +192,18 @@ async def test_tokens_now_respects_the_queue_and_the_daily_budget(
         assert r.status_code == status and r.json()["error"]["code"] == code
         assert "retry-after" in r.headers
         assert await _now_jobs(migrated_db) == 1
+
+
+def test_an_old_trend_index_reports_its_sources_stale() -> None:
+    """Audit 2026-10-19: failing rebuilds kept serving hours-old lists as "ok"."""
+    from tokensage import fulldepth
+
+    idx = trends.TrendIndex(
+        [],
+        load_knowledge(),
+        [trends.SourceStatus("x_trends", "ok"), trends.SourceStatus("wikipedia", "failed")],
+    )
+    assert fulldepth._aged(idx, fulldepth.TREND_INDEX_TTL_S) is idx
+    old = fulldepth._aged(idx, fulldepth.TREND_INDEX_STALE_S + 60)
+    assert [s.status for s in old.sources] == ["stale", "failed"]
+    assert [s.status for s in idx.sources] == ["ok", "failed"]

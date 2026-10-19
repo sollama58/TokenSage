@@ -4,6 +4,7 @@ news confirmation (guide §4.3, §5.8, §6.3). All database-aware; the engine st
 from __future__ import annotations
 
 import asyncio
+import copy
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
@@ -314,12 +315,14 @@ async def _profile_cached(
     )
     if row and row["snapshot"] and row["fetched_at"]:
         if datetime.now(UTC) - row["fetched_at"] < PROFILE_TTL:
-            return ProfileData.from_json(row["snapshot"])
+            return replace(ProfileData.from_json(row["snapshot"]), fetched_at=row["fetched_at"])
     p = await fetch_profile(http, handle)
     if p.status == "failed":
         if row and row["snapshot"]:
-            return ProfileData.from_json(row["snapshot"])  # stale beats nothing
+            # stale beats nothing; its read time goes out with it (x.author.as_of)
+            return replace(ProfileData.from_json(row["snapshot"]), fetched_at=row["fetched_at"])
         return p
+    p.fetched_at = datetime.now(UTC)
     key = p.user_id or f"handle:{handle.lower()}"
     prev = await conn.fetchrow("select handle, snapshot from x_profile where user_id=$1", key)
     # Work out renames before saving, so the stored snapshot (served from cache for 12 h)
@@ -502,16 +505,33 @@ async def trend_index(
     global _trend_cache
     now = time.monotonic()
     if _trend_cache and (_refresher_running or now - _trend_cache[0] < TREND_INDEX_TTL_S):
-        return _trend_cache[1]
+        return _aged(_trend_cache[1], now - _trend_cache[0])
     if _trend_cache:
         # expired: serve the old index unless nobody is rebuilding it yet
         if _trend_lock().locked():
-            return _trend_cache[1]
+            return _aged(_trend_cache[1], now - _trend_cache[0])
     async with _trend_lock():
         # the first jobs after a worker start all arrive here with no index: one builds it
         if _trend_cache and time.monotonic() - _trend_cache[0] < TREND_INDEX_TTL_S:
             return _trend_cache[1]
         return await _build_trend_index(conn, http)
+
+
+# An index this old is served with its sources marked stale: rebuilds have been failing, and
+# a source's status from build time ("ok") would otherwise vouch for lists hours old (audit
+# 2026-10-19).
+TREND_INDEX_STALE_S = 3 * TREND_INDEX_TTL_S
+
+
+def _aged(idx: trends.TrendIndex, age_s: float) -> trends.TrendIndex:
+    if age_s < TREND_INDEX_STALE_S or not any(s.status == "ok" for s in idx.sources):
+        return idx
+    old = copy.copy(idx)
+    detail = f"trend index not rebuilt for {int(age_s // 60)} min"
+    old.sources = [
+        replace(s, status="stale", detail=detail) if s.status == "ok" else s for s in idx.sources
+    ]
+    return old
 
 
 # Set while a worker's refresher keeps the index fresh (jobs then never rebuild an old one).
@@ -586,8 +606,8 @@ async def _with_history(
     keys = sorted({t.term.lower() for t in terms})
     rows = await conn.fetch(
         """select lower(term) as t, count(distinct day) as n from trend_term
-           where source = any($2::text[]) and day >= current_date - $3::int - 1
-             and day < current_date - 1 and lower(term) = any($1::text[])
+           where source = any($2::text[]) and day >= (now() at time zone 'utc')::date - $3::int - 1
+             and day < (now() at time zone 'utc')::date - 1 and lower(term) = any($1::text[])
            group by 1""",
         keys,
         list(HISTORY_SOURCES),
@@ -598,7 +618,8 @@ async def _with_history(
         r["source"]: int(r["n"])
         for r in await conn.fetch(
             """select source, count(distinct day) as n from trend_term
-               where day >= current_date - $1::int - 1 and day < current_date - 1
+               where day >= (now() at time zone 'utc')::date - $1::int - 1
+                 and day < (now() at time zone 'utc')::date - 1
                group by source""",
             HISTORY_DAYS,
         )

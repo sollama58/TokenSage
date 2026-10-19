@@ -34,6 +34,8 @@ class XAssessment:
     verified_type: str | None = None
     joined: datetime | None = None
     username_changes: int | None = None
+    # When the author's profile figures (followers, joined, renames) were read from X.
+    author_as_of: datetime | None = None
     fetch_source: str | None = None
     quoted: QuotedAssessment | None = None
     replied_to: QuotedAssessment | None = None  # the post the linked tweet replies to
@@ -118,6 +120,7 @@ def assess(
             a.joined = a.joined or profile.joined
             a.username_changes = profile.username_changes
             a.verified_type = a.verified_type or profile.verified_type
+            a.author_as_of = profile.fetched_at
         # A status URL whose handle differs from the post's author is not raised any more
         # (rules 0.35.0, TrenchScanner's call 2026-10-15): X ignores the handle in the URL, so
         # the fetched author is what counts, and the post is read like any other.
@@ -219,6 +222,7 @@ def assess(
         a.verified_type = profile.verified_type
         a.joined = profile.joined
         a.username_changes = profile.username_changes
+        a.author_as_of = profile.fetched_at
         a.text = profile.description
         big = (profile.followers or 0) >= BIG_ACCOUNT
         if big and token_created and profile.joined and _days(token_created, profile.joined) > 365:  # type: ignore[operator]

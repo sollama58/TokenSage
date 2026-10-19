@@ -20,7 +20,7 @@ from tokensage.api.schemas import (
 )
 from tokensage.api.usage import Usage
 from tokensage.config import Settings
-from tokensage.versions import NOW_KEY, NOW_USAGE_KEY, RULES_VERSION
+from tokensage.versions import LEXICON_VERSION, NOW_KEY, NOW_USAGE_KEY, RULES_VERSION
 
 DEPTH_RANK = {"basic": 0, "full": 1}
 # A request that misses the cache while an identical job is committing reuses that job.
@@ -262,8 +262,10 @@ async def get_or_enqueue(
             fr = _freshness(doc, max_age, from_cache=True)
             # an analysis made by older rules (before a deploy) is re-run on the next
             # request instead of being served until it ages out; an explicit max_age wins
-            outdated = max_age_s is None and (doc.get("versions") or {}).get("rules") != (
-                RULES_VERSION
+            # (the lexicon too: a bump changes what reads match, audit 2026-10-19)
+            versions = doc.get("versions") or {}
+            outdated = max_age_s is None and (
+                versions.get("rules") != RULES_VERSION or versions.get("lexicon") != LEXICON_VERSION
             )
             # a young coin's post counts are kept within X_ENGAGEMENT_REFRESH_S
             outdated = outdated or (

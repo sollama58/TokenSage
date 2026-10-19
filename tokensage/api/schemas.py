@@ -492,6 +492,12 @@ class XAuthor(_Model):
     followers: int | None = None
     joined: datetime | None = None
     username_changes: int | None = None
+    as_of: datetime | None = Field(
+        default=None,
+        description="When the profile figures (followers, joined, renames) were read from X: up "
+        "to 12 h old from cache, older when X could not be reached and the last snapshot was "
+        "served. Null when not known",
+    )
 
 
 class XMatchField(_Model):
