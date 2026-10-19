@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 
 import asyncpg
@@ -231,14 +233,15 @@ async def _condense_batch(conn: asyncpg.Connection, days: int, size: int) -> int
         return n
 
 
-async def _condense_analyses(conn: asyncpg.Connection) -> dict[str, Any] | None:
+async def _condense_analyses(
+    conn: asyncpg.Connection, size: int = CONDENSE_BATCH
+) -> dict[str, Any] | None:
     days = get_settings().analysis_condense_days
     if days <= 0:
         return None
     loop = asyncio.get_running_loop()
     deadline = loop.time() + CONDENSE_BUDGET_S
     out: dict[str, Any] = {"condensed": 0, "batches": 0}
-    size = CONDENSE_BATCH
     while loop.time() < deadline:
         try:
             n = await _condense_batch(conn, days, size)
@@ -543,16 +546,81 @@ STEPS: list[tuple[str, Callable[[asyncpg.Connection], Awaitable[Any]], bool]] = 
 ]
 
 
+# A dropped database shows up as one of these: the step that was running loses its
+# connection mid-statement (2026-10-19 02:08 run, in condensed_analyses) and every connect is
+# refused until the server is back. A statement timeout (TimeoutError, QueryCanceledError) is
+# not one of them: the step itself was too slow.
+_LOST = (
+    ConnectionError,
+    asyncpg.ConnectionDoesNotExistError,
+    asyncpg.CannotConnectNowError,
+    asyncpg.AdminShutdownError,
+    asyncpg.CrashShutdownError,
+)
+# How long a run waits for the database to come back after a drop before giving up on it.
+RECONNECT_WAIT_S = 180.0
+RECONNECT_RETRY_S = 5.0
+# The step that lost its connection is retried once when the database is back. These go
+# again more gently: if the drop came from the database running short under the step's load,
+# the same load would only bring it down a second time.
+RETRY_STEPS: dict[str, Callable[[asyncpg.Connection], Awaitable[Any]]] = {
+    "condensed_analyses": partial(_condense_analyses, size=CONDENSE_MIN_BATCH),
+}
+
+
+def _lost(e: BaseException) -> bool:
+    # asyncpg reports a connection closed under an open transaction as a plain InterfaceError
+    return isinstance(e, _LOST) or (
+        isinstance(e, asyncpg.InterfaceError) and "connection is closed" in str(e)
+    )
+
+
+async def _wait_for_db(dsn: str) -> bool:
+    deadline = time.monotonic() + RECONNECT_WAIT_S
+    while True:
+        try:
+            conn = await asyncpg.connect(dsn, timeout=RECONNECT_RETRY_S)
+        except Exception as e:
+            if not _lost(e) and not isinstance(e, OSError):
+                raise
+            if time.monotonic() >= deadline:
+                return False
+            log.warning("maintenance.db_down", error=f"{type(e).__name__}: {e}")
+            await asyncio.sleep(RECONNECT_RETRY_S)
+        else:
+            await conn.close()
+            return True
+
+
 async def run_once() -> dict[str, Any]:
     settings = get_settings()
     pool = await create_pool(settings.database_url, min_size=1, max_size=2)
     stats: dict[str, Any] = {}
     failed: list[str] = []
+    db_gone = False  # waited the full RECONNECT_WAIT_S once already: no more waiting
+
+    async def attempt(step: Callable[[asyncpg.Connection], Awaitable[Any]]) -> Any:
+        async with pool.acquire() as conn:
+            return await step(conn)
+
     try:
         for key, step, required in STEPS:
             try:
-                async with pool.acquire() as conn:
-                    result = await step(conn)
+                try:
+                    result = await attempt(step)
+                except Exception as e:
+                    if not _lost(e) or db_gone:
+                        raise
+                    log.warning(
+                        "maintenance.connection_lost", step=key, error=f"{type(e).__name__}: {e}"
+                    )
+                    if not await _wait_for_db(settings.database_url):
+                        db_gone = True
+                        raise
+                    # the pool's connections died with the server: open fresh ones
+                    await pool.expire_connections()
+                    log.info("maintenance.reconnected", step=key)
+                    result = await attempt(RETRY_STEPS.get(key, step))
             except Exception as e:  # one step must not take down the others
                 (log.error if required else log.warning)(
                     "maintenance.step_failed", step=key, error=f"{type(e).__name__}: {e}"

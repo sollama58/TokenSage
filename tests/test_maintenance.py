@@ -143,6 +143,74 @@ async def test_failing_step_does_not_stop_the_rest(
 
 
 @needs_db
+async def test_a_dropped_database_is_waited_out_and_the_step_retried(
+    db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-19 02:08: the database went away under condensed_analyses and every later
+    # step was refused. The step that lost its connection goes again once the database is
+    # back (condensing at its smallest batch), and the steps after it run as usual.
+    calls: list[str] = []
+
+    async def dropped(conn: asyncpg.Connection) -> Any:
+        calls.append("dropped")
+        raise asyncpg.InterfaceError(
+            "cannot call Transaction.__aexit__(): the underlying connection is closed"
+        )
+
+    async def gentle(conn: asyncpg.Connection) -> Any:
+        calls.append("gentle")
+        return {"condensed": 0}
+
+    waits: list[str] = []
+
+    async def back(dsn: str) -> bool:
+        waits.append(dsn)
+        return True
+
+    steps = [(k, f, req) for k, f, req in maintenance.STEPS if k != "recall"]
+    steps = [(k, dropped if k == "condensed_analyses" else f, req) for k, f, req in steps]
+    monkeypatch.setattr(maintenance, "STEPS", steps)
+    monkeypatch.setattr(maintenance, "RETRY_STEPS", {"condensed_analyses": gentle})
+    monkeypatch.setattr(maintenance, "_wait_for_db", back)
+    stats = await maintenance.run_once()
+    assert calls == ["dropped", "gentle"] and len(waits) == 1
+    assert stats["failed_steps"] == []
+    assert stats["condensed_analyses"] == {"condensed": 0}
+    assert "pruned_usage_rows" in stats
+
+    # the database never comes back: that step fails, and later drops do not wait again
+    async def gone(dsn: str) -> bool:
+        waits.append(dsn)
+        return False
+
+    async def refused(conn: asyncpg.Connection) -> Any:
+        raise ConnectionRefusedError(111, "Connect call failed")
+
+    waits.clear()
+    steps = [(k, refused if k == "pruned_usage_rows" else f, req) for k, f, req in steps]
+    monkeypatch.setattr(maintenance, "STEPS", steps)
+    monkeypatch.setattr(maintenance, "_wait_for_db", gone)
+    stats = await maintenance.run_once()
+    assert stats["failed_steps"] == ["condensed_analyses", "pruned_usage_rows"]
+    assert len(waits) == 1
+
+
+def test_only_a_lost_connection_counts_as_a_drop() -> None:
+    assert maintenance._lost(ConnectionRefusedError(111, "refused"))
+    assert maintenance._lost(asyncpg.ConnectionDoesNotExistError("closed in the middle"))
+    assert maintenance._lost(asyncpg.InterfaceError("the underlying connection is closed"))
+    # a slow step is not a dropped database
+    assert not maintenance._lost(TimeoutError())
+    assert not maintenance._lost(asyncpg.QueryCanceledError("statement timeout"))
+    assert not maintenance._lost(asyncpg.InterfaceError("the server expects 2 arguments"))
+
+
+@needs_db
+async def test_wait_for_db_returns_once_the_database_answers(db: asyncpg.Connection) -> None:
+    assert await maintenance._wait_for_db(maintenance.get_settings().database_url)
+
+
+@needs_db
 async def test_prune_lookup_cache_drops_expired_lookups_only(
     db: asyncpg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
