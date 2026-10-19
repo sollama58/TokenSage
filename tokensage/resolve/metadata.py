@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -165,9 +166,17 @@ def content_key_for(uri: str, body: bytes) -> str:
     return ipfs_content_key(uri) or "sha256:" + hashlib.sha256(body).hexdigest()
 
 
+def _finite_float(s: str) -> float | None:
+    f = float(s)
+    return f if math.isfinite(f) else None
+
+
 def parse_metadata_json(body: bytes) -> dict[str, Any]:
+    """The metadata object. NaN, Infinity and a number too large for a float (1e400) read as
+    null: Python's json accepts them, Postgres jsonb does not, and one such value in `raw` made
+    every write of the coin's metadata fail, so the coin could never be analysed."""
     text = body.decode("utf-8", "replace").lstrip("﻿")
-    data = json.loads(text)
+    data = json.loads(text, parse_constant=lambda _c: None, parse_float=_finite_float)
     if not isinstance(data, dict):
         raise ValueError("metadata JSON is not an object")
     return data

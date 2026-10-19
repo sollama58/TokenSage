@@ -359,7 +359,10 @@ async def get_job(
         raise errors.not_found("job_not_found", "no such job")
     async with pool.acquire() as conn:
         job = await queue.get(conn, job_id)
-        if job is None:
+        # Only analysis jobs are handed out (as job_id). The others are internal and belong to
+        # no caller: a callback job's error names the address its URL resolved to at delivery,
+        # which the batch route keeps out of its own answer (#71), and job ids are sequential.
+        if job is None or job.kind != "analyze":
             raise errors.not_found("job_not_found", "no such job")
         result: TokenResponse | None = None
         if job.status == "done" and job.mint and job.depth:
