@@ -54,10 +54,11 @@ flowchart LR
 - Merged the two same-name token queries into **one** SQL round trip.
 - **Logo perceptual hash** now runs on the CPU pool **while** early `_db_context` queries and external searches run; hashes are awaited only before logo Hamming queries.
 
-**Further options (not implemented):**
+**Also done (follow-up):**
 
-- Use **read-only secondary connections** from the pool to parallelize independent SELECTs (x_reuse, creator count, top_volume, known_coin sig) — requires passing `pool` into `analyze` or acquiring 2–3 connections per job.
-- **Defer** `pumpfun_search` / `dexscreener_search` when breaker is open or when `same_name` from DB already exceeds a threshold (trade copycat signal quality for speed).
+- **`_prefetch_db_reads`**: when the worker passes a pool, names/market queries and reference data (gazetteer, known coins, meta counts) run on **two extra connections** in parallel.
+- **External lookups** skipped when both breakers are open; cancelled when the DB already has **≥50** same-name tokens.
+- **`analysis.timing`** structured log per job (`resolve_ms`, `metadata_ms`, `db_context_ms`, `engine_ms`, `full_depth_ms`, `persist_ms`, `total_ms`).
 
 ---
 
@@ -85,7 +86,7 @@ flowchart LR
 
 **Impact:** Small per request (**~1–3 ms** × extra acquires); adds up at high QPS.
 
-**Recommendation:** Hold one connection for the transactional enqueue + callback schedule; optionally combine `queue.get` + `latest_analysis` in one SQL after wait.
+**Done:** `_job_and_latest_analysis` combines `queue.get` + `latest_analysis` in one SQL after a wait. Enqueue + callback scheduling already share one connection.
 
 ---
 
@@ -166,7 +167,7 @@ No new indexes are recommended from this audit alone; verify with `EXPLAIN (ANAL
 
 ## Suggested measurement plan
 
-1. **Structured timing** in `analyze` (resolve / metadata / db_context / engine / full_depth ms) — already partially logged; extend with one `analysis.timing` info log per job.
+1. **Structured timing** — implemented as `analysis.timing` on each analyze job.
 2. **Cache hit ratio** per API key from access logs or `api_usage`.
 3. **Load test** (`tests/load` or Render staging) at target QPS with mixed cache hit/miss; watch Postgres connection pool, CPU pool queue depth, and p95 latency.
 
@@ -175,6 +176,8 @@ No new indexes are recommended from this audit alone; verify with `EXPLAIN (ANAL
 ## Changes on branch `cursor/read-efficiency-audit-eeee`
 
 1. **`READ_EFFICIENCY_AUDIT.md`** (this file).
-2. **`analyzer.py`**: merged same-name SQL; overlap logo hashing with `_db_context`; overlap `pair_lookup` with CLIP encoder load when embed enabled.
+2. **`analyzer.py`**: merged same-name SQL; overlap logo hashing with `_db_context`; overlap `pair_lookup` with CLIP encoder load; parallel DB prefetch; external lookup skip; timing log.
+3. **`api/service.py`**: `_job_and_latest_analysis` after wait.
+4. **`worker.py`**: passes `pool` into `analyze`.
 
 Tests: full **906** pytest suite should remain green after changes.

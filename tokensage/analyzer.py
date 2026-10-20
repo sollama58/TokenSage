@@ -8,6 +8,7 @@ tokens, X link reuse, creator history, image-hash candidates), run the basic-dep
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -264,10 +265,21 @@ async def _x_reuse(
 # ----------------------------------------------------------------- database context
 
 
+EXT_LOOKUP_SKIP_DB_NAMESAKES = 50
+
+
+def _ext_lookups_allowed() -> bool:
+    from tokensage.net.breaker import breaker
+
+    return breaker.allow("pumpfun_search") or breaker.allow("dexscreener_search")
+
+
 async def _external_namesakes(
     http: httpx.AsyncClient, ticker: str | None, name_compact: str
 ) -> list[SameNameToken]:
     """Best-effort same-name coins from pump.fun and DexScreener search; never raises."""
+    if not _ext_lookups_allowed():
+        return []
     try:
         ext = await asyncio.gather(
             lookups.pumpfun_search(http, ticker or name_compact),
@@ -277,6 +289,131 @@ async def _external_namesakes(
     except Exception as e:  # noqa: BLE001 - lookups are optional
         log.info("lookups.failed", error=str(e)[:120])
         return []
+
+
+async def _fetch_same_name_rows(
+    conn: asyncpg.Connection,
+    r: Resolved,
+    ticker: str | None,
+    name_compact: str,
+    copycat_window_days: int,
+    window_hours: int,
+) -> list[asyncpg.Record]:
+    return await conn.fetch(
+        """select mint, name, symbol, created_at from (
+             select mint, name, symbol, created_at from token
+             where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
+                   regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
+               and created_at >= coalesce($4, now()) - make_interval(days => $5)
+               and created_at <= coalesce($4, now())
+             order by created_at limit 50
+           ) before
+           union all
+           select mint, name, symbol, created_at from token
+           where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
+                 regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
+             and created_at >= coalesce($4, now()) - make_interval(hours => $6)
+             and created_at <= coalesce($4, now()) + make_interval(hours => $6)
+           order by created_at limit 2000""",
+        r.mint,
+        (ticker or "").upper(),
+        name_compact,
+        r.created_at,
+        copycat_window_days,
+        window_hours,
+    )
+
+
+async def _fetch_top_volume_rows(
+    conn: asyncpg.Connection, created_at: datetime | None
+) -> list[asyncpg.Record]:
+    return await conn.fetch(
+        """select rank, mint, name, symbol, volume_usd from top_volume
+           where day = (select max(day) from top_volume
+                        where day between coalesce($1, now())::date - 1
+                                      and coalesce($1, now())::date + 1)
+           order by rank""",
+        created_at,
+    )
+
+
+async def _prefetch_db_reads(
+    pool: asyncpg.Pool | None,
+    main: asyncpg.Connection,
+    ctx: Context,
+    r: Resolved,
+    x: XInfo | None,
+    ticker: str | None,
+    name_compact: str,
+    meta_words: list[str] | None,
+    meta_cfg: dict[str, int],
+) -> tuple[
+    tuple[int, int | None, datetime | None],
+    int | None,
+    list[asyncpg.Record],
+    MetaCounts | None,
+    list[asyncpg.Record],
+    Any,
+    list[KnownCoin],
+    list[image_stage.Candidate],
+]:
+    """Independent SELECTs on one or two extra pool connections when a pool is available."""
+
+    async def names_and_market(c: asyncpg.Connection) -> tuple[
+        tuple[int, int | None, datetime | None],
+        int | None,
+        list[asyncpg.Record],
+        list[asyncpg.Record],
+    ]:
+        if x is not None:
+            x_reuse = await _x_reuse(c, x, r.mint, r.created_at)
+        else:
+            x_reuse = (0, None, None)
+        creator_count: int | None = None
+        if r.creator:
+            creator_count = await c.fetchval(
+                "select count(*) from token where creator=$1 and mint<>$2", r.creator, r.mint
+            )
+        same_rows: list[asyncpg.Record] = []
+        if ticker or name_compact:
+            same_rows = await _fetch_same_name_rows(
+                c,
+                r,
+                ticker,
+                name_compact,
+                ctx.settings.copycat_window_days,
+                meta_cfg["window_hours"],
+            )
+        top_rows = await _fetch_top_volume_rows(c, r.created_at)
+        return x_reuse, creator_count, same_rows, top_rows
+
+    async def reference_data(c: asyncpg.Connection) -> tuple[
+        MetaCounts | None,
+        Any,
+        list[KnownCoin],
+        list[image_stage.Candidate],
+    ]:
+        meta_counts = (
+            await _meta_counts(c, r, meta_words, **meta_cfg) if meta_words else None
+        )
+        gazetteer = await gazetteer_db.current(c)
+        coins, logos = await _known_coins(c)
+        return meta_counts, gazetteer, coins, logos
+
+    if pool is None:
+        x_reuse, creator_count, same_rows, top_rows = await names_and_market(main)
+        meta_counts, gazetteer, coins, logos = await reference_data(main)
+    else:
+        # One extra connection only: the worker already holds `main` from the pool; two
+        # workers with two extras each would exceed the default max_size and deadlock.
+        async with pool.acquire() as extra:
+            (x_reuse, creator_count, same_rows, top_rows), (
+                meta_counts,
+                gazetteer,
+                coins,
+                logos,
+            ) = await asyncio.gather(names_and_market(main), reference_data(extra))
+    return x_reuse, creator_count, same_rows, meta_counts, top_rows, gazetteer, coins, logos
 
 
 async def _db_context(
@@ -291,12 +428,13 @@ async def _db_context(
     logo: image_stage.ImageFeatures | None = None,
     normalized: Normalized | None = None,
     logo_hash_task: asyncio.Task[image_stage.ImageResult] | None = None,
+    pool: asyncpg.Pool | None = None,
 ) -> DbContext:
     # The external searches only need the name and ticker: they run while the database
     # queries below do, instead of adding their round trip after them.
     ext_task = (
         asyncio.create_task(_external_namesakes(ctx.http, ticker, name_compact))
-        if ticker or name_compact
+        if (ticker or name_compact) and _ext_lookups_allowed()
         else None
     )
     try:
@@ -312,6 +450,7 @@ async def _db_context(
             ext_task,
             normalized,
             logo_hash_task,
+            pool,
         )
     finally:
         if ext_task is not None and not ext_task.done():
@@ -330,68 +469,40 @@ async def _db_context_queries(
     ext_task: asyncio.Task[list[SameNameToken]] | None,
     normalized: Normalized | None = None,
     logo_hash_task: asyncio.Task[image_stage.ImageResult] | None = None,
+    pool: asyncpg.Pool | None = None,
 ) -> DbContext:
     dbc = DbContext()
-    if x is not None:
-        dbc.x_reuse_count, dbc.x_reuse_rank, dbc.x_reuse_first_at = await _x_reuse(
-            conn, x, r.mint, r.created_at
-        )
-    # creator history
-    if r.creator:
-        dbc.creator_token_count = await conn.fetchval(
-            "select count(*) from token where creator=$1 and mint<>$2", r.creator, r.mint
-        )
-    # same-name tokens we already know, plus best-effort external searches
     dbc.copycat_window_days = ctx.settings.copycat_window_days
     meta_cfg = {
         "window_hours": int(load_knowledge().meta.get("window_hours", 24)),
         "history_days": int(load_knowledge().meta.get("history_days", 90)),
     }
-    if ticker or name_compact:
-        # One round trip for the copycat window (oldest 50 before launch) and the ±window
-        # around launch (up to 2000) used for rank and current-meta counts.
-        rows = await conn.fetch(
-            """select mint, name, symbol, created_at from (
-                 select mint, name, symbol, created_at from token
-                 where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
-                       regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
-                   and created_at >= coalesce($4, now()) - make_interval(days => $5)
-                   and created_at <= coalesce($4, now())
-                 order by created_at limit 50
-               ) before
-               union all
-               select mint, name, symbol, created_at from token
-               where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
-                     regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
-                 and created_at >= coalesce($4, now()) - make_interval(hours => $6)
-                 and created_at <= coalesce($4, now()) + make_interval(hours => $6)
-               order by created_at limit 2000""",
-            r.mint,
-            (ticker or "").upper(),
-            name_compact,
-            r.created_at,
-            ctx.settings.copycat_window_days,
-            meta_cfg["window_hours"],
-        )
+    (
+        x_reuse,
+        creator_count,
+        same_rows,
+        meta_counts,
+        top_rows,
+        gazetteer,
+        coins,
+        logos,
+    ) = await _prefetch_db_reads(
+        pool, conn, ctx, r, x, ticker, name_compact, meta_words, meta_cfg
+    )
+    dbc.x_reuse_count, dbc.x_reuse_rank, dbc.x_reuse_first_at = x_reuse
+    if creator_count is not None:
+        dbc.creator_token_count = creator_count
+    if same_rows:
         dbc.same_name = list(
             {
                 x_["mint"]: SameNameToken(
                     x_["mint"], x_["name"], x_["symbol"], x_["created_at"], "db"
                 )
-                for x_ in rows
+                for x_ in same_rows
             }.values()
         )
-    if meta_words:
-        dbc.meta_counts = await _meta_counts(conn, r, meta_words, **meta_cfg)
-    # the most-traded tokens of the snapshot nearest this launch (a day either side)
-    rows = await conn.fetch(
-        """select rank, mint, name, symbol, volume_usd from top_volume
-           where day = (select max(day) from top_volume
-                        where day between coalesce($1, now())::date - 1
-                                      and coalesce($1, now())::date + 1)
-           order by rank""",
-        r.created_at,
-    )
+    if meta_counts is not None:
+        dbc.meta_counts = meta_counts
     dbc.top_volume = [
         TopVolume(
             row["rank"],
@@ -400,12 +511,9 @@ async def _db_context_queries(
             row["symbol"] or "",
             row["volume_usd"] or 0.0,
         )
-        for row in rows
+        for row in top_rows
     ]
-    dbc.gazetteer = await gazetteer_db.current(conn)
-    # known coins from the database (seed lives in data/, cron adds more), and their logos
-    # as image hash candidates (recent token images are added below)
-    coins, logos = await _known_coins(conn)
+    dbc.gazetteer = gazetteer
     dbc.extra_coins = list(coins)
     dbc.image_candidates.extend(logos)
     # Logos of tokens launched before this one (within the logo scan window) that are
@@ -492,7 +600,13 @@ async def _db_context_queries(
             )
     if ext_task is not None:
         # nothing above reads same_name: the external namesakes join it here, after ours
-        found = await ext_task
+        found: list[SameNameToken] = []
+        if len(dbc.same_name) >= EXT_LOOKUP_SKIP_DB_NAMESAKES and not ext_task.done():
+            ext_task.cancel()
+        try:
+            found = await ext_task
+        except asyncio.CancelledError:
+            pass
         known = {t.mint for t in dbc.same_name} | {r.mint}
         dbc.same_name += [t for t in found if t.mint not in known]
     dbc.originals = await _prior_reads(
@@ -1489,6 +1603,7 @@ async def analyze(
     depth: str,
     hints: dict[str, Any] | None = None,
     requested_by: str | None = None,
+    pool: asyncpg.Pool | None = None,
 ) -> int:
     """Resolve + fetch + engine + persist. Returns the new analysis.version.
     Raises AnalyzeFailed for definitive per-CA failures (404/422 at the API).
@@ -1498,6 +1613,8 @@ async def analyze(
     visible on-chain, the on-chain read; they never turn into a 404."""
     if ctx.rpc is None:
         raise RuntimeError("SOLANA_RPC_URL is not configured; the analyzer cannot resolve CAs")
+    t0 = time.perf_counter()
+    phase = t0
     hints = {k: v for k, v in (hints or {}).items() if v not in (None, "")}
     hint_meta_fields = [k for k in md.HINT_FIELDS if k in hints]
     hint_use: HintUse | None = (
@@ -1517,6 +1634,8 @@ async def analyze(
         hint_use.onchain_visible = False
         await _persist_stub_token(conn, r)
         log.info("analyze.from_hints", mint=mint, reason=e.code)
+    resolve_ms = int((time.perf_counter() - phase) * 1000)
+    phase = time.perf_counter()
 
     m: md.Metadata | None = None
     image_bytes: bytes | None = None
@@ -1599,6 +1718,8 @@ async def analyze(
                         refetched.image_content_key,
                     )
                     m.image_content_key = refetched.image_content_key
+    metadata_ms = int((time.perf_counter() - phase) * 1000)
+    phase = time.perf_counter()
 
     name = (m.name if m and m.status == "ok" and m.name else None) or r.name
     symbol = (m.symbol if m and m.status == "ok" and m.symbol else None) or r.symbol
@@ -1625,7 +1746,10 @@ async def analyze(
         logo=logo_feats,
         normalized=n0,
         logo_hash_task=logo_hash_task,
+        pool=pool,
     )
+    db_context_ms = int((time.perf_counter() - phase) * 1000)
+    phase = time.perf_counter()
     if logo_feats is None and logo_hash_task is not None:
         logo_feats = logo_hash_task.result().features
     pair_task = asyncio.create_task(pair_lookup.lookup(conn, ctx.rpc, r.quote_mint))
@@ -1652,10 +1776,15 @@ async def analyze(
         inp.encoder = await embed_task
     await _queue_pair_analysis(conn, inp.pair)
     timed_out: list[str] = []
+    full_depth_ms = 0
     if depth == "full":
         out, timed_out = await _full_depth(conn, ctx, r, m, x, inp, image_bytes)
+        full_depth_ms = int((time.perf_counter() - phase) * 1000)
+        phase = time.perf_counter()
     else:
         out = await cpu.run(run_basic, inp)
+    engine_ms = int((time.perf_counter() - phase) * 1000)
+    phase = time.perf_counter()
     if x is not None:
         x.reuse_count = dbc.x_reuse_count
         x.reuse_rank = dbc.x_reuse_rank
@@ -1700,6 +1829,19 @@ async def analyze(
     version = await _store_analysis(conn, doc, store_read=not hint_private)
     if depth == "full":
         await _store_trend_inputs(conn, r.mint, out)
+    persist_ms = int((time.perf_counter() - phase) * 1000)
+    log.info(
+        "analysis.timing",
+        mint=mint,
+        depth=depth,
+        resolve_ms=resolve_ms,
+        metadata_ms=metadata_ms,
+        db_context_ms=db_context_ms,
+        engine_ms=engine_ms,
+        full_depth_ms=full_depth_ms,
+        persist_ms=persist_ms,
+        total_ms=int((time.perf_counter() - t0) * 1000),
+    )
     return version
 
 
