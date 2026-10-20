@@ -290,6 +290,7 @@ async def _db_context(
     meta_words: list[str] | None = None,
     logo: image_stage.ImageFeatures | None = None,
     normalized: Normalized | None = None,
+    logo_hash_task: asyncio.Task[image_stage.ImageResult] | None = None,
 ) -> DbContext:
     # The external searches only need the name and ticker: they run while the database
     # queries below do, instead of adding their round trip after them.
@@ -300,7 +301,17 @@ async def _db_context(
     )
     try:
         return await _db_context_queries(
-            conn, ctx, r, x, ticker, name_compact, meta_words, logo, ext_task, normalized
+            conn,
+            ctx,
+            r,
+            x,
+            ticker,
+            name_compact,
+            meta_words,
+            logo,
+            ext_task,
+            normalized,
+            logo_hash_task,
         )
     finally:
         if ext_task is not None and not ext_task.done():
@@ -318,6 +329,7 @@ async def _db_context_queries(
     logo: image_stage.ImageFeatures | None,
     ext_task: asyncio.Task[list[SameNameToken]] | None,
     normalized: Normalized | None = None,
+    logo_hash_task: asyncio.Task[image_stage.ImageResult] | None = None,
 ) -> DbContext:
     dbc = DbContext()
     if x is not None:
@@ -336,40 +348,31 @@ async def _db_context_queries(
         "history_days": int(load_knowledge().meta.get("history_days", 90)),
     }
     if ticker or name_compact:
-        # an empty name or ticker must not match every token whose name/ticker is empty
-        # the earliest namesakes launched within the copycat window before this one: the
-        # candidates for the coin it copies (an older namesake is never its original)
+        # One round trip for the copycat window (oldest 50 before launch) and the ±window
+        # around launch (up to 2000) used for rank and current-meta counts.
         rows = await conn.fetch(
-            """select mint, name, symbol, created_at from token
+            """select mint, name, symbol, created_at from (
+                 select mint, name, symbol, created_at from token
+                 where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
+                       regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
+                   and created_at >= coalesce($4, now()) - make_interval(days => $5)
+                   and created_at <= coalesce($4, now())
+                 order by created_at limit 50
+               ) before
+               union all
+               select mint, name, symbol, created_at from token
                where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
                      regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
-                 and created_at >= coalesce($4, now()) - make_interval(days => $5)
-                 and created_at <= coalesce($4, now())
-               order by created_at limit 50""",
+                 and created_at >= coalesce($4, now()) - make_interval(hours => $6)
+                 and created_at <= coalesce($4, now()) + make_interval(hours => $6)
+               order by created_at limit 2000""",
             r.mint,
             (ticker or "").upper(),
             name_compact,
             r.created_at,
             ctx.settings.copycat_window_days,
+            meta_cfg["window_hours"],
         )
-        # ... and every namesake launched around this one, for its copycat rank and the
-        # current-meta count (the query above keeps only the oldest 50)
-        rows = [
-            *rows,
-            *await conn.fetch(
-                """select mint, name, symbol, created_at from token
-                   where mint<>$1 and (($2 <> '' and upper(symbol)=$2) or ($3 <> '' and
-                         regexp_replace(lower(coalesce(name,'')), '[^a-z0-9]', '', 'g') = $3))
-                     and created_at >= coalesce($4, now()) - make_interval(hours => $5)
-                     and created_at <= coalesce($4, now()) + make_interval(hours => $5)
-                   order by created_at limit 2000""",
-                r.mint,
-                (ticker or "").upper(),
-                name_compact,
-                r.created_at,
-                meta_cfg["window_hours"],
-            ),
-        ]
         dbc.same_name = list(
             {
                 x_["mint"]: SameNameToken(
@@ -409,6 +412,8 @@ async def _db_context_queries(
     # near-duplicates of its own, plain or mirrored. Postgres does the Hamming filter, so
     # only matches come back, however many coins launched. The same image file (same
     # content key) is the plainest logo reuse of all and counts too.
+    if logo is None and logo_hash_task is not None:
+        logo = (await logo_hash_task).features
     if logo is not None:
         k = load_knowledge()
         scan_days = min(
@@ -1604,10 +1609,10 @@ async def analyze(
 
     n0 = normalize(name, symbol, None)
     logo_feats = cached_feats
+    logo_hash_task: asyncio.Task[image_stage.ImageResult] | None = None
     if logo_feats is None and image_bytes:
-        # hash the logo up front: the database looks up its near-duplicates (lineage), and
-        # the engine reuses these hashes instead of decoding the image again
-        logo_feats = (await cpu.run(image_stage.analyze, image_bytes, [], 0)).features
+        # Hash while _db_context runs its non-logo queries (and external name searches).
+        logo_hash_task = asyncio.create_task(cpu.run(image_stage.analyze, image_bytes, [], 0))
     dbc = await _db_context(
         conn,
         ctx,
@@ -1619,7 +1624,17 @@ async def analyze(
         meta.candidate_words(n0, load_knowledge()),
         logo=logo_feats,
         normalized=n0,
+        logo_hash_task=logo_hash_task,
     )
+    if logo_feats is None and logo_hash_task is not None:
+        logo_feats = logo_hash_task.result().features
+    pair_task = asyncio.create_task(pair_lookup.lookup(conn, ctx.rpc, r.quote_mint))
+    embed_task = (
+        asyncio.create_task(cpu.run(embed.default_encoder, ctx.settings))
+        if ctx.settings.enable_embed
+        else None
+    )
+    pair = await pair_task
     inp = EngineInput(
         mint=r.mint,
         name=name,
@@ -1630,12 +1645,11 @@ async def analyze(
         x_kind=x.ref.kind if x else None,
         x_object_time=x.object_time if x else None,
         ctx=dbc,
-        pair=await pair_lookup.lookup(conn, ctx.rpc, r.quote_mint),
+        pair=pair,
     )
     inp.logo_features = logo_feats  # hashed above or cached: compared with other logos
-    if ctx.settings.enable_embed:
-        # first call loads the ONNX model from disk: keep that off the event loop
-        inp.encoder = await cpu.run(embed.default_encoder, ctx.settings)
+    if embed_task is not None:
+        inp.encoder = await embed_task
     await _queue_pair_analysis(conn, inp.pair)
     timed_out: list[str] = []
     if depth == "full":
