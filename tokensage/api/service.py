@@ -369,8 +369,10 @@ async def get_or_enqueue(
             if fresh is not None:
                 doc, _ = fresh
                 fr = _freshness(doc, max_age, from_cache=True)
-                if fr.age_s is not None and fr.age_s <= max_age and _may_serve_analysis(
-                    doc, key.name if key else None
+                if (
+                    fr.age_s is not None
+                    and fr.age_s <= max_age
+                    and _may_serve_analysis(doc, key.name if key else None)
                 ):
                     return TokenResponse(
                         ca=mint,
@@ -440,9 +442,8 @@ async def get_or_enqueue(
                             max_age_s=max_age_s,
                             hints=hints,
                         )
-                        finished = (
-                            job.status == "done"
-                            or (await waiter.wait(job.id, wait_s) if wait_s > 0 else False)
+                        finished = job.status == "done" or (
+                            await waiter.wait(job.id, wait_s) if wait_s > 0 else False
                         )
                         continue
                 if j and j.status == "failed" and j.error_code in DEFINITIVE_CODES:
