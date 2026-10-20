@@ -180,6 +180,9 @@ class Settings(BaseSettings):
     cpu_threads: int = 3
     job_lease_s: int = 120
     job_max_attempts: int = 3
+    # A low-priority launch read still waiting after this long is dropped (queue.expire_stale_low):
+    # TrenchScanner stops asking after ~11 minutes, and a backlog of them filled the queue.
+    batch_low_max_wait_s: float = 900.0
 
     # --- render platform ---
     port: int = Field(default=10000, alias="PORT")

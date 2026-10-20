@@ -302,7 +302,7 @@ async def get_or_enqueue(
             # just finished is always allowed. Raising here rolls the new job back.
             if not j.inserted:
                 return
-            if await queue.pending_count(conn) > settings.max_queue_depth:
+            if await queue.pending_count(conn, priority) > settings.max_queue_depth:
                 from tokensage.api import errors
 
                 raise errors.overloaded()
@@ -450,7 +450,7 @@ async def now_items(
 
             if not j.inserted:
                 return
-            if await queue.pending_count(conn) > settings.max_queue_depth:
+            if await queue.pending_count(conn, queue.PRIORITY_API) > settings.max_queue_depth:
                 raise errors.overloaded()
             used = await usage.bump(conn, NOW_USAGE_KEY + requested_by, requests=1)
             if used.requests > settings.now_per_day:

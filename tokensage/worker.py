@@ -30,6 +30,10 @@ from tokensage.net import metrics
 log = structlog.get_logger("worker")
 
 
+# How often the worker drops stale low-priority jobs (queue.expire_stale_low).
+EXPIRE_EVERY_S = 30.0
+
+
 class _Deferred(Exception):
     """A callback job whose target has not finished; it has been put back to wait."""
 
@@ -42,6 +46,7 @@ class Worker:
         self.stop = asyncio.Event()
         self._wake = asyncio.Event()
         self.active_jobs: set[int] = set()
+        self._next_expiry = 0.0
         self._listen_conn: asyncpg.Connection | None = None
         self.ctx = Context.create(settings)
         ocr.set_concurrency(settings.ocr_concurrency)
@@ -131,8 +136,23 @@ class Worker:
 
     # -- work --------------------------------------------------------------
 
+    async def _expire_stale_low(self, conn: asyncpg.Connection) -> None:
+        """At most every EXPIRE_EVERY_S across the slots: drop launch reads nobody waits on."""
+        loop = asyncio.get_running_loop()
+        if loop.time() < self._next_expiry:
+            return
+        self._next_expiry = loop.time() + EXPIRE_EVERY_S
+        try:
+            dropped = await queue.expire_stale_low(conn, self.settings.batch_low_max_wait_s)
+        except Exception as e:  # noqa: BLE001 - never let the sweep stop the slot claiming
+            log.warning("worker.expire_low_failed", error=f"{type(e).__name__}: {e}"[:200])
+            return
+        if dropped:
+            log.info("worker.expired_low", dropped=dropped)
+
     async def _tick(self) -> bool:
         async with self.pool.acquire() as conn:
+            await self._expire_stale_low(conn)
             job = await queue.claim(
                 conn, self.settings.job_lease_s, max_attempts=self.settings.job_max_attempts
             )

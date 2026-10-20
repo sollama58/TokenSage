@@ -205,3 +205,57 @@ async def test_pending_count_ignores_jobs_parked_on_a_future_run_after(
         queue.PRIORITY_BACKGROUND,
     )
     assert await queue.pending_count(conn) == 1
+
+
+async def test_low_tier_is_claimed_newest_first(conn: asyncpg.Connection) -> None:
+    """Launch reads (PRIORITY_BATCH_LOW) go newest first under a backlog; the other tiers
+    stay oldest first, and every tier still yields to a more urgent one."""
+    mints = [f"{MINT[:-5]}low{i:02d}" for i in range(3)]
+    low = []
+    for i, m in enumerate(mints):
+        j = await queue.enqueue(conn, "analyze", m, "basic", priority=queue.PRIORITY_BATCH_LOW)
+        await conn.execute(
+            "update job set run_after = now() - make_interval(secs => $2) where id = $1",
+            j.id,
+            float(60 * (3 - i)),
+        )
+        low.append(j.id)
+    normal_a = await queue.enqueue(conn, "analyze", mints[0], "full", priority=queue.PRIORITY_BATCH)
+    normal_b = await queue.enqueue(conn, "analyze", mints[1], "full", priority=queue.PRIORITY_BATCH)
+    order = []
+    while (j := await queue.claim(conn, lease_s=60)) is not None:
+        order.append(j.id)
+    assert order == [normal_a.id, normal_b.id, *reversed(low)]
+
+
+async def test_expire_stale_low_drops_only_old_launch_reads(conn: asyncpg.Connection) -> None:
+    old = await queue.enqueue(conn, "analyze", MINT, "basic", priority=queue.PRIORITY_BATCH_LOW)
+    fresh = await queue.enqueue(conn, "analyze", MINT, "full", priority=queue.PRIORITY_BATCH_LOW)
+    normal = await queue.enqueue(conn, "analyze", MINT[:-1] + "x", "basic", priority=50)
+    hooked = await queue.enqueue(
+        conn, "analyze", MINT[:-1] + "y", "basic", priority=queue.PRIORITY_BATCH_LOW
+    )
+    await conn.execute(
+        "update job set run_after = now() - interval '20 minutes' where id = any($1::bigint[])",
+        [old.id, normal.id, hooked.id],
+    )
+    await conn.execute(
+        """insert into job (kind, priority, payload)
+           values ('callback', 100, jsonb_build_object('target_job_id', $1::bigint))""",
+        hooked.id,
+    )
+    assert await queue.expire_stale_low(conn, 900) == 1
+    left = {r["id"] for r in await conn.fetch("select id from job where kind = 'analyze'")}
+    assert left == {fresh.id, normal.id, hooked.id}
+
+
+async def test_pending_count_by_priority_ignores_the_low_backlog(conn: asyncpg.Connection) -> None:
+    for i in range(3):
+        await queue.enqueue(
+            conn, "analyze", f"{MINT[:-3]}b{i:02d}", "basic", priority=queue.PRIORITY_BATCH_LOW
+        )
+    await queue.enqueue(conn, "analyze", MINT, "full", priority=queue.PRIORITY_BATCH)
+    assert await queue.pending_count(conn) == 4
+    assert await queue.pending_count(conn, queue.PRIORITY_BATCH) == 1
+    assert await queue.pending_count(conn, queue.PRIORITY_API) == 0
+    assert await queue.pending_count(conn, queue.PRIORITY_BATCH_LOW) == 4
