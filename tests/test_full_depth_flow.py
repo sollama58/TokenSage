@@ -187,9 +187,8 @@ async def test_basic_depth_does_not_fetch_x(
 
 
 async def test_basic_depth_fetches_x_when_enabled(settings, clean_tables: None) -> None:
-    from tokensage.api.app import create_app
-
     from tests.conftest import API_KEY
+    from tokensage.api.app import create_app
 
     cfg = settings.model_copy(update={"enable_basic_x_fetch": True})
     chain = FakeChain()

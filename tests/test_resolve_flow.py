@@ -85,7 +85,8 @@ async def test_token2022_pump_coin_full_resolution(
     assert a.image.status == "ok" and a.image.source_url and CID_IMG in a.image.source_url
     assert a.x is not None and a.x.ref.kind == "tweet"
     assert a.x.ref.tweet_id == "1791351500217754008" and a.x.ref.url_handle == "elonmusk"
-    assert a.x.object_time is not None and a.x.status == "not_fetched"  # no X fetch in test settings
+    assert a.x.object_time is not None
+    assert a.x.status == "not_fetched"  # test settings: ENABLE_BASIC_X_FETCH=false
     assert "metadata_unresolved" not in {f.code for f in a.flags}
 
     # persisted state
