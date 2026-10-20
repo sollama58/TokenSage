@@ -7,10 +7,15 @@ client from it.
 > **Status:** the contract is final for v1 and every field is now populated. `depth=basic`
 > gives on-chain/metadata facts plus the meaning analysis (`referent`, `categories`,
 > `ticker_explanation`, `copy_of`, `normalized`, `image` hashes/near-duplicates, `flags`,
-> `summary`, `evidence`). `depth=full` additionally fills `x.author`/`x.text`/`x.relation` from
-> the fetched tweet or profile, `image.ocr`, `image.labels` (what the logo shows, from a local
-> vision model; since rules 0.25.0, when the service runs with `ENABLE_CLIP`), `trend`, and the
-> X account-quality flags. `versions.rules` tells you which build produced a document.
+> `summary`, `evidence`). Since rules **0.36.0**, basic also interprets the **linked tweet or
+> profile text** when it is already in the service cache or can be fetched within
+> `BASIC_X_TIMEOUT_S` (primary post only; no quoted/replied chain, `x.match`, or trends): then
+> `x.text`, `x.relation`, and post-derived `referent` / `summary` match what full depth would
+> produce from that text alone. Controlled by `ENABLE_BASIC_X` and `ENABLE_BASIC_X_FETCH`
+> (cache-only when fetch is off). `depth=full` additionally runs the full X chain (quoted and
+> replied posts, author profile, media hash match, engagement refresh), `image.ocr`,
+> `image.labels` (local vision model when `ENABLE_CLIP`), `trend`, and richer account signals.
+> `versions.rules` tells you which build produced a document.
 
 ## Try it in a browser
 

@@ -8,7 +8,7 @@ import copy
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
@@ -419,6 +419,93 @@ async def x_content(
     elif x.ref.kind == "profile" and x.ref.handle:
         profile = await profile_cached(conn, http, x.ref.handle)
     return tweet, profile
+
+
+@dataclass
+class BasicXLoad:
+    """Tweet or profile text for basic-depth interpretation (primary post only)."""
+
+    tweet: TweetData | None = None
+    profile: ProfileData | None = None
+    caveats: list[str] = field(default_factory=list)
+
+
+async def _tweet_snapshot_ok(conn: asyncpg.Connection, tweet_id: str) -> TweetData | None:
+    row = await conn.fetchrow(
+        "select first_snapshot, status from x_tweet where tweet_id=$1",
+        tweet_id,
+    )
+    if row and row["status"] == "ok" and row["first_snapshot"]:
+        return TweetData.from_json(row["first_snapshot"])
+    return None
+
+
+async def _profile_snapshot_ok(conn: asyncpg.Connection, handle: str) -> ProfileData | None:
+    row = await conn.fetchrow(
+        """select snapshot, status from x_profile
+           where lower(handle) = lower($1) order by fetched_at desc limit 1""",
+        handle,
+    )
+    if row and row["status"] == "ok" and row["snapshot"]:
+        return ProfileData.from_json(row["snapshot"])
+    return None
+
+
+async def basic_x_load(
+    conn: asyncpg.Connection,
+    http: httpx.AsyncClient,
+    settings: Settings,
+    x: XInfo,
+) -> BasicXLoad:
+    """Tier A: OK snapshot from x_tweet / x_profile. Tier B: one timed fetch when missing."""
+    out = BasicXLoad()
+    if not settings.enable_basic_x:
+        return out
+    sconn = serial(conn)
+    if x.ref.kind == "tweet" and x.ref.tweet_id:
+        tid = x.ref.tweet_id
+        cached = await _tweet_snapshot_ok(sconn, tid)
+        if cached is not None:
+            out.tweet = cached
+            return out
+        if not settings.enable_basic_x_fetch:
+            return out
+        try:
+            async with asyncio.timeout(settings.basic_x_timeout_s):
+                t = await _tweet_cached(sconn, http, settings, tid, fresh_engagement=False)
+        except TimeoutError:
+            out.caveats.append(
+                f"basic x: tweet fetch timed out after {settings.basic_x_timeout_s:g} s"
+            )
+            return out
+        if t.status == "ok":
+            out.tweet = t
+        elif t.status == "deleted":
+            out.tweet = t
+        else:
+            out.caveats.append("basic x: linked tweet could not be fetched")
+        return out
+    if x.ref.kind == "profile" and x.ref.handle:
+        handle = x.ref.handle
+        prof = await _profile_snapshot_ok(sconn, handle)
+        if prof is not None:
+            out.profile = prof
+            return out
+        if not settings.enable_basic_x_fetch:
+            return out
+        try:
+            async with asyncio.timeout(settings.basic_x_timeout_s):
+                p = await _profile_cached(sconn, http, handle)
+        except TimeoutError:
+            out.caveats.append(
+                f"basic x: profile fetch timed out after {settings.basic_x_timeout_s:g} s"
+            )
+            return out
+        if p.status == "ok":
+            out.profile = p
+        else:
+            out.caveats.append("basic x: linked profile could not be fetched")
+    return out
 
 
 # ----------------------------------------------------------------- OCR cache

@@ -1780,12 +1780,23 @@ async def analyze(
     await _queue_pair_analysis(conn, inp.pair)
     timed_out: list[str] = []
     full_depth_ms = 0
+    basic_x_ms = 0
     if depth == "full":
         out, timed_out = await _full_depth(conn, ctx, r, m, x, inp, image_bytes)
         full_depth_ms = int((time.perf_counter() - phase) * 1000)
         phase = time.perf_counter()
     else:
+        basic_x_caveats: list[str] = []
+        if ctx.settings.enable_basic_x and x is not None:
+            inp.x_url_handle = x.ref.url_handle
+            phase_x = time.perf_counter()
+            bx = await fulldepth.basic_x_load(conn, ctx.http, ctx.settings, x)
+            basic_x_ms = int((time.perf_counter() - phase_x) * 1000)
+            inp.tweet, inp.profile = bx.tweet, bx.profile
+            basic_x_caveats = bx.caveats
         out = await cpu.run(run_basic, inp)
+        if basic_x_caveats:
+            out.caveats.extend(basic_x_caveats)
     engine_ms = int((time.perf_counter() - phase) * 1000)
     phase = time.perf_counter()
     if x is not None:
@@ -1810,7 +1821,7 @@ async def analyze(
     if hint_private:
         doc.cacheable = False
         doc.analysis_requested_by = requested_by
-    if depth == "full":
+    if inp.tweet is not None and inp.tweet.status == "ok":
         _attach_post_details(doc.x, inp.tweet)
     if timed_out:
         doc.timed_out = timed_out
@@ -1842,6 +1853,7 @@ async def analyze(
         db_context_ms=db_context_ms,
         engine_ms=engine_ms,
         full_depth_ms=full_depth_ms,
+        basic_x_ms=basic_x_ms,
         persist_ms=persist_ms,
         total_ms=int((time.perf_counter() - t0) * 1000),
     )

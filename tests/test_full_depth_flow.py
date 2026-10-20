@@ -186,6 +186,33 @@ async def test_basic_depth_does_not_fetch_x(
     assert not a.trend.matched
 
 
+async def test_basic_depth_fetches_x_when_enabled(settings, clean_tables: None) -> None:
+    from tests.conftest import API_KEY
+    from tokensage.api.app import create_app
+
+    cfg = settings.model_copy(update={"enable_basic_x_fetch": True})
+    chain = FakeChain()
+    chain.add_t22_pump(T22_MINT, "dog wif cap", "cap", META_URI)
+    fx_calls: list[int] = []
+    app = create_app(cfg)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+        ) as c,
+        respx.mock(assert_all_called=False) as router,
+    ):
+        _install_x(router, fx_calls)
+        install_web(router, chain)
+        r = await c.get(f"/v1/tokens/{T22_MINT}?depth=basic&wait=10")
+    assert r.status_code == 200
+    a = TokenResponse.model_validate(r.json()).analysis
+    assert a and a.x and a.x.status == "ok" and fx_calls
+    assert a.x.text
+
+
 QUOTE_TID = "1850000000000000002"
 QUOTED_TID = "1790000000000000001"
 

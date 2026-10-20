@@ -1047,6 +1047,13 @@ def _ocr_pass(
     return lines, err, evs, ocr_text
 
 
+def _has_x_text(inp: EngineInput) -> bool:
+    """Tweet or profile body loaded (full depth or basic X interpret)."""
+    if inp.x_kind == "tweet" and inp.tweet is not None:
+        return True
+    return inp.x_kind == "profile" and inp.profile is not None
+
+
 def _run(inp: EngineInput, depth: str) -> EngineOutput:
     k = load_knowledge()
     # where the creator fees go is not what the coin is about ("fees to my wallet")
@@ -1064,24 +1071,26 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
         evidence += ocr_evs
         if ocr_text:
             extra_passes.append(("image", ocr_text, k.scoring.get("ocr_factor", 0.7)))
-        if inp.x_kind in ("tweet", "profile", "community", "search"):
-            xa = xsignals.assess(
-                inp.x_kind,
-                inp.x_url_handle,
-                inp.tweet,
-                inp.profile,
-                inp.created_at,
-                n.ticker or None,
-                inp.mint,
-                n.name_tokens,
-            )
-            evidence += xa.evidence
-            if xa.text:
-                extra_passes.append(("x", strip_fee_text(xa.text, k) or "", 0.8))
-            for related in (xa.quoted, xa.replied_to):
-                if related and related.text:
-                    extra_passes.append(("x", strip_fee_text(related.text, k) or "", 0.7))
-            extra_passes += _account_passes(xa)
+    if inp.x_kind in ("tweet", "profile", "community", "search") and (
+        depth == "full" or _has_x_text(inp)
+    ):
+        xa = xsignals.assess(
+            inp.x_kind,
+            inp.x_url_handle,
+            inp.tweet,
+            inp.profile,
+            inp.created_at,
+            n.ticker or None,
+            inp.mint,
+            n.name_tokens,
+        )
+        evidence += xa.evidence
+        if xa.text:
+            extra_passes.append(("x", strip_fee_text(xa.text, k) or "", 0.8))
+        for related in (xa.quoted, xa.replied_to):
+            if related and related.text:
+                extra_passes.append(("x", strip_fee_text(related.text, k) or "", 0.7))
+        extra_passes += _account_passes(xa)
     gaz = inp.ctx.gazetteer if inp.ctx.gazetteer is not None else gazetteer.packaged()
     matches = known_coins.match_known(n, k, extra=inp.ctx.extra_coins)
     coin_words = frozenset(_kept_coin_words(matches, n))
@@ -1250,7 +1259,7 @@ def _run(inp: EngineInput, depth: str) -> EngineOutput:
             agg = aggregate(evidence, k, symbol_is_name=_symbol_is_name(n))
     _demote_description_only_referent(agg, head)
     referent_read = read_referent(agg, symbol_is_name, k)
-    if depth == "full" and xa is not None and xa.status == "ok" and inp.x_kind == "tweet":
+    if xa is not None and xa.status == "ok" and inp.x_kind == "tweet":
         referent_read = _post_subject(referent_read, agg, inp, xa, n, k)
     flags = _flags(inp, n, agg, is_famous, recent_copies, matches)
     flags += _lineage_flags(lin, k)
