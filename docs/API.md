@@ -25,7 +25,7 @@ flow and the rendered result. Useful for checking what a given CA returns before
 - Each key has a per-minute rate limit (300/min on the deployed service; code default 60). Exceeding it → `429 rate_limited` with
   `Retry-After` (seconds).
 - Each key also has **daily quotas** (UTC day) for the expensive calls: `depth=full` analyses
-  (20,000/day on the deployed service; code default 2000) and `refresh=true` re-analyses (default 200/day). Cached reads and
+  (20,000/day on the deployed service; code default 2000) and `refresh=true` (or `max_age=0`) re-analyses (default 200/day). Cached reads and
   `depth=basic` work are not quota-limited. A unit is charged only when a request creates a
   new analysis job: re-requesting a pending analysis (the 202 → retry loop), polling
   `GET /v1/jobs/{id}`, or a batch item that joins an already-open job costs nothing, even after
@@ -48,7 +48,7 @@ GET /v1/tokens/{ca}?depth=full&wait=10
 |---|---|---|
 | `depth` | `full` | `basic` (fast, text + image hashes, no X fetch) or `full` (adds OCR, X content, trends) |
 | `wait` | `10` | Seconds to wait for a fresh analysis before answering `202` (0–25) |
-| `max_age` | by token age | Accept a cached analysis up to this many seconds old. Defaults: 5 min for tokens < 1 h old, 1 h up to 7 days, 24 h after that |
+| `max_age` | by token age | Accept a cached analysis up to this many seconds old. Defaults: 5 min for tokens < 1 h old, 1 h up to 7 days, 24 h after that. `max_age=0` accepts no cached copy and counts as `refresh=true` (same daily refresh quota) |
 | `refresh` | `false` | Force a new analysis (rate-limited more strictly) |
 | `include` | all parts | Comma list of optional parts to keep: `evidence`, `raw`. Omit it to get everything; a part you leave out is emptied (`evidence: []`, `raw` fields null). `include=evidence` drops `raw`; `include=raw` drops `evidence` |
 
