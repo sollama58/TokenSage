@@ -61,7 +61,7 @@ async def db(migrated_db: str, clean_tables: None) -> AsyncIterator[asyncpg.Conn
 
 
 async def _get(client: httpx.AsyncClient, ca: str, **params: object) -> httpx.Response:
-    # these tests cover resolution; depth=basic keeps X/trend fetching out of the picture
+    # resolution tests use depth=basic; X mirror fetch is off in the test settings fixture
     return await client.get(f"/v1/tokens/{ca}", params={"wait": 8, "depth": "basic", **params})
 
 
@@ -85,7 +85,7 @@ async def test_token2022_pump_coin_full_resolution(
     assert a.image.status == "ok" and a.image.source_url and CID_IMG in a.image.source_url
     assert a.x is not None and a.x.ref.kind == "tweet"
     assert a.x.ref.tweet_id == "1791351500217754008" and a.x.ref.url_handle == "elonmusk"
-    assert a.x.object_time is not None and a.x.status == "not_fetched"
+    assert a.x.object_time is not None and a.x.status == "not_fetched"  # no X fetch in test settings
     assert "metadata_unresolved" not in {f.code for f in a.flags}
 
     # persisted state

@@ -178,6 +178,7 @@ def settings(migrated_db: str) -> Settings:
         solana_rpc_url="https://rpc.test/",
         ipfs_gateways="https://gw1.test,https://gw2.test",
         worker_poll_interval_s=0.2,
+        enable_basic_x_fetch=False,  # integration tests: no X mirror calls unless overridden
         _env_file=None,  # type: ignore[call-arg]
     )
 
@@ -187,7 +188,8 @@ async def clean_tables(migrated_db: str) -> AsyncIterator[None]:
     conn = await asyncpg.connect(migrated_db)
     try:
         await conn.execute(
-            "truncate job, analysis, token, api_usage, api_key, pair_token restart identity cascade"
+            "truncate job, analysis, token, api_usage, api_key, pair_token, "
+            "x_tweet, x_profile restart identity cascade"
         )
         yield
     finally:

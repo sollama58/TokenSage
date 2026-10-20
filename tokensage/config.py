@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     # answers 429 quota_exceeded. TrenchScanner refreshes each band coin about every 4 min.
     now_per_day: int = 50_000
 
+    # --- basic-depth X interpretation (since rules 0.36.0) ---
+    # On depth=basic, use cached tweet/profile text when present (tier A), and optionally
+    # fetch the primary post only (tier B; no quoted/replied/profile chain, media, or trends).
+    enable_basic_x: bool = True
+    enable_basic_x_fetch: bool = True  # false = cache-only tier A
+    basic_x_timeout_s: float = 3.0
+
     # --- full-depth job deadline (since rules 0.30.0) ---
     # The full-depth fetches (X, OCR, logo labels, trends, Wikipedia, news, Bluesky) run
     # concurrently; whatever is unfinished after this many seconds is cancelled and the read
