@@ -149,9 +149,7 @@ async def _job_and_latest_analysis(
     if row is None:
         return None, None
     fresh = (
-        (row["analysis_doc"], row["analysis_version"])
-        if row["analysis_doc"] is not None
-        else None
+        (row["analysis_doc"], row["analysis_version"]) if row["analysis_doc"] is not None else None
     )
     return queue.Job.from_record(row), fresh
 

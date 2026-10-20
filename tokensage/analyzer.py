@@ -359,7 +359,9 @@ async def _prefetch_db_reads(
 ]:
     """Independent SELECTs on one or two extra pool connections when a pool is available."""
 
-    async def names_and_market(c: asyncpg.Connection) -> tuple[
+    async def names_and_market(
+        c: asyncpg.Connection,
+    ) -> tuple[
         tuple[int, int | None, datetime | None],
         int | None,
         list[asyncpg.Record],
@@ -387,15 +389,15 @@ async def _prefetch_db_reads(
         top_rows = await _fetch_top_volume_rows(c, r.created_at)
         return x_reuse, creator_count, same_rows, top_rows
 
-    async def reference_data(c: asyncpg.Connection) -> tuple[
+    async def reference_data(
+        c: asyncpg.Connection,
+    ) -> tuple[
         MetaCounts | None,
         Any,
         list[KnownCoin],
         list[image_stage.Candidate],
     ]:
-        meta_counts = (
-            await _meta_counts(c, r, meta_words, **meta_cfg) if meta_words else None
-        )
+        meta_counts = await _meta_counts(c, r, meta_words, **meta_cfg) if meta_words else None
         gazetteer = await gazetteer_db.current(c)
         coins, logos = await _known_coins(c)
         return meta_counts, gazetteer, coins, logos
@@ -407,11 +409,14 @@ async def _prefetch_db_reads(
         # One extra connection only: the worker already holds `main` from the pool; two
         # workers with two extras each would exceed the default max_size and deadlock.
         async with pool.acquire() as extra:
-            (x_reuse, creator_count, same_rows, top_rows), (
-                meta_counts,
-                gazetteer,
-                coins,
-                logos,
+            (
+                (x_reuse, creator_count, same_rows, top_rows),
+                (
+                    meta_counts,
+                    gazetteer,
+                    coins,
+                    logos,
+                ),
             ) = await asyncio.gather(names_and_market(main), reference_data(extra))
     return x_reuse, creator_count, same_rows, meta_counts, top_rows, gazetteer, coins, logos
 
@@ -486,9 +491,7 @@ async def _db_context_queries(
         gazetteer,
         coins,
         logos,
-    ) = await _prefetch_db_reads(
-        pool, conn, ctx, r, x, ticker, name_compact, meta_words, meta_cfg
-    )
+    ) = await _prefetch_db_reads(pool, conn, ctx, r, x, ticker, name_compact, meta_words, meta_cfg)
     dbc.x_reuse_count, dbc.x_reuse_rank, dbc.x_reuse_first_at = x_reuse
     if creator_count is not None:
         dbc.creator_token_count = creator_count
