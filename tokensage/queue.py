@@ -168,11 +168,49 @@ async def get(conn: asyncpg.Connection, job_id: int) -> Job | None:
     return Job.from_record(row) if row else None
 
 
-async def pending_count(conn: asyncpg.Connection) -> int:
+async def pending_count(conn: asyncpg.Connection, priority: int | None = None) -> int:
     """Jobs waiting for a worker now. A metadata retry or a callback parked on a future
-    run_after is not queue depth: nothing is waiting on a worker for it yet."""
+    run_after is not queue depth: nothing is waiting on a worker for it yet.
+
+    With `priority`, only the jobs a new job at that priority would wait behind (as urgent
+    or more): a backlog of low-priority launch reads must not turn away a decision's read
+    or refresh, which the claim order serves first anyway (2026-10-20: 500 pending launch
+    reads held the queue at max_queue_depth and refused every new job)."""
+    if priority is None:
+        return await conn.fetchval(
+            "select count(*) from job where status = 'pending' and run_after <= now()"
+        )
     return await conn.fetchval(
-        "select count(*) from job where status = 'pending' and run_after <= now()"
+        """select count(*) from job
+           where status = 'pending' and run_after <= now() and priority <= $1""",
+        priority,
+    )
+
+
+async def expire_stale_low(conn: asyncpg.Connection, max_wait_s: float, limit: int = 500) -> int:
+    """Drop low-priority analyze jobs (PRIORITY_BATCH_LOW, the launch reads asked for every
+    new coin) that have waited longer than `max_wait_s`. Nobody waits on them: a batch caller
+    re-sends what it still wants (and gives up on its own sooner), so past that age the read
+    is for a coin no one is looking at, and serving it only delays the fresh ones. Deleted, not
+    failed, so a later request is not answered with a failure. A job with an open callback is
+    kept. Returns how many were dropped."""
+    return await conn.fetchval(
+        """with stale as (
+             select id from job
+             where status = 'pending' and kind = 'analyze' and priority = $1
+               and run_after < now() - make_interval(secs => $2)
+               and not exists (
+                 select 1 from job c
+                 where c.kind = 'callback' and c.status in ('pending', 'running')
+                   and c.payload->>'target_job_id' = job.id::text)
+             order by run_after
+             limit $3
+             for update skip locked
+           ), gone as (delete from job where id in (select id from stale) returning 1)
+           select count(*) from gone""",
+        PRIORITY_BATCH_LOW,
+        float(max_wait_s),
+        limit,
     )
 
 
@@ -205,7 +243,11 @@ async def claim(
                      and ($3::int is null or attempts < $3)))
             and run_after <= now()
             and ($2::text[] is null or kind = any($2))
-          order by priority, run_after
+          -- the low tier (launch reads) newest first: under a backlog the oldest of them are
+          -- for coins no one is looking at any more, while a fresh coin's read is wanted now
+          order by priority,
+                   case when priority = $5 then run_after end desc,
+                   run_after
           for update skip locked
           limit 1
         )
@@ -218,6 +260,7 @@ async def claim(
         kinds,
         max_attempts,
         uuid.uuid4().hex,
+        PRIORITY_BATCH_LOW,
     )
     return Job.from_record(row) if row else None
 
