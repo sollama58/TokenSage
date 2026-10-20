@@ -61,7 +61,7 @@ async def test_fetch_has_an_overall_time_limit() -> None:
 
         return httpx.Response(200, content=body())
 
-    with respx.mock() as router:
+    with respx.mock(assert_all_called=False) as router:
         router.get("https://slow.test/a").mock(side_effect=trickle)
         async with httpx.AsyncClient() as c:
             t0 = time.perf_counter()

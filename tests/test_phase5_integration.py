@@ -38,7 +38,9 @@ def _install_chain(router: respx.MockRouter) -> None:
 
 
 @contextlib.asynccontextmanager
-async def make_client(db: str, **over: Any) -> AsyncIterator[httpx.AsyncClient]:
+async def make_client(
+    db: str, *, bearer: str | None = None, **over: Any
+) -> AsyncIterator[httpx.AsyncClient]:
     from tokensage.api.app import create_app
 
     base: dict[str, Any] = dict(
@@ -53,12 +55,13 @@ async def make_client(db: str, **over: Any) -> AsyncIterator[httpx.AsyncClient]:
     )
     base.update(over)
     app = create_app(Settings(**base, _env_file=None))  # type: ignore[call-arg]
+    token = bearer if bearer is not None else API_KEY
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
-            headers={"Authorization": f"Bearer {API_KEY}"},
+            headers={"Authorization": f"Bearer {token}"},
         ) as c,
     ):
         yield c

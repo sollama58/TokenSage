@@ -9,7 +9,7 @@ import asyncpg
 import httpx
 import respx
 
-from tests.conftest import needs_db
+from tests.conftest import API_KEY, needs_db
 from tests.fixtures.chain import (
     CID_IMG,
     CID_META,
@@ -19,6 +19,7 @@ from tests.fixtures.chain import (
     FakeChain,
     install_web,
     metadata_json,
+    pinned_url,
 )
 from tests.test_phase5_integration import make_client, router  # noqa: F401
 from tokensage.api.schemas import TokenResponse
@@ -144,7 +145,9 @@ async def test_dead_hinted_logo_falls_back_to_the_onchain_one(
     clean_tables: None,
     router: respx.MockRouter,  # noqa: F811
 ) -> None:
-    dead = router.get("https://cdn.example.test/gone.png").mock(return_value=httpx.Response(404))
+    dead = router.get(pinned_url("https://cdn.example.test/gone.png")).mock(
+        return_value=httpx.Response(404)
+    )
     install_web(router, _chain())
     async with make_client(migrated_db) as c:
         r = await c.post(
@@ -183,6 +186,35 @@ async def test_batch_items_carry_hints(
     assert j["status"] == "done", j
     assert j["result"]["status"] == "partial"
     assert j["result"]["analysis"]["raw"]["description"] == "description from the caller"
+
+
+PEER_KEY = "peer-key-0123456789abcdef"
+
+
+async def test_hint_metadata_is_not_served_to_another_api_key(
+    migrated_db: str,
+    clean_tables: None,
+    router: respx.MockRouter,  # noqa: F811
+) -> None:
+    install_web(router, _chain())
+    keys = f"tester:{API_KEY},peer:{PEER_KEY}"
+    async with make_client(migrated_db, api_keys=keys) as c:
+        r = await c.post(
+            f"/v1/tokens/{T22_MINT}",
+            params={"wait": 5},
+            json={"hints": {**HINTS, "description": "poison from tester"}},
+        )
+        assert r.status_code == 200, r.text
+        tester_body = TokenResponse.model_validate(r.json())
+        assert tester_body.analysis is not None
+        assert tester_body.analysis.raw.description == "poison from tester"
+    async with make_client(migrated_db, api_keys=keys, bearer=PEER_KEY) as peer:
+        g = await peer.get(f"/v1/tokens/{T22_MINT}", params={"wait": 5})
+    assert g.status_code == 200, g.text
+    peer_body = TokenResponse.model_validate(g.json())
+    assert peer_body.analysis is not None
+    assert peer_body.analysis.raw.description != "poison from tester"
+    assert peer_body.analysis.raw.description == "just a dog wif a cap"
 
 
 async def test_batch_needs_at_least_one_ca(

@@ -129,10 +129,28 @@
       "Analysis": {
         "additionalProperties": false,
         "properties": {
+          "analysis_requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The api_key name that owned the analyze job when cacheable is false",
+            "title": "Analysis Requested By"
+          },
           "analyzed_at": {
             "format": "date-time",
             "title": "Analyzed At",
             "type": "string"
+          },
+          "cacheable": {
+            "default": true,
+            "description": "When false, only the API key that requested this read (analysis_requested_by) may receive it from cache or a shared job; other keys re-run the analysis",
+            "title": "Cacheable",
+            "type": "boolean"
           },
           "categories": {
             "default": [],

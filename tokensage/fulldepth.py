@@ -1164,7 +1164,11 @@ async def media_hashes(
                 MediaHash(url=url, status="ok", phash=feats.phash, phash_mirror=feats.phash_mirror),
                 feats.dhash,
             )
-        except (UnsafeUrl, FetchError) as e:
+        except UnsafeUrl as e:
+            from tokensage.net.safe_fetch import public_unsafe_detail
+
+            return MediaHash(url=url, status="failed", error=public_unsafe_detail(e)), None
+        except FetchError as e:
             return MediaHash(url=url, status="failed", error=str(e)[:200]), None
         except Exception as e:  # noqa: BLE001 - undecodable image etc.
             return MediaHash(url=url, status="failed", error=f"{type(e).__name__}: {e}"[:200]), None

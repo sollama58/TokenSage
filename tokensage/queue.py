@@ -45,6 +45,7 @@ class Job:
     last_error: str | None
     error_code: str | None = None
     payload: dict[str, Any] | None = None
+    requested_by: str | None = None
     # True only when enqueue() created this row (not joined an open job or reused a done one)
     inserted: bool = False
     # set by claim(): proves to complete/fail/renew_lease/defer/release that the caller still
@@ -64,6 +65,7 @@ class Job:
             last_error=r["last_error"],
             error_code=r["error_code"],
             payload=r["payload"] if "payload" in r.keys() else None,
+            requested_by=r["requested_by"] if "requested_by" in r.keys() else None,
             inserted=bool(r["inserted"]) if "inserted" in r.keys() else False,
             lease_token=r["lease_token"] if "lease_token" in r.keys() else None,
         )
@@ -134,8 +136,14 @@ async def _enqueue_row(
           where not exists (select 1 from recent)
           on conflict (kind, mint, depth) where status in ('pending','running')
           do update set priority = least(job.priority, excluded.priority),
-                        -- a later caller's hints help a job that has none yet
-                        payload = coalesce(job.payload, excluded.payload),
+                        -- a later caller's hints help a job that has none yet, same key only
+                        payload = case
+                          when excluded.payload is null then job.payload
+                          when job.payload is null then excluded.payload
+                          when job.requested_by is not distinct from excluded.requested_by
+                            then coalesce(job.payload, excluded.payload)
+                          else job.payload
+                        end,
                         -- an interactive request joining a job parked for a retry does
                         -- not wait out the park; a batch joiner never does, even one
                         -- that raises the job's priority

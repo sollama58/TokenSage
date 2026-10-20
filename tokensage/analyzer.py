@@ -1159,13 +1159,25 @@ def _normalized_view(out: EngineOutput | None) -> NormalizedOut:
 # ----------------------------------------------------------------- persistence
 
 
-async def _store_analysis(conn: asyncpg.Connection, doc: Analysis) -> int:
+async def _store_analysis(
+    conn: asyncpg.Connection, doc: Analysis, *, store_read: bool = True
+) -> int:
     async with conn.transaction():
         # basic and full jobs for one mint can finish together: serialise max(version)+1
         await conn.execute("select pg_advisory_xact_lock(hashtext('analysis:' || $1))", doc.mint)
         version = await _insert_analysis(conn, doc)
-        await _store_read(conn, doc)
+        if store_read:
+            await _store_read(conn, doc)
         return version
+
+
+def _hint_private_to_caller(hint_use: HintUse | None, m: md.Metadata | None) -> bool:
+    """Caller hints must not become another key's cache hit or shared x_ref / wave counts."""
+    if hint_use is None:
+        return False
+    if not hint_use.onchain_visible:
+        return True
+    return m is not None and m.origin == "hints"
 
 
 # the most referents trends.referent_hits matches, with room for the ones it skips
@@ -1359,7 +1371,11 @@ async def _onchain_logo_fallback(ctx: Context, uri: str, m: md.Metadata) -> None
 
 
 async def _schedule_retry(
-    conn: asyncpg.Connection, mint: str, depth: str, own_job_id: int | None = None
+    conn: asyncpg.Connection,
+    mint: str,
+    depth: str,
+    own_job_id: int | None = None,
+    lease_token: str | None = None,
 ) -> bool:
     """Queue the next metadata retry at token_metadata.next_retry_at. Called from inside a
     retry_metadata job (own_job_id), the job re-queues itself: inserting a new row would hit
@@ -1372,13 +1388,17 @@ async def _schedule_retry(
     if not row or row["next_retry_at"] is None:
         return False
     if own_job_id is not None:
-        await conn.execute(
-            """update job set status='pending', locked_until=null, run_after=$2,
-                 attempts = greatest(attempts - 1, 0)
-               where id=$1""",
+        tag = await conn.execute(
+            """update job set status='pending', locked_until=null, lease_token=null,
+                 run_after=$2, attempts = greatest(attempts - 1, 0)
+               where id=$1 and status='running'
+                 and ($3::text is null or lease_token = $3)""",
             own_job_id,
             row["next_retry_at"],
+            lease_token,
         )
+        if tag != "UPDATE 1":
+            return False
         log.info("metadata.retry_scheduled", mint=mint, run_after=str(row["next_retry_at"]))
         return True
     job = await conn.fetchrow(
@@ -1463,6 +1483,7 @@ async def analyze(
     mint: str,
     depth: str,
     hints: dict[str, Any] | None = None,
+    requested_by: str | None = None,
 ) -> int:
     """Resolve + fetch + engine + persist. Returns the new analysis.version.
     Raises AnalyzeFailed for definitive per-CA failures (404/422 at the API).
@@ -1639,6 +1660,10 @@ async def analyze(
 
     extras = await _read_extras(conn, ctx, r, out)
     doc = build_document(r, m, depth, out, x, hint_use, extras)
+    hint_private = _hint_private_to_caller(hint_use, m)
+    if hint_private:
+        doc.cacheable = False
+        doc.analysis_requested_by = requested_by
     if depth == "full":
         _attach_post_details(doc.x, inp.tweet)
     if timed_out:
@@ -1656,8 +1681,9 @@ async def analyze(
         score=score,
         label=doc.referent.label if doc.referent else None,
     )
-    await _store_xref(conn, r.mint, doc.x)
-    version = await _store_analysis(conn, doc)
+    if not hint_private:
+        await _store_xref(conn, r.mint, doc.x)
+    version = await _store_analysis(conn, doc, store_read=not hint_private)
     if depth == "full":
         await _store_trend_inputs(conn, r.mint, out)
     return version
@@ -2220,7 +2246,12 @@ class RetryRescheduled(Exception):
 
 
 async def retry_metadata(
-    conn: asyncpg.Connection, ctx: Context, mint: str, depth: str, job_id: int | None = None
+    conn: asyncpg.Connection,
+    ctx: Context,
+    mint: str,
+    depth: str,
+    job_id: int | None = None,
+    lease_token: str | None = None,
 ) -> int | None:
     """Background job: try the metadata again; on success re-run the analysis. If it is
     still unresolved and more retries are due, raises RetryRescheduled (job re-queued)."""
@@ -2237,6 +2268,8 @@ async def retry_metadata(
         # the state is final; the stored analysis says partial, so re-run it once to clear
         # that (the API would otherwise keep re-analysing it every 60 s)
         return await analyze(conn, ctx, mint, depth)
-    if m.status == "unresolved" and await _schedule_retry(conn, mint, depth, own_job_id=job_id):
+    if m.status == "unresolved" and await _schedule_retry(
+        conn, mint, depth, own_job_id=job_id, lease_token=lease_token
+    ):
         raise RetryRescheduled
     return None

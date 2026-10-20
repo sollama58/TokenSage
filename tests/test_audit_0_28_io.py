@@ -99,6 +99,10 @@ def test_build_and_from_hints_survive_bracket_urls() -> None:
 
 @respx.mock
 async def test_fetch_metadata_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.fixtures.chain import public_resolver
+    from tokensage.net import safe_fetch
+
+    monkeypatch.setattr(safe_fetch, "DEFAULT_RESOLVER", public_resolver)
     respx.get("https://ex.test/m.json").mock(
         return_value=httpx.Response(200, json={"name": "x", "website": "https://[::1"})
     )
@@ -264,14 +268,16 @@ async def test_ipfs_too_large_is_definitive_but_404_is_not() -> None:
 @respx.mock
 async def test_safe_get_refuses_a_compressed_answer() -> None:
     bomb = gzip.compress(b"\x00" * 300_000)  # a few hundred bytes that inflate to 300 KB
-    respx.get("https://a.test/gz").mock(
+    from tests.fixtures.chain import pinned_url
+
+    respx.get(pinned_url("https://a.test/gz")).mock(
         return_value=httpx.Response(
             200,
             content=bomb,
             headers={"content-encoding": "gzip", "content-length": str(len(bomb))},
         )
     )
-    respx.get("https://a.test/plain").mock(
+    respx.get(pinned_url("https://a.test/plain")).mock(
         return_value=httpx.Response(200, content=b"ok", headers={"content-encoding": "identity"})
     )
     async with httpx.AsyncClient() as c:

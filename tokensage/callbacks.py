@@ -26,7 +26,7 @@ import httpx
 import structlog
 
 from tokensage import queue
-from tokensage.net.safe_fetch import UnsafeUrl, check_url
+from tokensage.net.safe_fetch import UnsafeUrl, _stream_request, check_url, prepare_connect
 
 log = structlog.get_logger("callbacks")
 CALLBACK_RETRY_S = 30
@@ -120,8 +120,9 @@ async def deliver(http: httpx.AsyncClient, payload: dict[str, Any], body: dict[s
 async def _post(http: httpx.AsyncClient, url: str, raw: bytes, headers: dict[str, str]) -> int:
     """POST and return the status; the response body is read only up to
     CALLBACK_BODY_MAX_BYTES and then dropped."""
-    async with http.stream(
-        "POST", url, content=raw, headers=headers, timeout=8.0, follow_redirects=False
+    target = await prepare_connect(url)
+    async with _stream_request(
+        http, "POST", target, timeout=8.0, headers=headers, content=raw
     ) as r:
         got = 0
         async for chunk in r.aiter_bytes():

@@ -895,6 +895,15 @@ class Analysis(_Model):
     depth: Depth
     analyzed_at: datetime
     versions: Versions
+    cacheable: bool = Field(
+        default=True,
+        description="When false, only the API key that requested this read (analysis_requested_by) "
+        "may receive it from cache or a shared job; other keys re-run the analysis",
+    )
+    analysis_requested_by: str | None = Field(
+        default=None,
+        description="The api_key name that owned the analyze job when cacheable is false",
+    )
 
 
 # ---------------------------------------------------------------- Envelope

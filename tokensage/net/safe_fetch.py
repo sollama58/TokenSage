@@ -3,11 +3,9 @@
 - https only
 - DNS is resolved up front and every address must be public (no private, loopback,
   link-local, multicast, reserved, or cloud-metadata ranges)
+- the TCP connection uses that resolved address (Host + TLS SNI stay the original name)
 - redirects are followed manually (<= 3 hops) and each hop is re-checked
 - byte and time caps, streamed; no cookies, no credentials
-
-Known limitation: the check-then-connect sequence leaves a small DNS-rebinding window.
-Acceptable for v1 given there are no internal services to reach from these containers.
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -58,6 +56,23 @@ class Fetched:
     truncated: bool = False
 
 
+@dataclass(frozen=True)
+class ConnectTarget:
+    """How to open one hop: connect to `request_url`, present `host` as Host and SNI."""
+
+    request_url: str
+    host: str
+
+
+def public_unsafe_detail(exc: BaseException) -> str:
+    """A fixed string for API/analysis storage; never echo resolved internal addresses."""
+    if isinstance(exc, UnsafeUrl):
+        msg = str(exc)
+        if " resolves to non-public " in msg or msg.startswith("ip not public"):
+            return "unsafe url"
+    return "unsafe url"
+
+
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         ip = ip.ipv4_mapped
@@ -75,22 +90,20 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-async def check_url(url: str, resolver: Resolver | None = None) -> str:
-    """Validate scheme/host and resolve DNS; return the normalised URL or raise UnsafeUrl.
-    Malformed URLs (bad port, invalid IDNA label, ...) are UnsafeUrl too, never a bare
-    ValueError/UnicodeError escaping to the caller."""
-    try:
-        return await _check_url(url, resolver)
-    except (UnsafeUrl, FetchError):
-        raise
-    except (ValueError, UnicodeError) as e:
-        raise UnsafeUrl(f"malformed url: {type(e).__name__}: {e}"[:200]) from e
+def _url_with_ip(url: str, ip: str) -> str:
+    parts = urlsplit(url)
+    hostpart = f"[{ip}]" if ":" in ip and not ip.startswith("[") else ip
+    if parts.port:
+        hostpart = f"{hostpart}:{parts.port}"
+    return urlunsplit((parts.scheme, hostpart, parts.path, parts.query, parts.fragment))
 
 
-async def _check_url(url: str, resolver: Resolver | None) -> str:
+async def prepare_connect(url: str, resolver: Resolver | None = None) -> ConnectTarget:
+    """Validate `url` and return where to connect so DNS cannot change after the check."""
     parts = urlsplit(url)
     if _dev_insecure():
-        return url  # DEV ONLY (see Settings.dev_allow_insecure_fetch)
+        host = (parts.hostname or "").lower().rstrip(".")
+        return ConnectTarget(url, host)
     if parts.scheme != "https":
         raise UnsafeUrl(f"scheme not allowed: {parts.scheme or 'none'}")
     host = (parts.hostname or "").lower().rstrip(".")
@@ -106,7 +119,7 @@ async def _check_url(url: str, resolver: Resolver | None) -> str:
     if literal is not None:
         if not _is_public_ip(literal):
             raise UnsafeUrl(f"ip not public: {literal}")
-        return url
+        return ConnectTarget(url, host)
     loop = asyncio.get_running_loop()
     try:
         fn: Resolver = resolver or DEFAULT_RESOLVER or loop.getaddrinfo
@@ -115,11 +128,60 @@ async def _check_url(url: str, resolver: Resolver | None) -> str:
         raise FetchError(f"dns failure for {host}: {e}") from e
     if not infos:
         raise FetchError(f"dns returned nothing for {host}")
+    connect_ip: str | None = None
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not _is_public_ip(ip):
             raise UnsafeUrl(f"{host} resolves to non-public {ip}")
-    return url
+        if connect_ip is None:
+            connect_ip = info[4][0]
+    assert connect_ip is not None
+    return ConnectTarget(_url_with_ip(url, connect_ip), host)
+
+
+async def check_url(url: str, resolver: Resolver | None = None) -> str:
+    """Validate scheme/host and resolve DNS; return the normalised URL or raise UnsafeUrl.
+    Malformed URLs (bad port, invalid IDNA label, ...) are UnsafeUrl too, never a bare
+    ValueError/UnicodeError escaping to the caller."""
+    try:
+        await prepare_connect(url, resolver)
+        return url
+    except (UnsafeUrl, FetchError):
+        raise
+    except (ValueError, UnicodeError) as e:
+        raise UnsafeUrl(f"malformed url: {type(e).__name__}: {e}"[:200]) from e
+
+
+def _stream_request(
+    client: httpx.AsyncClient,
+    method: str,
+    target: ConnectTarget,
+    *,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+    content: bytes | None = None,
+) -> Any:
+    hdrs = dict(headers or {})
+    hdrs.setdefault("Host", target.host)
+    extensions = {"sni_hostname": target.host}
+    if content is None:
+        return client.stream(
+            method,
+            target.request_url,
+            headers=hdrs,
+            timeout=timeout,
+            follow_redirects=False,
+            extensions=extensions,
+        )
+    return client.stream(
+        method,
+        target.request_url,
+        content=content,
+        headers=hdrs,
+        timeout=timeout,
+        follow_redirects=False,
+        extensions=extensions,
+    )
 
 
 async def safe_get(
@@ -150,16 +212,14 @@ async def _safe_get(
 ) -> Fetched:
     current = url
     for _hop in range(MAX_REDIRECTS + 1):
-        await check_url(current, resolver=resolver)
+        target = await prepare_connect(current, resolver=resolver)
         try:
-            async with client.stream(
+            async with _stream_request(
+                client,
                 "GET",
-                current,
-                # identity: the byte cap applies to what we hold in memory; a compressed
-                # body could otherwise inflate far past it within one chunk
-                headers={"Accept": accept, "Accept-Encoding": "identity"},
+                target,
                 timeout=timeout,
-                follow_redirects=False,
+                headers={"Accept": accept, "Accept-Encoding": "identity"},
             ) as r:
                 if r.status_code in (301, 302, 303, 307, 308):
                     loc = r.headers.get("location")
