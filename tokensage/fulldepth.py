@@ -487,9 +487,9 @@ async def basic_x_load(
         return out
     if x.ref.kind == "profile" and x.ref.handle:
         handle = x.ref.handle
-        cached = await _profile_snapshot_ok(sconn, handle)
-        if cached is not None:
-            out.profile = cached
+        prof = await _profile_snapshot_ok(sconn, handle)
+        if prof is not None:
+            out.profile = prof
             return out
         if not settings.enable_basic_x_fetch:
             return out
