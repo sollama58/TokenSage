@@ -120,6 +120,43 @@ async def test_refresh_quota_exhausted_returns_429(
         assert r.json()["freshness"]["from_cache"] is True
 
 
+async def test_max_age_zero_is_charged_as_a_refresh(
+    migrated_db: str, clean_tables: None, router: respx.MockRouter
+) -> None:
+    """max_age=0 re-runs the analysis like refresh=true, so it spends (and is refused by)
+    the same daily refresh allowance; a positive max_age stays a plain read."""
+    _install_chain(router)
+    async with make_client(migrated_db, refresh_per_day_default=1) as c:
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "wait": 5})
+        assert r.status_code == 200, r.text
+        assert r.headers["x-quota-refresh-remaining"] == "1"
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "max_age": 3600})
+        assert r.status_code == 200 and r.json()["freshness"]["from_cache"] is True
+        assert r.headers["x-quota-refresh-remaining"] == "1"
+        await asyncio.sleep(1.1)  # the cached copy must be older than 0 s
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "max_age": 0, "wait": 5})
+        assert r.status_code == 200, r.text
+        assert r.json()["freshness"]["from_cache"] is False
+        assert r.headers["x-quota-refresh-remaining"] == "0"
+        await asyncio.sleep(1.1)
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "max_age": 0, "wait": 5})
+        assert r.status_code == 429, r.text
+        assert r.json()["error"]["code"] == "quota_exceeded"
+        assert r.headers["x-quota-refresh-remaining"] == "0"
+        # refresh=true draws on the same allowance
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "refresh": "true"})
+        assert r.status_code == 429
+        # a positive max_age is unaffected once the refresh quota is gone
+        r = await c.get(f"/v1/tokens/{MINT}", params={"depth": "basic", "max_age": 3600})
+        assert r.status_code == 200 and r.json()["freshness"]["from_cache"] is True
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        row = await conn.fetchrow("select requests, full_calls, refreshes from api_usage")
+        assert dict(row) == {"requests": 6, "full_calls": 0, "refreshes": 1}
+    finally:
+        await conn.close()
+
+
 async def test_queue_full_returns_503_overloaded(
     migrated_db: str, clean_tables: None, router: respx.MockRouter
 ) -> None:

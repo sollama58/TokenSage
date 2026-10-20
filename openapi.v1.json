@@ -7157,6 +7157,7 @@
             }
           },
           {
+            "description": "accept a cached analysis up to this many seconds old (default by token age). 0 accepts none: a new analysis is charged like refresh=true",
             "in": "query",
             "name": "max_age",
             "required": false,
@@ -7171,6 +7172,7 @@
                   "type": "null"
                 }
               ],
+              "description": "accept a cached analysis up to this many seconds old (default by token age). 0 accepts none: a new analysis is charged like refresh=true",
               "title": "Max Age"
             }
           },
@@ -7340,6 +7342,7 @@
             }
           },
           {
+            "description": "accept a cached analysis up to this many seconds old (default by token age). 0 accepts none: a new analysis is charged like refresh=true",
             "in": "query",
             "name": "max_age",
             "required": false,
@@ -7354,6 +7357,7 @@
                   "type": "null"
                 }
               ],
+              "description": "accept a cached analysis up to this many seconds old (default by token age). 0 accepts none: a new analysis is charged like refresh=true",
               "title": "Max Age"
             }
           },

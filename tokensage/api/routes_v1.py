@@ -55,6 +55,10 @@ INCLUDE_DOC = (
     "comma list of optional parts to keep: evidence, raw. Omit to get everything; "
     "a part left out of the list is dropped (evidence -> [], raw -> empty)"
 )
+MAX_AGE_DOC = (
+    "accept a cached analysis up to this many seconds old (default by token age). "
+    "0 accepts none: a new analysis is charged like refresh=true"
+)
 
 
 def err(description: str) -> dict:
@@ -97,7 +101,7 @@ async def get_token(
     key: Annotated[ApiKey, Depends(require_api_key)],
     depth: Depth | None = None,
     wait: Annotated[int | None, Query(ge=0, le=25)] = None,
-    max_age: Annotated[int | None, Query(ge=0, le=7 * 86400)] = None,
+    max_age: Annotated[int | None, Query(ge=0, le=7 * 86400, description=MAX_AGE_DOC)] = None,
     refresh: bool = False,
     include: Annotated[str | None, Query(description=INCLUDE_DOC)] = None,
 ) -> TokenResponse:
@@ -125,7 +129,7 @@ async def post_token(
     body: TokenRequest | None = None,
     depth: Depth | None = None,
     wait: Annotated[int | None, Query(ge=0, le=25)] = None,
-    max_age: Annotated[int | None, Query(ge=0, le=7 * 86400)] = None,
+    max_age: Annotated[int | None, Query(ge=0, le=7 * 86400, description=MAX_AGE_DOC)] = None,
     refresh: bool = False,
     include: Annotated[str | None, Query(description=INCLUDE_DOC)] = None,
 ) -> TokenResponse:

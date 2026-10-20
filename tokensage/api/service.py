@@ -307,7 +307,9 @@ async def get_or_enqueue(
 
                 raise errors.overloaded()
             if key is not None:
-                await _enforce_quotas(conn, key, depth, refresh)
+                # max_age=0 accepts no cached copy, so it re-runs like refresh=true and is
+                # charged against the same refresh allowance (decision 2026-10-20)
+                await _enforce_quotas(conn, key, depth, refresh or max_age_s == 0)
 
         async def enqueue(reuse_s: float) -> queue.Job:
             return await queue.enqueue(
