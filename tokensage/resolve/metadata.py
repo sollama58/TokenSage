@@ -21,7 +21,13 @@ import structlog
 from tokensage.config import Settings
 from tokensage.net.breaker import breaker
 from tokensage.net.ipfs import fetch_ipfs, parse_ipfs
-from tokensage.net.safe_fetch import Fetched, FetchError, UnsafeUrl, safe_get
+from tokensage.net.safe_fetch import (
+    Fetched,
+    FetchError,
+    UnsafeUrl,
+    public_unsafe_detail,
+    safe_get,
+)
 
 log = structlog.get_logger("metadata")
 
@@ -249,7 +255,7 @@ async def fetch_metadata(client: httpx.AsyncClient, uri: str, settings: Settings
             accept="application/json, */*",
         )
     except UnsafeUrl as e:
-        return Metadata(status="invalid", error=f"unsafe uri: {e}")
+        return Metadata(status="invalid", error=f"unsafe uri: {public_unsafe_detail(e)}")
     except FetchError as e:
         return Metadata(status="unresolved" if e.retryable else "invalid", error=str(e))
     except Exception as e:  # noqa: BLE001 - "never raises": a bad uri must not fail the job
@@ -399,7 +405,7 @@ async def attach_image(
             m.image_bytes = img.body
             m.image_content_key = content_key_for(m.image_url, img.body)
     except UnsafeUrl as e:
-        m.image_error = f"unsafe image url: {e}"
+        m.image_error = f"unsafe image url: {public_unsafe_detail(e)}"
     except FetchError as e:
         m.image_error = str(e)
     except Exception as e:  # noqa: BLE001 - never fail the analysis over the logo

@@ -84,7 +84,7 @@ async def test_a_failure_is_kept_briefly_then_tried_again(monkeypatch: pytest.Mo
 async def test_memo_is_bounded_by_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(md, "IMAGE_MEMO_MAX_BYTES", len(PNG) * 2)
     with respx.mock(assert_all_called=False) as router:
-        router.get(url__regex=r"https://cdn\.example\.test/\d+\.png").mock(
+        router.get(url__regex=r"https://(cdn\.example\.test|93\.184\.216\.34)/\d+\.png").mock(
             return_value=httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
         )
         async with httpx.AsyncClient() as client:

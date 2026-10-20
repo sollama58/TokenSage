@@ -291,7 +291,9 @@ async def test_full_depth_compares_post_media_with_the_logo(
             router.get(f"{xs.FX}/status/{QUOTE_TID}").mock(
                 return_value=httpx.Response(200, json=post)
             )
-            router.get(url__startswith=MEDIA_URL).mock(side_effect=media)
+            router.get(url__regex=r"https://(pbs\.twimg\.com|93\.184\.216\.34)/media/LOGOCOPY\.jpg").mock(
+                side_effect=media
+            )
             router.get(url__startswith=f"{xs.FX}/profile/").mock(return_value=httpx.Response(404))
             router.get(url__startswith=xs.VX).mock(return_value=httpx.Response(404))
             router.get(url__startswith="https://news.google.com/rss/search").mock(

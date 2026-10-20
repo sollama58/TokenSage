@@ -366,21 +366,22 @@ async def get_job(
         # Only analysis jobs are handed out (as job_id). The others are internal and belong to
         # no caller: a callback job's error names the address its URL resolved to at delivery,
         # which the batch route keeps out of its own answer (#71), and job ids are sequential.
-        if job is None or job.kind != "analyze":
+        if job is None or job.kind != "analyze" or job.requested_by != key.name:
             raise errors.not_found("job_not_found", "no such job")
         result: TokenResponse | None = None
         if job.status == "done" and job.mint and job.depth:
             latest = await service.latest_analysis(conn, job.mint, job.depth)
             if latest:
                 doc, _ = latest
-                result = TokenResponse(
-                    ca=job.mint,
-                    status=service._status_for(doc),  # type: ignore[arg-type]
-                    depth=doc["depth"],
-                    analysis=stored_analysis(doc),
-                    errors=service.doc_errors(doc),
-                    request_id=rid,
-                )
+                if service._may_serve_analysis(doc, key.name):
+                    result = TokenResponse(
+                        ca=job.mint,
+                        status=service._status_for(doc),  # type: ignore[arg-type]
+                        depth=doc["depth"],
+                        analysis=stored_analysis(doc),
+                        errors=service.doc_errors(doc),
+                        request_id=rid,
+                    )
     return JobResponse(
         job_id=job.id,
         status=job.status,  # type: ignore[arg-type]

@@ -76,9 +76,9 @@ async def test_jobs_route_hides_internal_jobs(client: httpx.AsyncClient, migrate
                        now()) returning id"""
         )
         an = await conn.fetchval(
-            """insert into job (kind, mint, depth, status, last_error, finished_at)
+            """insert into job (kind, mint, depth, status, last_error, finished_at, requested_by)
                values ('analyze', 'So11111111111111111111111111111111111111112', 'basic',
-                       'failed', 'boom', now()) returning id"""
+                       'failed', 'boom', now(), 'tester') returning id"""
         )
     finally:
         await conn.close()

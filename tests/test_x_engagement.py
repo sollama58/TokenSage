@@ -94,7 +94,7 @@ async def http() -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def test_fx_engagement_and_media_are_parsed(http: httpx.AsyncClient) -> None:
-    with respx.mock() as router:
+    with respx.mock(assert_all_called=False) as router:
         router.get(f"{xs.FX}/status/{POST_ID}").mock(
             return_value=httpx.Response(200, json=_post(41000, 9_800_000))
         )

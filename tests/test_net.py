@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from tests.fixtures.chain import GW1, GW2, public_resolver
+from tests.fixtures.chain import GW1, GW2, pinned_url, public_resolver
 from tokensage.net import safe_fetch
 from tokensage.net.ipfs import IpfsRef, fetch_ipfs, parse_ipfs
 from tokensage.net.safe_fetch import FetchError, UnsafeUrl, check_url, safe_get
@@ -63,8 +63,10 @@ async def test_check_url_accepts_public() -> None:
 
 @respx.mock
 async def test_safe_get_follows_safe_redirects_and_rechecks() -> None:
-    respx.get("https://a.test/1").mock(return_value=httpx.Response(302, headers={"location": "/2"}))
-    respx.get("https://a.test/2").mock(return_value=httpx.Response(200, content=b"ok"))
+    respx.get(pinned_url("https://a.test/1")).mock(
+        return_value=httpx.Response(302, headers={"location": "/2"})
+    )
+    respx.get(pinned_url("https://a.test/2")).mock(return_value=httpx.Response(200, content=b"ok"))
     async with httpx.AsyncClient() as c:
         f = await safe_get(c, "https://a.test/1", max_bytes=100, timeout=5)
     assert f.body == b"ok" and f.url == "https://a.test/2"
@@ -72,7 +74,7 @@ async def test_safe_get_follows_safe_redirects_and_rechecks() -> None:
 
 @respx.mock
 async def test_safe_get_blocks_redirect_to_private() -> None:
-    respx.get("https://a.test/1").mock(
+    respx.get(pinned_url("https://a.test/1")).mock(
         return_value=httpx.Response(302, headers={"location": "https://127.0.0.1/"})
     )
     async with httpx.AsyncClient() as c:
@@ -82,9 +84,11 @@ async def test_safe_get_blocks_redirect_to_private() -> None:
 
 @respx.mock
 async def test_safe_get_caps_size_and_redirect_count() -> None:
-    respx.get("https://a.test/big").mock(return_value=httpx.Response(200, content=b"x" * 1000))
+    respx.get(pinned_url("https://a.test/big")).mock(
+        return_value=httpx.Response(200, content=b"x" * 1000)
+    )
     for i in range(6):
-        respx.get(f"https://a.test/r{i}").mock(
+        respx.get(pinned_url(f"https://a.test/r{i}")).mock(
             return_value=httpx.Response(302, headers={"location": f"/r{i + 1}"})
         )
     async with httpx.AsyncClient() as c:
@@ -96,8 +100,8 @@ async def test_safe_get_caps_size_and_redirect_count() -> None:
 
 @respx.mock
 async def test_safe_get_status_classification() -> None:
-    respx.get("https://a.test/404").mock(return_value=httpx.Response(404))
-    respx.get("https://a.test/503").mock(return_value=httpx.Response(503))
+    respx.get(pinned_url("https://a.test/404")).mock(return_value=httpx.Response(404))
+    respx.get(pinned_url("https://a.test/503")).mock(return_value=httpx.Response(503))
     async with httpx.AsyncClient() as c:
         with pytest.raises(FetchError) as e1:
             await safe_get(c, "https://a.test/404", max_bytes=10, timeout=5)
@@ -105,6 +109,33 @@ async def test_safe_get_status_classification() -> None:
         with pytest.raises(FetchError) as e2:
             await safe_get(c, "https://a.test/503", max_bytes=10, timeout=5)
         assert e2.value.retryable is True
+
+
+@respx.mock
+async def test_prepare_connect_rejects_when_dns_flips_to_private() -> None:
+    calls = 0
+
+    async def flip(host: str, port: int, **_: Any) -> list[Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [(2, 1, 6, "", ("93.184.216.34", port))]
+        return [(2, 1, 6, "", ("10.0.0.5", port))]
+
+    respx.get(pinned_url("https://a.test/1")).mock(
+        return_value=httpx.Response(302, headers={"location": "/2"})
+    )
+    async with httpx.AsyncClient() as c:
+        with pytest.raises(UnsafeUrl):
+            await safe_get(c, "https://a.test/1", max_bytes=100, timeout=5, resolver=flip)
+
+
+async def test_public_unsafe_detail_hides_resolved_ip() -> None:
+    from tokensage.net.safe_fetch import public_unsafe_detail
+
+    exc = UnsafeUrl("evil.test resolves to non-public 10.1.2.3")
+    assert public_unsafe_detail(exc) == "unsafe url"
+    assert "10.1.2.3" not in public_unsafe_detail(exc)
 
 
 # ------------------------------------------------------------- ipfs
@@ -148,7 +179,10 @@ def test_parse_ipfs_non_ipfs() -> None:
 async def test_fetch_ipfs_falls_back_to_second_gateway() -> None:
     cid = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
     respx.get(f"{GW1}/ipfs/{cid}").mock(return_value=httpx.Response(429))
-    respx.get(f"{GW2}/ipfs/{cid}").mock(return_value=httpx.Response(200, content=b"{}"))
+    respx.get(pinned_url(f"{GW1}/ipfs/{cid}")).mock(return_value=httpx.Response(429))
+    ok = httpx.Response(200, content=b"{}")
+    respx.get(f"{GW2}/ipfs/{cid}").mock(return_value=ok)
+    respx.get(pinned_url(f"{GW2}/ipfs/{cid}")).mock(return_value=ok)
     async with httpx.AsyncClient() as c:
         f = await fetch_ipfs(c, IpfsRef(cid), [GW1, GW2], max_bytes=100, timeout=5, stagger_s=0.01)
     assert f.body == b"{}" and f.url.startswith(GW2)
@@ -157,19 +191,30 @@ async def test_fetch_ipfs_falls_back_to_second_gateway() -> None:
 @respx.mock
 async def test_fetch_ipfs_skips_a_gateway_that_answered_429() -> None:
     cid = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
-    gw1 = respx.get(f"{GW1}/ipfs/{cid}").mock(return_value=httpx.Response(429))
-    respx.get(f"{GW2}/ipfs/{cid}").mock(return_value=httpx.Response(200, content=b"{}"))
+    gw1_calls = 0
+
+    def gw1_429(*_: object, **__: object) -> httpx.Response:
+        nonlocal gw1_calls
+        gw1_calls += 1
+        return httpx.Response(429)
+
+    respx.get(f"{GW1}/ipfs/{cid}").mock(side_effect=gw1_429)
+    ok = httpx.Response(200, content=b"{}")
+    respx.get(f"{GW2}/ipfs/{cid}").mock(return_value=ok)
+    respx.get(pinned_url(f"{GW2}/ipfs/{cid}")).mock(return_value=ok)
     async with httpx.AsyncClient() as c:
         await fetch_ipfs(c, IpfsRef(cid), [GW1, GW2], max_bytes=100, timeout=5, stagger_s=0.01)
         f = await fetch_ipfs(c, IpfsRef(cid), [GW1, GW2], max_bytes=100, timeout=5, stagger_s=0.01)
     assert f.url.startswith(GW2)
-    assert gw1.call_count == 1  # the second race left the throttled gateway out
+    assert gw1_calls == 1  # the second race left the throttled gateway out
 
 
 @respx.mock
 async def test_fetch_ipfs_all_fail_is_retryable() -> None:
     cid = "bafkreig5wtk2ui6yti4zaczp2u4x27rkbnyzf7n7ontszeedlicqcc2mxe"
-    respx.get(url__regex=r"https://gw[12]\.test/.*").mock(return_value=httpx.Response(504))
+    respx.get(url__regex=r"https://(gw[12]\.test|93\.184\.216\.3[45])/.*").mock(
+        return_value=httpx.Response(504)
+    )
     async with httpx.AsyncClient() as c:
         with pytest.raises(FetchError) as e:
             await fetch_ipfs(c, IpfsRef(cid), [GW1, GW2], max_bytes=100, timeout=5, stagger_s=0.01)
@@ -188,7 +233,7 @@ async def test_fetch_ipfs_overall_cap_gives_up_retryable() -> None:
         await asyncio.sleep(10)
         return httpx.Response(200, content=b"{}")
 
-    respx.get(url__regex=r"https://gw[12]\.test/.*").mock(side_effect=hang)
+    respx.get(url__regex=r"https://(gw[12]\.test|93\.184\.216\.3[45])/.*").mock(side_effect=hang)
     t0 = time.monotonic()
     async with httpx.AsyncClient() as c:
         with pytest.raises(FetchError) as e:

@@ -1,6 +1,6 @@
 # TokenSage code review
 
-Review-only pass of `main` at `a27de78` (2026-10-20, "Charge max_age=0 against the refresh allowance"). No source files were changed. The two items called out as already decided or in flight (webhook HMAC key equals the stored key hash, and charging `max_age=0` like `refresh=true`) are omitted.
+Review pass of `main` at `a27de78` (2026-10-20, "Charge max_age=0 against the refresh allowance"). Findings SG-001–SG-008 are addressed on branch `cursor/tokensage-code-review-eeee`. The two items called out as already decided or in flight (webhook HMAC key equals the stored key hash, and charging `max_age=0` like `refresh=true`) are omitted from the findings table.
 
 ## Summary
 

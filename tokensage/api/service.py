@@ -52,6 +52,52 @@ DEFINITIVE_CODES = {
 }
 
 
+def _analysis_cacheable(doc: dict[str, Any]) -> bool:
+    return doc.get("cacheable", True) is not False
+
+
+def _may_serve_analysis(doc: dict[str, Any], key_name: str | None) -> bool:
+    if _analysis_cacheable(doc):
+        return True
+    owner = doc.get("analysis_requested_by")
+    return bool(key_name and owner and key_name == owner)
+
+
+async def _enqueue_analyze(
+    conn: asyncpg.Connection,
+    settings: Settings,
+    *,
+    mint: str,
+    depth: str,
+    priority: int,
+    requested_by: str,
+    reuse_done_within_s: float,
+    key: ApiKey | None,
+    refresh: bool,
+    max_age_s: int | None,
+    hints: dict[str, Any] | None,
+) -> queue.Job:
+    async def charge(j: queue.Job) -> None:
+        if not j.inserted:
+            return
+        if await queue.pending_count(conn, priority) > settings.max_queue_depth:
+            raise errors.overloaded()
+        if key is not None:
+            await _enforce_quotas(conn, key, depth, refresh or max_age_s == 0)
+
+    return await queue.enqueue(
+        conn,
+        "analyze",
+        mint,
+        depth,
+        priority=priority,
+        requested_by=requested_by,
+        reuse_done_within_s=reuse_done_within_s,
+        before_commit=charge,
+        payload={"hints": hints} if hints else None,
+    )
+
+
 def default_max_age(settings: Settings, token_created_at: datetime | None) -> int:
     if token_created_at is None:
         return settings.max_age_mid_s
@@ -271,7 +317,12 @@ async def get_or_enqueue(
             outdated = outdated or (
                 max_age_s is None and engagement_expired(doc, created, settings)
             )
-            if fr.age_s is not None and fr.age_s <= max_age and not outdated:
+            if (
+                fr.age_s is not None
+                and fr.age_s <= max_age
+                and not outdated
+                and _may_serve_analysis(doc, key.name if key else None)
+            ):
                 return TokenResponse(
                     ca=mint,
                     status=_status_for(doc),  # type: ignore[arg-type]
@@ -290,43 +341,25 @@ async def get_or_enqueue(
             if failed is not None and not (hinted and failed[1] == "token_not_found"):
                 fid, code, last_error = failed
                 if code in DEFINITIVE_CODES:
-                    from tokensage.api import errors
-
                     status, api_code = DEFINITIVE_CODES[code]
                     raise errors.ApiError(status, api_code, last_error or api_code)
                 return _failed_response(mint, depth, cached, fid, last_error, request_id, code)
 
-        async def charge(j: queue.Job) -> None:
-            # Only a newly created job costs quota or counts against the queue limit.
-            # Joining an open job (the documented 202 -> retry loop) or reusing one that
-            # just finished is always allowed. Raising here rolls the new job back.
-            if not j.inserted:
-                return
-            if await queue.pending_count(conn, priority) > settings.max_queue_depth:
-                from tokensage.api import errors
-
-                raise errors.overloaded()
-            if key is not None:
-                # max_age=0 accepts no cached copy, so it re-runs like refresh=true and is
-                # charged against the same refresh allowance (decision 2026-10-20)
-                await _enforce_quotas(conn, key, depth, refresh or max_age_s == 0)
-
-        async def enqueue(reuse_s: float) -> queue.Job:
-            return await queue.enqueue(
-                conn,
-                "analyze",
-                mint,
-                depth,
-                priority=priority,
-                requested_by=requested_by,
-                reuse_done_within_s=reuse_s,
-                before_commit=charge,
-                payload={"hints": hints} if hints else None,
-            )
-
         # a refresh always re-analyses; otherwise reuse a job that just finished
         # (nor one whose result came from older rules)
-        job = await enqueue(0 if refresh or outdated else REUSE_DONE_WITHIN_S)
+        job = await _enqueue_analyze(
+            conn,
+            settings,
+            mint=mint,
+            depth=depth,
+            priority=priority,
+            requested_by=requested_by,
+            reuse_done_within_s=0 if refresh or outdated else REUSE_DONE_WITHIN_S,
+            key=key,
+            refresh=refresh,
+            max_age_s=max_age_s,
+            hints=hints,
+        )
         reused = job.status == "done"
         if reused:
             # The reused job's result must satisfy the caller's bound: it closes the race of
@@ -336,7 +369,9 @@ async def get_or_enqueue(
             if fresh is not None:
                 doc, _ = fresh
                 fr = _freshness(doc, max_age, from_cache=True)
-                if fr.age_s is not None and fr.age_s <= max_age:
+                if fr.age_s is not None and fr.age_s <= max_age and _may_serve_analysis(
+                    doc, key.name if key else None
+                ):
                     return TokenResponse(
                         ca=mint,
                         status=_status_for(doc),  # type: ignore[arg-type]
@@ -346,7 +381,19 @@ async def get_or_enqueue(
                         errors=doc_errors(doc),
                         request_id=request_id,
                     )
-            job = await enqueue(0)
+            job = await _enqueue_analyze(
+                conn,
+                settings,
+                mint=mint,
+                depth=depth,
+                priority=priority,
+                requested_by=requested_by,
+                reuse_done_within_s=0,
+                key=key,
+                refresh=refresh,
+                max_age_s=max_age_s,
+                hints=hints,
+            )
         if callback_url and key is not None:
             from tokensage import callbacks
 
@@ -359,41 +406,64 @@ async def get_or_enqueue(
     else:
         finished = await waiter.wait(job.id, wait_s) if wait_s > 0 else False
 
-    async with pool.acquire() as conn:
-        if finished:
-            j = await queue.get(conn, job.id)
-            if j and j.status == "done":
-                fresh = await latest_analysis(conn, mint, depth)
-                if fresh:
-                    doc, _ = fresh
-                    return TokenResponse(
-                        ca=mint,
-                        status=_status_for(doc),  # type: ignore[arg-type]
-                        depth=doc["depth"],
-                        analysis=stored_analysis(doc),
-                        freshness=_freshness(doc, max_age, from_cache=False),
-                        errors=doc_errors(doc),
-                        request_id=request_id,
+    retried_for_caller = False
+    while True:
+        async with pool.acquire() as conn:
+            if finished:
+                j = await queue.get(conn, job.id)
+                if j and j.status == "done":
+                    fresh = await latest_analysis(conn, mint, depth)
+                    if fresh:
+                        doc, _ = fresh
+                        if _may_serve_analysis(doc, key.name if key else None):
+                            return TokenResponse(
+                                ca=mint,
+                                status=_status_for(doc),  # type: ignore[arg-type]
+                                depth=doc["depth"],
+                                analysis=stored_analysis(doc),
+                                freshness=_freshness(doc, max_age, from_cache=False),
+                                errors=doc_errors(doc),
+                                request_id=request_id,
+                            )
+                    if not retried_for_caller and key is not None:
+                        retried_for_caller = True
+                        job = await _enqueue_analyze(
+                            conn,
+                            settings,
+                            mint=mint,
+                            depth=depth,
+                            priority=priority,
+                            requested_by=requested_by,
+                            reuse_done_within_s=0,
+                            key=key,
+                            refresh=refresh,
+                            max_age_s=max_age_s,
+                            hints=hints,
+                        )
+                        finished = (
+                            job.status == "done"
+                            or (await waiter.wait(job.id, wait_s) if wait_s > 0 else False)
+                        )
+                        continue
+                if j and j.status == "failed" and j.error_code in DEFINITIVE_CODES:
+                    status, code = DEFINITIVE_CODES[j.error_code]
+                    raise errors.ApiError(status, code, j.last_error or code)
+                if j and j.status == "failed":
+                    return _failed_response(
+                        mint, depth, cached, job.id, j.last_error, request_id, j.error_code
                     )
-            if j and j.status == "failed" and j.error_code in DEFINITIVE_CODES:
-                from tokensage.api import errors
-
-                status, code = DEFINITIVE_CODES[j.error_code]
-                raise errors.ApiError(status, code, j.last_error or code)
-            if j and j.status == "failed":
-                return _failed_response(
-                    mint, depth, cached, job.id, j.last_error, request_id, j.error_code
-                )
-        stale = cached[0] if cached else None
-        return TokenResponse(
-            ca=mint,
-            status="pending",
-            depth=depth,  # type: ignore[arg-type]
-            stale_analysis=stored_analysis(stale) if stale else None,
-            freshness=_freshness(stale, max_age, from_cache=True) if stale else Freshness(),
-            job_id=job.id,
-            request_id=request_id,
-        )
+            stale = cached[0] if cached else None
+            if stale and not _may_serve_analysis(stale, key.name if key else None):
+                stale = None
+            return TokenResponse(
+                ca=mint,
+                status="pending",
+                depth=depth,  # type: ignore[arg-type]
+                stale_analysis=stored_analysis(stale) if stale else None,
+                freshness=_freshness(stale, max_age, from_cache=True) if stale else Freshness(),
+                job_id=job.id,
+                request_id=request_id,
+            )
 
 
 # ----------------------------------------------------------------- decision-time refresh

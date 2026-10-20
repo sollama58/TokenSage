@@ -279,7 +279,14 @@ class Worker:
             if job.kind == "analyze":
                 assert job.mint and job.depth
                 hints = (job.payload or {}).get("hints") if job.payload else None
-                version = await analyze(conn, self.ctx, job.mint, job.depth, hints=hints)
+                version = await analyze(
+                    conn,
+                    self.ctx,
+                    job.mint,
+                    job.depth,
+                    hints=hints,
+                    requested_by=job.requested_by,
+                )
                 if await queue.complete(conn, job.id, version, job.lease_token):
                     bound.info("job.done", version=version)
                 else:
@@ -302,7 +309,14 @@ class Worker:
             elif job.kind == "retry_metadata":
                 assert job.mint and job.depth
                 try:
-                    rv = await retry_metadata(conn, self.ctx, job.mint, job.depth, job_id=job.id)
+                    rv = await retry_metadata(
+                        conn,
+                        self.ctx,
+                        job.mint,
+                        job.depth,
+                        job_id=job.id,
+                        lease_token=job.lease_token,
+                    )
                 except RetryRescheduled:
                     bound.info("job.retry_metadata.rescheduled")
                     return

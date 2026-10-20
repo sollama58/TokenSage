@@ -5,6 +5,7 @@ volume; a token with several pools counts once, with their volumes summed."""
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass
 
@@ -218,7 +219,7 @@ def _num(v: object) -> float | None:
         f = float(v)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    return f if f == f else None  # NaN
+    return f if math.isfinite(f) else None
 
 
 def parse_pools(doc: dict) -> list[PoolQuote]:
