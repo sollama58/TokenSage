@@ -129,6 +129,31 @@ async def latest_analysis(
     return (r["doc"], r["version"]) if r else None
 
 
+async def _job_and_latest_analysis(
+    conn: asyncpg.Connection, job_id: int, mint: str, depth: str
+) -> tuple[queue.Job | None, tuple[dict[str, Any], int] | None]:
+    """One round trip after a wait: job row plus the newest analysis when the job finished."""
+    row = await conn.fetchrow(
+        """select j.*, lat.doc as analysis_doc, lat.version as analysis_version
+           from job j
+           left join lateral (
+             select doc, version from (
+               select doc, version, depth from analysis where mint=$2 order by version desc limit 5
+             ) t where $3::text is null or depth = $3 order by version desc limit 1
+           ) lat on j.status = 'done'
+           where j.id = $1""",
+        job_id,
+        mint,
+        _min_depth(depth),
+    )
+    if row is None:
+        return None, None
+    fresh = (
+        (row["analysis_doc"], row["analysis_version"]) if row["analysis_doc"] is not None else None
+    )
+    return queue.Job.from_record(row), fresh
+
+
 async def _created_and_latest(
     conn: asyncpg.Connection, mint: str, depth: str
 ) -> tuple[datetime | None, tuple[dict[str, Any], int] | None]:
@@ -412,9 +437,8 @@ async def get_or_enqueue(
     while True:
         async with pool.acquire() as conn:
             if finished:
-                j = await queue.get(conn, job.id)
+                j, fresh = await _job_and_latest_analysis(conn, job.id, mint, depth)
                 if j and j.status == "done":
-                    fresh = await latest_analysis(conn, mint, depth)
                     if fresh:
                         doc, _ = fresh
                         if _may_serve_analysis(doc, key.name if key else None):

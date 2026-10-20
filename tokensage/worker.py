@@ -286,6 +286,7 @@ class Worker:
                     job.depth,
                     hints=hints,
                     requested_by=job.requested_by,
+                    pool=self.pool,
                 )
                 if await queue.complete(conn, job.id, version, job.lease_token):
                     bound.info("job.done", version=version)
