@@ -337,6 +337,19 @@ async def _fetch_top_volume_rows(
     )
 
 
+async def _awaited_namesakes(task: asyncio.Task[list[SameNameToken]]) -> list[SameNameToken]:
+    """The external name search's hits; none when we cancelled it as not needed. A cancel of
+    this job itself (heartbeat lost the lease, shutdown) arrives here too while it waits, and
+    must go on up: swallowed, the job wrote its analysis after another worker had claimed it."""
+    try:
+        return await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+        return []
+
+
 async def _prefetch_db_reads(
     pool: asyncpg.Pool | None,
     main: asyncpg.Connection,
@@ -603,13 +616,9 @@ async def _db_context_queries(
             )
     if ext_task is not None:
         # nothing above reads same_name: the external namesakes join it here, after ours
-        found: list[SameNameToken] = []
         if len(dbc.same_name) >= EXT_LOOKUP_SKIP_DB_NAMESAKES and not ext_task.done():
             ext_task.cancel()
-        try:
-            found = await ext_task
-        except asyncio.CancelledError:
-            pass
+        found = await _awaited_namesakes(ext_task)
         known = {t.mint for t in dbc.same_name} | {r.mint}
         dbc.same_name += [t for t in found if t.mint not in known]
     dbc.originals = await _prior_reads(

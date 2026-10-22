@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from typing import Any
 
@@ -177,3 +178,35 @@ async def test_guarded_fetches_are_metered_by_hostname() -> None:
 
 def test_shared_clients_pin_connections() -> None:
     assert isinstance(metrics.MeteredTransport().inner, PinnedTransport)
+
+
+# ------------------------------------------------- TS-5: the job's own cancel is not swallowed
+
+
+async def test_a_cancelled_name_search_reads_as_no_hits() -> None:
+    from tokensage import analyzer
+
+    search = asyncio.create_task(asyncio.sleep(10, result=[]))
+    search.cancel()
+    assert await analyzer._awaited_namesakes(search) == []
+
+
+async def test_the_jobs_own_cancel_is_not_swallowed_by_the_name_search() -> None:
+    """The heartbeat cancels a job whose lease is lost; swallowed while the job waited on
+    the external search, the job went on to write a duplicate analysis."""
+    from tokensage import analyzer
+
+    went_on = False
+
+    async def job() -> None:
+        nonlocal went_on
+        search = asyncio.create_task(asyncio.sleep(10, result=[]))
+        await analyzer._awaited_namesakes(search)
+        went_on = True
+
+    t = asyncio.create_task(job())
+    await asyncio.sleep(0.05)
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+    assert not went_on
