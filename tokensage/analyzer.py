@@ -421,16 +421,20 @@ async def _prefetch_db_reads(
     else:
         # One extra connection only: the worker already holds `main` from the pool; two
         # workers with two extras each would exceed the default max_size and deadlock.
+        # Both finish before either error is raised: `main` is the job's own connection, and
+        # a query still running on it made the worker's queue.fail() hit "another operation
+        # is in progress", leaving the job `running` until its lease ran out (and the pool
+        # took `extra` back mid-query the other way round).
         async with pool.acquire() as extra:
-            (
-                (x_reuse, creator_count, same_rows, top_rows),
-                (
-                    meta_counts,
-                    gazetteer,
-                    coins,
-                    logos,
-                ),
-            ) = await asyncio.gather(names_and_market(main), reference_data(extra))
+            names, refs = await asyncio.gather(
+                names_and_market(main), reference_data(extra), return_exceptions=True
+            )
+        if isinstance(names, BaseException):
+            raise names
+        if isinstance(refs, BaseException):
+            raise refs
+        x_reuse, creator_count, same_rows, top_rows = names
+        meta_counts, gazetteer, coins, logos = refs
     return x_reuse, creator_count, same_rows, meta_counts, top_rows, gazetteer, coins, logos
 
 

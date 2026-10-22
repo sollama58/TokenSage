@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+import contextlib
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 import asyncpg
@@ -210,3 +211,61 @@ async def test_the_jobs_own_cancel_is_not_swallowed_by_the_name_search() -> None
     with pytest.raises(asyncio.CancelledError):
         await t
     assert not went_on
+
+
+# ------------------------------------------------- TS-6: no query left running on a failure
+
+
+class _Conn:
+    """A connection whose queries take `delay_s`, or fail at once with `error`."""
+
+    def __init__(self, delay_s: float = 0.0, error: Exception | None = None) -> None:
+        self.delay_s, self.error = delay_s, error
+        self.running = 0
+
+    async def _query(self, *_: Any) -> Any:
+        if self.error is not None:
+            raise self.error
+        self.running += 1
+        try:
+            await asyncio.sleep(self.delay_s)
+        finally:
+            self.running -= 1
+        return []
+
+    fetch = fetchrow = fetchval = _query
+
+
+class _Pool:
+    def __init__(self, conn: _Conn) -> None:
+        self.conn = conn
+
+    @contextlib.asynccontextmanager
+    async def acquire(self) -> AsyncIterator[_Conn]:
+        yield self.conn
+
+
+async def test_a_failed_reference_query_waits_for_the_jobs_own_query() -> None:
+    """With a bare gather the extra connection's error came up while `main` (the job's own
+    connection) was still mid-query, so the worker's queue.fail() on it raised "another
+    operation is in progress" and the job sat `running` until its lease ran out."""
+    from types import SimpleNamespace
+
+    from tokensage import analyzer
+
+    main = _Conn(delay_s=0.2)
+    extra = _Conn(error=asyncpg.exceptions.QueryCanceledError("statement timeout"))
+    r = SimpleNamespace(mint="M", created_at=None, creator=None)
+    with pytest.raises(asyncpg.exceptions.QueryCanceledError):
+        await analyzer._prefetch_db_reads(
+            _Pool(extra),  # type: ignore[arg-type]
+            main,  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            r,  # type: ignore[arg-type]
+            None,
+            None,
+            "",
+            None,
+            {},
+        )
+    assert main.running == 0  # `main` is free for queue.fail()
