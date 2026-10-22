@@ -19,6 +19,8 @@ import asyncpg
 import httpx
 import structlog
 
+from tokensage.net.safe_fetch import PinnedTransport
+
 log = structlog.get_logger("metrics")
 
 FLUSH_INTERVAL_S = 30.0
@@ -230,8 +232,9 @@ class MeteredTransport(httpx.AsyncBaseTransport):
 
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None, **kwargs: object):
         # No env proxy: token URLs are SSRF-guarded by pinning the connect address; a proxy
-        # would resolve and dial on its own (see analyzer Context.trust_env=False).
-        self.inner = inner or httpx.AsyncHTTPTransport(**kwargs)  # type: ignore[arg-type]
+        # would resolve and dial on its own (see analyzer Context.trust_env=False). The
+        # pinning itself happens in PinnedTransport's network backend.
+        self.inner = inner or PinnedTransport(**kwargs)  # type: ignore[arg-type]
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host

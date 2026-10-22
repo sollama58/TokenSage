@@ -314,31 +314,8 @@ def metadata_json(**over: Any) -> bytes:
     return json.dumps(d).encode()
 
 
-PUBLIC_PIN_IP = "93.184.216.34"
-# Two gateway hostnames must pin to different addresses so respx can tell them apart
-# (httpx connects by IP; only the Host header names the gateway).
-_PIN_BY_HOST = {"gw1.test": "93.184.216.34", "gw2.test": "93.184.216.35"}
-
-
 async def public_resolver(host: str, port: int, **_: Any) -> list[Any]:
-    ip = _PIN_BY_HOST.get(host.lower().rstrip("."), PUBLIC_PIN_IP)
-    return [(2, 1, 6, "", (ip, port))]
-
-
-GW_HOST_RE = r"https://(gw[12]\.test|93\.184\.216\.3[45])/"
-
-
-def pinned_url(url: str, *, ip: str | None = None) -> str:
-    """URL httpx sees after safe_fetch DNS pinning (hostname replaced, path unchanged)."""
-    from urllib.parse import urlsplit, urlunsplit
-
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower().rstrip(".")
-    pin = ip if ip is not None else _PIN_BY_HOST.get(host, PUBLIC_PIN_IP)
-    hostpart = f"[{pin}]" if ":" in pin and not pin.startswith("[") else pin
-    if parts.port:
-        hostpart = f"{hostpart}:{parts.port}"
-    return urlunsplit((parts.scheme, hostpart, parts.path, parts.query, parts.fragment))
+    return [(2, 1, 6, "", ("93.184.216.34", port))]
 
 
 def install_web(
@@ -354,11 +331,10 @@ def install_web(
         meta_headers = {"content-type": "application/json"}
         img_resp = httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
         for gw in (GW1, GW2):
-            for base in (gw, pinned_url(gw)):
-                router.get(f"{base}/ipfs/{CID_META}").mock(
-                    return_value=httpx.Response(200, content=meta_body, headers=meta_headers)
-                )
-                router.get(f"{base}/ipfs/{CID_IMG}").mock(return_value=img_resp)
+            router.get(f"{gw}/ipfs/{CID_META}").mock(
+                return_value=httpx.Response(200, content=meta_body, headers=meta_headers)
+            )
+            router.get(f"{gw}/ipfs/{CID_IMG}").mock(return_value=img_resp)
     else:
         router.get(url__regex=r"https://gw[12]\.test/.*").mock(return_value=httpx.Response(503))
     router.get(url__regex=r"https://frontend-api-v3\.pump\.fun/.*").mock(

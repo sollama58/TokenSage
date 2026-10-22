@@ -136,12 +136,13 @@ async def _enqueue_row(
           where not exists (select 1 from recent)
           on conflict (kind, mint, depth) where status in ('pending','running')
           do update set priority = least(job.priority, excluded.priority),
-                        -- a later caller's hints help a job that has none yet, same key only
+                        -- a later caller's hints help a job that has none yet, same key
+                        -- only: the job's owner is who the result is private to, so another
+                        -- key's hints would be served to it as its own
                         payload = case
-                          when excluded.payload is null then job.payload
-                          when job.payload is null then excluded.payload
-                          when job.requested_by is not distinct from excluded.requested_by
-                            then coalesce(job.payload, excluded.payload)
+                          when job.payload is null
+                               and job.requested_by is not distinct from excluded.requested_by
+                            then excluded.payload
                           else job.payload
                         end,
                         -- an interactive request joining a job parked for a retry does

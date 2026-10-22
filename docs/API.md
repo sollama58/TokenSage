@@ -255,7 +255,8 @@ The linked post's public counts, and the same for `x.quoted` and `x.replied_to`:
   their cached copy (re-checked every 6 h for deletion) and the usual `max_age`. When the
   re-fetch fails (mirrors down) the older counts are served with their `as_of`, and the read is
   re-run at most once a minute (`X_ENGAGEMENT_RETRY_S`). An explicit `max_age` wins. Read
-  `as_of`, not `analyzed_at`, for the age of the counts.
+  `as_of`, not `analyzed_at`, for the age of the counts. A basic read (rules 0.36.0) carries
+  the newest stored counts but never fetches them again, so it keeps the usual `max_age`.
 - `media[]` (`type`: `photo`, `video`, `gif` or `unknown`; `url`; `thumbnail_url` for video and
   GIF): https URLs only, at most 4. Posts cached before rules 0.30.0 list their images with
   `type: "unknown"` until the next re-check. Like the logo, media are not screened.
@@ -495,7 +496,7 @@ re-read on every analysis (its running total moves), a plain wallet's is cached 
 | `POST /v1/tokens:batch` with `{"cas": [...≤50], "depth": "basic", "callback_url": "https://…"}` | Prefetch. Returns cached analyses immediately and `pending` + `job_id` for the rest. Never waits. `callback_url` is optional (see below). Items are handled one by one: if the daily quota runs out or the queue is full partway through, the remaining items come back as `status: "failed"` with `error: "quota_exceeded"` or `"overloaded"` and `retry_after_s`, while items already queued keep their `job_id`. A coin whose analysis failed for good in the last 10 minutes (20 s for `token_not_found`) comes back as `status: "failed"` with its code in `error` (`token_not_found`, `not_a_token_mint` or `not_pumpfun`) instead of failing the whole batch. A CA may be given as a pump.fun or explorer URL here; the item's `ca` is the bare mint |
 | `POST /v1/tokens/{ca}` with `{"hints": {...}}` | Same as the GET, with metadata you already have (see below) |
 | `POST /v1/tokens:now` with `{"cas": [...≤50], "wait": 0-10}` | Since rules 0.34.0: fresh trends and story heat for coins already read at full depth, see below. Free of the read quotas; new refreshes count against `NOW_PER_DAY` per key (429 `quota_exceeded`) and the queue limit (503 `overloaded`) |
-| `GET /v1/jobs/{job_id}` | An analysis job (a `job_id` from `/v1/tokens` or a batch item; any other id is `404 job_not_found`): `pending \| running \| done \| failed`, with the result when done. `result.status` is `complete` or `partial`, exactly as `GET /v1/tokens/{ca}` would report it (webhook callbacks carry the same) |
+| `GET /v1/jobs/{job_id}` | An analysis job (a `job_id` from `/v1/tokens` or a batch item: one your key started, or an internal one your request joined; another key's job, or any other id, is `404 job_not_found`): `pending \| running \| done \| failed`, with the result when done. `result.status` is `complete` or `partial`, exactly as `GET /v1/tokens/{ca}` would report it (webhook callbacks carry the same) |
 | `GET /v1/meta` | Schema/rule versions, the full category taxonomy, flag codes, and the disclaimer. Use it instead of hard-coding labels |
 | `GET /healthz` | Liveness (no auth) |
 
@@ -544,6 +545,10 @@ Every field is optional. How hints are treated:
   it again shortly afterwards re-analyses it with the on-chain view.
 - A cached analysis that is still fresh is returned as is; hints only matter when a new
   analysis runs. Hints are never cached as the coin's metadata.
+- **Private to the key that sent them.** An analysis built from hint metadata is not served to
+  another key as a cache hit, and does not count towards shared X-reuse counts or launch
+  waves. Keys named in the server's `TRUSTED_HINT_KEYS` (first-party consumers) are the
+  exception: their hinted reads are stored and counted like fetched ones.
 
 ### Webhook callbacks (optional)
 

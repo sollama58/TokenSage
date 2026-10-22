@@ -337,6 +337,19 @@ async def _fetch_top_volume_rows(
     )
 
 
+async def _awaited_namesakes(task: asyncio.Task[list[SameNameToken]]) -> list[SameNameToken]:
+    """The external name search's hits; none when we cancelled it as not needed. A cancel of
+    this job itself (heartbeat lost the lease, shutdown) arrives here too while it waits, and
+    must go on up: swallowed, the job wrote its analysis after another worker had claimed it."""
+    try:
+        return await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+        return []
+
+
 async def _prefetch_db_reads(
     pool: asyncpg.Pool | None,
     main: asyncpg.Connection,
@@ -408,16 +421,20 @@ async def _prefetch_db_reads(
     else:
         # One extra connection only: the worker already holds `main` from the pool; two
         # workers with two extras each would exceed the default max_size and deadlock.
+        # Both finish before either error is raised: `main` is the job's own connection, and
+        # a query still running on it made the worker's queue.fail() hit "another operation
+        # is in progress", leaving the job `running` until its lease ran out (and the pool
+        # took `extra` back mid-query the other way round).
         async with pool.acquire() as extra:
-            (
-                (x_reuse, creator_count, same_rows, top_rows),
-                (
-                    meta_counts,
-                    gazetteer,
-                    coins,
-                    logos,
-                ),
-            ) = await asyncio.gather(names_and_market(main), reference_data(extra))
+            names, refs = await asyncio.gather(
+                names_and_market(main), reference_data(extra), return_exceptions=True
+            )
+        if isinstance(names, BaseException):
+            raise names
+        if isinstance(refs, BaseException):
+            raise refs
+        x_reuse, creator_count, same_rows, top_rows = names
+        meta_counts, gazetteer, coins, logos = refs
     return x_reuse, creator_count, same_rows, meta_counts, top_rows, gazetteer, coins, logos
 
 
@@ -603,13 +620,9 @@ async def _db_context_queries(
             )
     if ext_task is not None:
         # nothing above reads same_name: the external namesakes join it here, after ours
-        found: list[SameNameToken] = []
         if len(dbc.same_name) >= EXT_LOOKUP_SKIP_DB_NAMESAKES and not ext_task.done():
             ext_task.cancel()
-        try:
-            found = await ext_task
-        except asyncio.CancelledError:
-            pass
+        found = await _awaited_namesakes(ext_task)
         known = {t.mint for t in dbc.same_name} | {r.mint}
         dbc.same_name += [t for t in found if t.mint not in known]
     dbc.originals = await _prior_reads(
@@ -1293,9 +1306,19 @@ async def _store_analysis(
         return version
 
 
-def _hint_private_to_caller(hint_use: HintUse | None, m: md.Metadata | None) -> bool:
-    """Caller hints must not become another key's cache hit or shared x_ref / wave counts."""
+def _hint_private_to_caller(
+    hint_use: HintUse | None,
+    m: md.Metadata | None,
+    requested_by: str | None = None,
+    trusted: frozenset[str] = frozenset(),
+) -> bool:
+    """Caller hints must not become another key's cache hit or shared x_ref / wave counts.
+    A key in TRUSTED_HINT_KEYS sends first-party data (TrenchScanner forwards pump.fun's own
+    fields): its reads are stored like fetched ones, or X-reuse counts and launch waves would
+    miss nearly every coin, since that key hints every read it makes."""
     if hint_use is None:
+        return False
+    if requested_by is not None and requested_by in trusted:
         return False
     if not hint_use.onchain_visible:
         return True
@@ -1817,7 +1840,9 @@ async def analyze(
 
     extras = await _read_extras(conn, ctx, r, out)
     doc = build_document(r, m, depth, out, x, hint_use, extras)
-    hint_private = _hint_private_to_caller(hint_use, m)
+    hint_private = _hint_private_to_caller(
+        hint_use, m, requested_by, ctx.settings.trusted_hint_key_set
+    )
     if hint_private:
         doc.cacheable = False
         doc.analysis_requested_by = requested_by

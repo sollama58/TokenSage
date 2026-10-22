@@ -431,12 +431,18 @@ class BasicXLoad:
 
 
 async def _tweet_snapshot_ok(conn: asyncpg.Connection, tweet_id: str) -> TweetData | None:
+    """The stored post with its newest counts, as _tweet_cached reads it: the first snapshot
+    alone carried the first fetch's counts and as_of into every basic read."""
     row = await conn.fetchrow(
-        "select first_snapshot, status from x_tweet where tweet_id=$1",
+        "select first_snapshot, latest, status from x_tweet where tweet_id=$1",
         tweet_id,
     )
     if row and row["status"] == "ok" and row["first_snapshot"]:
-        return TweetData.from_json(row["first_snapshot"])
+        record = TweetData.from_json(row["first_snapshot"])
+        latest = _latest_copy(row["latest"])
+        if latest is not None:
+            _take_engagement(record, latest)
+        return record
     return None
 
 

@@ -346,6 +346,16 @@ async def tokens_now(
     return NowResponse(items=out, request_id=request.state.request_id)
 
 
+# Analysis jobs no API key started: a read joining one is handed its id, so any key may poll
+# it (its analysis is still served only under _may_serve_analysis). None is the metadata
+# retry, pair_lookup the pair token's read, admin a retry from the admin panel.
+INTERNAL_REQUESTERS: frozenset[str | None] = frozenset({None, "pair_lookup", "admin"})
+
+
+def _may_poll(job: queue.Job, key_name: str) -> bool:
+    return job.requested_by == key_name or job.requested_by in INTERNAL_REQUESTERS
+
+
 @router.get(
     "/jobs/{job_id}",
     response_model=JobResponse,
@@ -366,7 +376,7 @@ async def get_job(
         # Only analysis jobs are handed out (as job_id). The others are internal and belong to
         # no caller: a callback job's error names the address its URL resolved to at delivery,
         # which the batch route keeps out of its own answer (#71), and job ids are sequential.
-        if job is None or job.kind != "analyze" or job.requested_by != key.name:
+        if job is None or job.kind != "analyze" or not _may_poll(job, key.name):
             raise errors.not_found("job_not_found", "no such job")
         result: TokenResponse | None = None
         if job.status == "done" and job.mint and job.depth:
