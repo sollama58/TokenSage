@@ -19,7 +19,6 @@ from tests.fixtures.chain import (
     FakeChain,
     install_web,
     metadata_json,
-    pinned_url,
 )
 from tests.test_phase5_integration import make_client, router  # noqa: F401
 from tokensage.api.schemas import TokenResponse
@@ -145,9 +144,7 @@ async def test_dead_hinted_logo_falls_back_to_the_onchain_one(
     clean_tables: None,
     router: respx.MockRouter,  # noqa: F811
 ) -> None:
-    dead = router.get(pinned_url("https://cdn.example.test/gone.png")).mock(
-        return_value=httpx.Response(404)
-    )
+    dead = router.get("https://cdn.example.test/gone.png").mock(return_value=httpx.Response(404))
     install_web(router, _chain())
     async with make_client(migrated_db) as c:
         r = await c.post(

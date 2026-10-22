@@ -3,7 +3,10 @@
 - https only
 - DNS is resolved up front and every address must be public (no private, loopback,
   link-local, multicast, reserved, or cloud-metadata ranges)
-- the TCP connection uses that resolved address (Host + TLS SNI stay the original name)
+- the TCP connection uses a resolved address: the URL keeps the hostname (so the connection
+  pool, TLS SNI, the certificate check and metering all see the real host) and PinnedBackend,
+  under every shared client's transport, dials the validated address instead of resolving
+  the name again
 - redirects are followed manually (<= 3 hops) and each hop is re-checked
 - byte and time caps, streamed; no cookies, no credentials
 """
@@ -11,13 +14,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit
 
+import httpcore
 import httpx
 
 Resolver = Callable[..., Awaitable[list[Any]]]
@@ -58,10 +64,97 @@ class Fetched:
 
 @dataclass(frozen=True)
 class ConnectTarget:
-    """How to open one hop: connect to `request_url`, present `host` as Host and SNI."""
+    """How to open one hop: request `url` and dial one of `addresses` for `host`, the name
+    httpx connects to. No addresses (dev insecure mode) = resolve as usual."""
 
-    request_url: str
+    url: str
     host: str
+    addresses: tuple[str, ...] = ()
+
+
+# The addresses prepare_connect validated, by host, for the request this task is sending.
+# None = no guarded request in flight: PinnedBackend resolves as usual (RPC, Wikipedia, ...).
+_pins: ContextVar[dict[str, tuple[str, ...]] | None] = ContextVar("safe_fetch_pins", default=None)
+
+
+def _pin_key(host: str) -> str:
+    return host.lower().rstrip(".")
+
+
+class PinnedBackend(httpcore.AsyncNetworkBackend):
+    """Dials the address prepare_connect validated, not whatever the name resolves to now.
+
+    With the IP in the URL instead (SG-001's first version), httpcore keyed its pool by IP and
+    reused a connection opened and certificate-checked for one host for any other host on that
+    address: two Pinata zones on one Cloudflare IP shared a TLS session, answered 403/421, and
+    the second host's certificate was never checked. Every address is tried in order, as
+    anyio does for a name, so a dead first record does not fail the fetch."""
+
+    def __init__(self, inner: httpcore.AsyncNetworkBackend | None = None) -> None:
+        self.inner = inner or httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[httpcore.SOCKET_OPTION] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        pins = _pins.get()
+        if pins is None:
+            addresses: tuple[str, ...] = (host,)
+        else:
+            addresses = pins.get(_pin_key(host), ())
+            if not addresses:
+                # a guarded request must never fall back to a fresh lookup
+                raise httpcore.ConnectError(f"no validated address for {host}")
+        last: Exception | None = None
+        for addr in addresses:
+            try:
+                return await self.inner.connect_tcp(
+                    addr,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                last = e
+        assert last is not None
+        raise last
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[httpcore.SOCKET_OPTION] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise httpcore.ConnectError("unix sockets are not used")
+
+    async def sleep(self, seconds: float) -> None:
+        await self.inner.sleep(seconds)
+
+
+class PinnedTransport(httpx.AsyncHTTPTransport):
+    """httpx's transport on a pool whose connections go through PinnedBackend. A client
+    that calls safe_get or delivers callbacks must sit on this (MeteredTransport does): on
+    any other transport the validated address is ignored."""
+
+    def __init__(
+        self,
+        limits: httpx.Limits | None = None,
+        network_backend: httpcore.AsyncNetworkBackend | None = None,
+    ) -> None:
+        limits = limits or httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        super().__init__(limits=limits)
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            max_connections=limits.max_connections,
+            max_keepalive_connections=limits.max_keepalive_connections,
+            keepalive_expiry=limits.keepalive_expiry,
+            network_backend=PinnedBackend(network_backend),
+        )
 
 
 def public_unsafe_detail(exc: BaseException) -> str:
@@ -90,14 +183,6 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _url_with_ip(url: str, ip: str) -> str:
-    parts = urlsplit(url)
-    hostpart = f"[{ip}]" if ":" in ip and not ip.startswith("[") else ip
-    if parts.port:
-        hostpart = f"{hostpart}:{parts.port}"
-    return urlunsplit((parts.scheme, hostpart, parts.path, parts.query, parts.fragment))
-
-
 async def prepare_connect(url: str, resolver: Resolver | None = None) -> ConnectTarget:
     """Validate `url` and return where to connect so DNS cannot change after the check."""
     parts = urlsplit(url)
@@ -113,30 +198,34 @@ async def prepare_connect(url: str, resolver: Resolver | None = None) -> Connect
         raise UnsafeUrl("credentials in URL")
     port = parts.port  # raises ValueError for out-of-range / non-numeric ports
     try:
+        # the name exactly as httpx will dial it (IDNA 2008, lowercased), so the pin matches
+        dial = httpx.URL(url).raw_host.decode("ascii")
+    except httpx.InvalidURL as e:
+        raise ValueError(str(e)) from e
+    try:
         literal = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         literal = None
     if literal is not None:
         if not _is_public_ip(literal):
             raise UnsafeUrl(f"ip not public: {literal}")
-        return ConnectTarget(url, host)
+        return ConnectTarget(url, dial, (str(literal),))
     loop = asyncio.get_running_loop()
     try:
         fn: Resolver = resolver or DEFAULT_RESOLVER or loop.getaddrinfo
-        infos = await fn(host, port or 443, type=socket.SOCK_STREAM)
+        infos = await fn(dial, port or 443, type=socket.SOCK_STREAM)
     except (socket.gaierror, OSError) as e:
         raise FetchError(f"dns failure for {host}: {e}") from e
     if not infos:
         raise FetchError(f"dns returned nothing for {host}")
-    connect_ip: str | None = None
+    addresses: list[str] = []
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not _is_public_ip(ip):
             raise UnsafeUrl(f"{host} resolves to non-public {ip}")
-        if connect_ip is None:
-            connect_ip = info[4][0]
-    assert connect_ip is not None
-    return ConnectTarget(_url_with_ip(url, connect_ip), host)
+        if info[4][0] not in addresses:
+            addresses.append(info[4][0])
+    return ConnectTarget(url, dial, tuple(addresses))
 
 
 async def check_url(url: str, resolver: Resolver | None = None) -> str:
@@ -152,7 +241,8 @@ async def check_url(url: str, resolver: Resolver | None = None) -> str:
         raise UnsafeUrl(f"malformed url: {type(e).__name__}: {e}"[:200]) from e
 
 
-def _stream_request(
+@contextlib.asynccontextmanager
+async def _stream_request(
     client: httpx.AsyncClient,
     method: str,
     target: ConnectTarget,
@@ -160,28 +250,22 @@ def _stream_request(
     timeout: float,
     headers: dict[str, str] | None = None,
     content: bytes | None = None,
-) -> Any:
-    hdrs = dict(headers or {})
-    hdrs.setdefault("Host", target.host)
-    extensions = {"sni_hostname": target.host}
-    if content is None:
-        return client.stream(
+) -> AsyncIterator[httpx.Response]:
+    # dev insecure mode validates nothing, so there is nothing to pin
+    pin = _pins.set({_pin_key(target.host): target.addresses}) if target.addresses else None
+    try:
+        async with client.stream(
             method,
-            target.request_url,
-            headers=hdrs,
+            target.url,
+            content=content,
+            headers=headers,
             timeout=timeout,
             follow_redirects=False,
-            extensions=extensions,
-        )
-    return client.stream(
-        method,
-        target.request_url,
-        content=content,
-        headers=hdrs,
-        timeout=timeout,
-        follow_redirects=False,
-        extensions=extensions,
-    )
+        ) as r:
+            yield r
+    finally:
+        if pin is not None:
+            _pins.reset(pin)
 
 
 async def safe_get(

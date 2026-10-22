@@ -268,16 +268,14 @@ async def test_ipfs_too_large_is_definitive_but_404_is_not() -> None:
 @respx.mock
 async def test_safe_get_refuses_a_compressed_answer() -> None:
     bomb = gzip.compress(b"\x00" * 300_000)  # a few hundred bytes that inflate to 300 KB
-    from tests.fixtures.chain import pinned_url
-
-    respx.get(pinned_url("https://a.test/gz")).mock(
+    respx.get("https://a.test/gz").mock(
         return_value=httpx.Response(
             200,
             content=bomb,
             headers={"content-encoding": "gzip", "content-length": str(len(bomb))},
         )
     )
-    respx.get(pinned_url("https://a.test/plain")).mock(
+    respx.get("https://a.test/plain").mock(
         return_value=httpx.Response(200, content=b"ok", headers={"content-encoding": "identity"})
     )
     async with httpx.AsyncClient() as c:
