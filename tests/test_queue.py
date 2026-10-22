@@ -259,3 +259,18 @@ async def test_pending_count_by_priority_ignores_the_low_backlog(conn: asyncpg.C
     assert await queue.pending_count(conn, queue.PRIORITY_BATCH) == 1
     assert await queue.pending_count(conn, queue.PRIORITY_API) == 0
     assert await queue.pending_count(conn, queue.PRIORITY_BATCH_LOW) == 4
+
+
+async def test_hints_join_an_open_job_from_its_own_key_only(conn: asyncpg.Connection) -> None:
+    """Audit 2026-10-22 TS-4: another key's hints filled a hint-less open job, and the read
+    built from them was served to the job's owner (SG-003's cross-key poisoning)."""
+    from tokensage.db import _init_connection
+
+    await _init_connection(conn)  # json codecs, as the API pool has
+    hints = {"hints": {"description": "poison"}}
+    j = await queue.enqueue(conn, "analyze", MINT, "basic", requested_by="a")
+    await queue.enqueue(conn, "analyze", MINT, "basic", requested_by="b", payload=hints)
+    assert await conn.fetchval("select payload from job where id=$1", j.id) is None
+    own = {"hints": {"description": "mine"}}
+    await queue.enqueue(conn, "analyze", MINT, "basic", requested_by="a", payload=own)
+    assert await conn.fetchval("select payload from job where id=$1", j.id) == own
