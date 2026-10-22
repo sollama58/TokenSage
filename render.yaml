@@ -98,6 +98,8 @@ services:
         sync: false
       - key: TWITTERAPI_IO_KEY # optional paid X fallback
         sync: false
+      - key: TRUSTED_HINT_KEYS # key names whose hints are first-party, e.g. "trenchscanner"
+        sync: false
 
   - type: cron
     name: tokensage-knowledge

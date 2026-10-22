@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # read-only key for the monitoring GETs under /admin/v1 (status, usage, recall, helius,
     # upstreams, queue, signals); the admin key works there too. Empty = off.
     monitor_key: str = ""
+    # Key names (as in API_KEYS / the api_key table) whose hints are first-party data, e.g.
+    # "trenchscanner". Another key's hint-derived read stays private to it (no shared cache
+    # hit, x_ref or token_read rows); a trusted key's read is stored like a fetched one, so
+    # X-reuse counts and launch waves keep seeing the coins it reads. Empty = trust none.
+    trusted_hint_keys: str = ""
     rate_per_min_default: int = 60
     full_per_day_default: int = 2000
     refresh_per_day_default: int = 200
@@ -211,6 +216,10 @@ class Settings(BaseSettings):
             if name and key:
                 out[name.strip()] = key.strip()
         return out
+
+    @property
+    def trusted_hint_key_set(self) -> frozenset[str]:
+        return frozenset(k.strip() for k in self.trusted_hint_keys.split(",") if k.strip())
 
     @property
     def ipfs_gateway_list(self) -> list[str]:

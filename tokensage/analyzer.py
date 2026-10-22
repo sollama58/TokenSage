@@ -1293,9 +1293,19 @@ async def _store_analysis(
         return version
 
 
-def _hint_private_to_caller(hint_use: HintUse | None, m: md.Metadata | None) -> bool:
-    """Caller hints must not become another key's cache hit or shared x_ref / wave counts."""
+def _hint_private_to_caller(
+    hint_use: HintUse | None,
+    m: md.Metadata | None,
+    requested_by: str | None = None,
+    trusted: frozenset[str] = frozenset(),
+) -> bool:
+    """Caller hints must not become another key's cache hit or shared x_ref / wave counts.
+    A key in TRUSTED_HINT_KEYS sends first-party data (TrenchScanner forwards pump.fun's own
+    fields): its reads are stored like fetched ones, or X-reuse counts and launch waves would
+    miss nearly every coin, since that key hints every read it makes."""
     if hint_use is None:
+        return False
+    if requested_by is not None and requested_by in trusted:
         return False
     if not hint_use.onchain_visible:
         return True
@@ -1817,7 +1827,9 @@ async def analyze(
 
     extras = await _read_extras(conn, ctx, r, out)
     doc = build_document(r, m, depth, out, x, hint_use, extras)
-    hint_private = _hint_private_to_caller(hint_use, m)
+    hint_private = _hint_private_to_caller(
+        hint_use, m, requested_by, ctx.settings.trusted_hint_key_set
+    )
     if hint_private:
         doc.cacheable = False
         doc.analysis_requested_by = requested_by

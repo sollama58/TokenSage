@@ -544,6 +544,10 @@ Every field is optional. How hints are treated:
   it again shortly afterwards re-analyses it with the on-chain view.
 - A cached analysis that is still fresh is returned as is; hints only matter when a new
   analysis runs. Hints are never cached as the coin's metadata.
+- **Private to the key that sent them.** An analysis built from hint metadata is not served to
+  another key as a cache hit, and does not count towards shared X-reuse counts or launch
+  waves. Keys named in the server's `TRUSTED_HINT_KEYS` (first-party consumers) are the
+  exception: their hinted reads are stored and counted like fetched ones.
 
 ### Webhook callbacks (optional)
 
