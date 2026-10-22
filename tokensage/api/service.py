@@ -248,8 +248,10 @@ def engagement_expired(
     X_ENGAGEMENT_REFRESH_S: not served from cache, so the read is re-run and the post
     fetched again. A read under X_ENGAGEMENT_RETRY_S old is still served (the re-fetch just
     failed, say: mirrors down), so a dead mirror does not re-run the read on every request.
-    Coins older than X_ENGAGEMENT_YOUNG_S, or of unknown age, keep the usual max_age."""
-    if token_created_at is None:
+    Coins older than X_ENGAGEMENT_YOUNG_S, or of unknown age, keep the usual max_age, and so
+    does a basic read: it never fetches the post again for counts (tier A reuses the stored
+    copy), so re-running it would bring the same as_of back on every request."""
+    if token_created_at is None or doc.get("depth") != "full":
         return False
     now = datetime.now(UTC)
     if (now - token_created_at).total_seconds() >= settings.x_engagement_young_s:

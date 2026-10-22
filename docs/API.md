@@ -255,7 +255,8 @@ The linked post's public counts, and the same for `x.quoted` and `x.replied_to`:
   their cached copy (re-checked every 6 h for deletion) and the usual `max_age`. When the
   re-fetch fails (mirrors down) the older counts are served with their `as_of`, and the read is
   re-run at most once a minute (`X_ENGAGEMENT_RETRY_S`). An explicit `max_age` wins. Read
-  `as_of`, not `analyzed_at`, for the age of the counts.
+  `as_of`, not `analyzed_at`, for the age of the counts. A basic read (rules 0.36.0) carries
+  the newest stored counts but never fetches them again, so it keeps the usual `max_age`.
 - `media[]` (`type`: `photo`, `video`, `gif` or `unknown`; `url`; `thumbnail_url` for video and
   GIF): https URLs only, at most 4. Posts cached before rules 0.30.0 list their images with
   `type: "unknown"` until the next re-check. Like the logo, media are not screened.

@@ -147,6 +147,7 @@ def _doc(analyzed_ago_s: float, as_of_ago_s: float | None) -> dict[str, Any]:
     now = datetime.now(UTC)
     as_of = (now - timedelta(seconds=as_of_ago_s)).isoformat() if as_of_ago_s is not None else None
     return {
+        "depth": "full",
         "analyzed_at": (now - timedelta(seconds=analyzed_ago_s)).isoformat(),
         "x": {"engagement": {"likes": 1, "as_of": as_of}},
     }
@@ -169,6 +170,15 @@ def test_cached_read_of_a_young_coin_expires_with_its_engagement() -> None:
     assert service.engagement_expired(_doc(200, None), young, s)
     # a read without engagement (basic depth, no post) is not affected
     assert not service.engagement_expired({"analyzed_at": _doc(200, 0)["analyzed_at"]}, young, s)
+
+
+def test_basic_read_does_not_expire_with_its_engagement() -> None:
+    """Audit 2026-10-22 TS-3: a basic read carries the stored post's counts (rules 0.36.0)
+    but never fetches them again, so expiring it re-ran the whole read on every request
+    for the coin's first 2 h and brought the same as_of back each time."""
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
+    young = datetime.now(UTC) - timedelta(minutes=30)
+    assert not service.engagement_expired({**_doc(200, 3600), "depth": "basic"}, young, s)
 
 
 def test_young_coin_age_comes_from_config() -> None:
@@ -305,6 +315,32 @@ async def test_engagement_comes_from_the_newest_copy_text_from_the_first(
         cached = await fulldepth.tweet_cached(db, http, s, POST_ID)
     assert not route.called
     assert cached.likes == 41000 and "most powerful force" in (cached.text or "")
+
+
+@needs_db
+async def test_basic_tier_a_reads_the_newest_counts(
+    db: asyncpg.Connection, http: httpx.AsyncClient
+) -> None:
+    """Audit 2026-10-22 TS-3: tier A read the first snapshot alone, so a basic read showed
+    the first fetch's counts and as_of however often the post was fetched since."""
+    s = _settings()
+    payload = {"p": _post(100, 5000)}
+    with respx.mock(assert_all_called=False) as router:
+        router.get(f"{xs.FX}/status/{POST_ID}").mock(
+            side_effect=lambda request: httpx.Response(200, json=payload["p"])
+        )
+        await fulldepth.tweet_cached(db, http, s, POST_ID, fresh_engagement=True)
+        await _age_snapshot(db, POST_ID, 360)
+        payload["p"] = _post(41000, 9_800_000)
+        fresh = await fulldepth.tweet_cached(db, http, s, POST_ID, fresh_engagement=True)
+    x = analyzer._x_info(f"https://x.com/elonmusk/status/{POST_ID}", None)
+    assert x is not None
+    with respx.mock(assert_all_called=False) as router:
+        route = router.get(url__startswith=xs.FX).mock(return_value=httpx.Response(500))
+        bx = await fulldepth.basic_x_load(db, http, s, x)
+    assert not route.called  # tier A: no fetch
+    assert bx.tweet is not None and bx.tweet.likes == 41000
+    assert bx.tweet.fetched_at == fresh.fetched_at
 
 
 @needs_db
