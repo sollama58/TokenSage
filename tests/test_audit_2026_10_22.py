@@ -269,3 +269,35 @@ async def test_a_failed_reference_query_waits_for_the_jobs_own_query() -> None:
             {},
         )
     assert main.running == 0  # `main` is free for queue.fail()
+
+
+# ------------------------------------------------- TS-7: polling a job the key was handed
+
+
+@needs_db
+async def test_a_key_may_poll_an_internal_job_it_joined(
+    client: httpx.AsyncClient, migrated_db: str
+) -> None:
+    """A batch item that joins an open pair_lookup / admin / metadata-retry job is handed
+    that job's id; the poll answered 404, so TrenchScanner read a definitive
+    not_a_token_mint failure as transient and asked again."""
+    conn = await asyncpg.connect(migrated_db)
+    ids: dict[str | None, int] = {}
+    try:
+        for i, owner in enumerate((None, "pair_lookup", "admin", "someone-else")):
+            ids[owner] = await conn.fetchval(
+                """insert into job (kind, mint, depth, status, error_code, last_error,
+                                    finished_at, requested_by)
+                   values ('analyze', $1, 'basic', 'failed', 'not_a_token_mint', 'no mint',
+                           now(), $2) returning id""",
+                f"So1111111111111111111111111111111111111111{i}",
+                owner,
+            )
+    finally:
+        await conn.close()
+    for owner in (None, "pair_lookup", "admin"):
+        r = await client.get(f"/v1/jobs/{ids[owner]}")
+        assert r.status_code == 200, (owner, r.text)
+        assert r.json()["error"].startswith("not_a_token_mint")
+    r = await client.get(f"/v1/jobs/{ids['someone-else']}")
+    assert r.status_code == 404  # another key's job stays private (SG-004)
