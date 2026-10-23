@@ -82,6 +82,15 @@ def _empty_image_memo() -> None:
     image_memo.clear()
 
 
+@pytest.fixture(autouse=True)
+def _empty_search_memo() -> None:
+    """Every test asks DexScreener itself: a previous test's cached name search must not
+    stand in for the one a test mocks."""
+    from tokensage.sources.lookups import search_memo
+
+    search_memo.clear()
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> str:
     if not DB_AVAILABLE:

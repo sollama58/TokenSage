@@ -579,7 +579,9 @@ def _trend_lock() -> asyncio.Lock:
 
 GTRENDS_KEY = "gtrends:seen"  # lookup_cache row: the Google Trends searches seen lately
 GTRENDS_KEEP = timedelta(hours=48)
-GTRENDS_POLL = timedelta(minutes=9)  # just under the index TTL: one poll per rebuild
+# 15 min, was 9 (user ask 2026-10-23: API audit): ~250 fewer feed calls a day, for up to 15 min
+# more lag on a breaking search. Polls ride the ~5-min index rebuilds, so the gap is 15-20 min.
+GTRENDS_POLL = timedelta(minutes=15)
 # the knowledge cron loads yesterday's Wikipedia top-1000 at 03:17 UTC, so the newest day is
 # normally 1-2 days old; older than this and the cron is not running (or Wikipedia is down)
 WIKI_STALE_DAYS = 3
@@ -862,7 +864,9 @@ async def _google_trends(
 
 XTRENDS_KEY = "xtrends:seen"  # lookup_cache row: X's trending topics of the last day
 XTRENDS_KEEP = timedelta(hours=24)
-XTRENDS_POLL = timedelta(minutes=20)  # trends24 adds one list an hour
+# trends24 adds one list an hour. 30 min, was 20 (user ask 2026-10-23: API audit): ~100 fewer
+# page loads a day, for up to ~35 min lag on a new hourly list (polls ride the index rebuilds).
+XTRENDS_POLL = timedelta(minutes=30)
 
 
 async def _x_trends(
