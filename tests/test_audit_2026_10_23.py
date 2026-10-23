@@ -331,3 +331,146 @@ def test_allow_probe_holds_the_others_until_the_probe_reports() -> None:
     assert b.allow_probe("s", 5.0)
     b.success("s")
     assert b.allow_probe("s", 5.0) and b.allow_probe("s", 5.0)
+
+
+# ------------------------------------- B2: the external name search, shared per term for 10 min
+# (user ask 2026-10-23: API audit)
+
+
+def _dex_pairs(*rows: tuple[str, str, str]) -> dict[str, Any]:
+    return {
+        "pairs": [
+            {"chainId": "solana", "baseToken": {"address": a, "name": n, "symbol": s}}
+            for a, n, s in rows
+        ]
+    }
+
+
+async def test_name_search_is_shared_per_normalised_term() -> None:
+    from tokensage.sources import lookups
+
+    asked: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        asked.append(req.url.params["q"])
+        return httpx.Response(200, json=_dex_pairs(("m1", "Sahur Cat", "SAHUR")))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+        # a copycat wave: the worker slots ask at once, then again a little later
+        got = await asyncio.gather(
+            *(lookups.dexscreener_search_cached(http, t) for t in ("SAHUR", "sahur", " Sahur "))
+        )
+        again = await lookups.dexscreener_search_cached(http, "SAHUR")
+        await lookups.dexscreener_search_cached(http, "other")
+    assert asked == ["SAHUR", "other"]
+    assert [[t.mint for t in g] for g in got] == [["m1"]] * 3 and [t.mint for t in again] == ["m1"]
+
+
+async def test_name_search_asks_again_after_the_ttl_and_after_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tokensage.sources import lookups
+
+    replies = [httpx.Response(503), httpx.Response(200, json=_dex_pairs(("m1", "x", "PEPE")))]
+    asked = 0
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        nonlocal asked
+        asked += 1
+        return replies.pop(0) if replies else httpx.Response(200, json=_dex_pairs())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+        assert await lookups.dexscreener_search_cached(http, "pepe") == []  # failed: not kept
+        assert [t.mint for t in await lookups.dexscreener_search_cached(http, "pepe")] == ["m1"]
+        assert asked == 2
+        assert [t.mint for t in await lookups.dexscreener_search_cached(http, "pepe")] == ["m1"]
+        assert asked == 2
+        monkeypatch.setattr(lookups, "DEX_SEARCH_TTL_S", 0.0)
+        lookups.search_memo.clear()
+        await lookups.dexscreener_search_cached(http, "pepe")
+        await lookups.dexscreener_search_cached(http, "pepe")  # expired at once: asked again
+    assert asked == 4
+
+
+async def test_name_search_memo_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tokensage.sources import lookups
+
+    monkeypatch.setattr(lookups, "DEX_SEARCH_MAX_TERMS", 2)
+    asked: list[str] = []
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        asked.append(req.url.params["q"])
+        return httpx.Response(200, json=_dex_pairs())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+        for t in ("a", "b", "a", "c", "a", "b"):
+            await lookups.dexscreener_search_cached(http, t)
+    # "a" was used again before "c" arrived, so "b" was the one dropped
+    assert asked == ["a", "b", "c", "b"] and list(lookups.search_memo.done) == ["a", "b"]
+
+
+async def test_external_namesakes_share_the_search_but_filter_per_coin() -> None:
+    asked = 0
+
+    def answer(req: httpx.Request) -> httpx.Response:
+        nonlocal asked
+        asked += 1
+        return httpx.Response(
+            200, json=_dex_pairs(("m1", "Sahur Cat", "SAHUR"), ("m2", "Other", "OTHER"))
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
+        a = await analyzer._external_namesakes(http, "SAHUR", "sahurcat")
+        b = await analyzer._external_namesakes(http, "SAHUR", "sahurdog")
+        c = await analyzer._external_namesakes(http, "OTHER", "other")
+    assert asked == 2  # "SAHUR" once, "OTHER" once
+    assert [t.mint for t in a] == [t.mint for t in b] == ["m1"]
+    assert [t.mint for t in c] == ["m2"]
+
+
+# ------------------------------------- B7: slower trend polls (user ask 2026-10-23: API audit)
+
+
+def test_trend_poll_intervals() -> None:
+    from datetime import timedelta
+
+    assert fulldepth.GTRENDS_POLL == timedelta(minutes=15)
+    assert fulldepth.XTRENDS_POLL == timedelta(minutes=30)
+
+
+@needs_db
+@pytest.mark.parametrize(
+    ("key", "host", "fresh_min", "due_min"),
+    [
+        (fulldepth.GTRENDS_KEY, "trends.google.com", 12, 16),
+        (fulldepth.XTRENDS_KEY, "trends24.in", 25, 31),
+    ],
+)
+async def test_trend_feeds_polled_only_when_due(
+    migrated_db: str, key: str, host: str, fresh_min: int, due_min: int
+) -> None:
+    from tokensage.db import _init_connection
+
+    c = await asyncpg.connect(migrated_db)
+    await _init_connection(c)
+    try:
+        await c.execute("truncate trend_term, lookup_cache")
+        poll = fulldepth._google_trends if key == fulldepth.GTRENDS_KEY else fulldepth._x_trends
+        for age, polled in ((fresh_min, False), (due_min, True)):
+            await c.execute(
+                """insert into lookup_cache (key, value, fetched_at)
+                   values ($1, '[]'::jsonb, now() - make_interval(mins => $2))
+                   on conflict (key) do update set fetched_at=excluded.fetched_at""",
+                key,
+                age,
+            )
+            with respx.mock(assert_all_called=False) as r:
+                route = r.get(url__regex=rf"https://{host.replace('.', r'\.')}/").mock(
+                    return_value=httpx.Response(503)
+                )
+                async with httpx.AsyncClient() as http:
+                    await poll(c, http)
+            assert route.called is polled, (key, age)
+    finally:
+        await c.execute("truncate trend_term, lookup_cache")
+        await c.close()

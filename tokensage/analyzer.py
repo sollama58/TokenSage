@@ -282,7 +282,8 @@ async def _external_namesakes(
     if not _ext_lookups_allowed():
         return []
     try:
-        ext = await lookups.dexscreener_search(http, ticker or name_compact)
+        # shared per term for 10 min (user ask 2026-10-23: API audit): see lookups.search_memo
+        ext = await lookups.dexscreener_search_cached(http, ticker or name_compact)
         return lookups.filter_same_name(ext, ticker, name_compact)
     except Exception as e:  # noqa: BLE001 - lookups are optional
         log.info("lookups.failed", error=str(e)[:120])
