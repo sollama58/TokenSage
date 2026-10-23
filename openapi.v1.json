@@ -1173,6 +1173,187 @@
         "title": "DepthTiming",
         "type": "object"
       },
+      "EnvCell": {
+        "additionalProperties": false,
+        "properties": {
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A setting's value, a URL's host, a secret's length",
+            "title": "Hint"
+          },
+          "need": {
+            "anyOf": [
+              {
+                "enum": [
+                  "required",
+                  "expected",
+                  "optional"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need"
+          },
+          "state": {
+            "enum": [
+              "set",
+              "empty",
+              "missing",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "need",
+          "state",
+          "hint"
+        ],
+        "title": "EnvCell",
+        "type": "object"
+      },
+      "EnvResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/EnvService"
+            },
+            "title": "Services",
+            "type": "array"
+          },
+          "vars": {
+            "items": {
+              "$ref": "#/components/schemas/EnvRow"
+            },
+            "title": "Vars",
+            "type": "array"
+          }
+        },
+        "required": [
+          "services",
+          "vars"
+        ],
+        "title": "EnvResponse",
+        "type": "object"
+      },
+      "EnvRow": {
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EnvCell"
+            },
+            "title": "Cells",
+            "type": "object"
+          },
+          "differs": {
+            "description": "Meant to match across services, and the set ones don't",
+            "title": "Differs",
+            "type": "boolean"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "secret",
+              "url",
+              "setting"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "key",
+          "group",
+          "kind",
+          "note",
+          "differs",
+          "cells"
+        ],
+        "title": "EnvRow",
+        "type": "object"
+      },
+      "EnvService": {
+        "additionalProperties": false,
+        "properties": {
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "live": {
+            "description": "Read from this process now, not a stored report",
+            "title": "Live",
+            "type": "boolean"
+          },
+          "reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it last started; null: never",
+            "title": "Reported At"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "reported_at",
+          "commit",
+          "live"
+        ],
+        "title": "EnvService",
+        "type": "object"
+      },
       "ErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -6024,6 +6205,43 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/v1/env": {
+      "get": {
+        "description": "Which of the env vars each service is meant to have are set on it, never the values:\nthe api's own read now, every other service's as it reported when it last started.",
+        "operationId": "env_admin_v1_env_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden (monitor or admin key required)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Env",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/v1/helius": {
       "get": {
         "description": "Solana RPC (Helius) calls and credits: this hour, today, the last 24 h, the billing\ncycle so far and its projection against the plan; per method; hourly and daily series.\nCredits are counted from each method's Helius price (HELIUS_CREDIT_COSTS overrides).",

@@ -13,7 +13,7 @@ import traceback
 import asyncpg
 import structlog
 
-from tokensage import cpu, fulldepth, queue
+from tokensage import cpu, envreport, fulldepth, queue
 from tokensage.analyzer import (
     AnalyzeFailed,
     Context,
@@ -395,6 +395,7 @@ async def main() -> None:
     # one connection per concurrent job, plus the LISTEN connection, the metrics flusher's, the
     # trend refresher's, and spares for the job heartbeats
     pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 6)
+    await envreport.publish_quietly(pool, "worker")  # for TrenchScanner's Admin > Environment
     w = Worker(pool, settings, concurrency=concurrency)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
