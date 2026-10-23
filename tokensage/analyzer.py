@@ -268,10 +268,13 @@ async def _x_reuse(
 EXT_LOOKUP_SKIP_DB_NAMESAKES = 50
 
 
-def _ext_lookups_allowed() -> bool:
+def _ext_lookups_allowed(term: str) -> bool:
+    """The breaker allows a DexScreener search, or the memo already has this term's answer:
+    an open breaker gates only the network call, never a cached answer (audit 2026-10-23
+    TS-4: reads during the 120 s cooldown lost their external namesakes)."""
     from tokensage.net.breaker import breaker
 
-    return breaker.allow("dexscreener_search")
+    return breaker.allow("dexscreener_search") or lookups.dexscreener_search_fresh(term)
 
 
 async def _external_namesakes(
@@ -279,7 +282,7 @@ async def _external_namesakes(
 ) -> list[SameNameToken]:
     """Best-effort same-name coins from DexScreener search; never raises. (pump.fun's
     /coins/search was asked too until its route went away: 404 since 2026-10-17.)"""
-    if not _ext_lookups_allowed():
+    if not _ext_lookups_allowed(ticker or name_compact):
         return []
     try:
         # shared per term for 10 min (user ask 2026-10-23: API audit): see lookups.search_memo
@@ -455,7 +458,7 @@ async def _db_context(
     # queries below do, instead of adding their round trip after them.
     ext_task = (
         asyncio.create_task(_external_namesakes(ctx.http, ticker, name_compact))
-        if (ticker or name_compact) and _ext_lookups_allowed()
+        if (ticker or name_compact) and _ext_lookups_allowed(ticker or name_compact)
         else None
     )
     try:
@@ -1824,7 +1827,7 @@ async def analyze(
         if ctx.settings.enable_basic_x and x is not None:
             inp.x_url_handle = x.ref.url_handle
             phase_x = time.perf_counter()
-            bx = await fulldepth.basic_x_load(conn, ctx.http, ctx.settings, x)
+            bx = await fulldepth.basic_x_load(conn, ctx.http, ctx.settings, x, pool=pool)
             basic_x_ms = int((time.perf_counter() - phase_x) * 1000)
             inp.tweet, inp.profile = bx.tweet, bx.profile
             basic_x_caveats = bx.caveats

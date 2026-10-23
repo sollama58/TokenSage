@@ -457,13 +457,52 @@ async def _profile_snapshot_ok(conn: asyncpg.Connection, handle: str) -> Profile
     return None
 
 
+# Basic tier-B tweet fetches running on their own pool connection, per (loop, tweet id): one
+# per post however many basic reads want it, and left to finish when a read's timeout ends.
+_basic_tweet_fetches: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Task[TweetData]] = {}
+
+
+async def _tweet_on_own_conn(
+    pool: asyncpg.Pool, http: httpx.AsyncClient, settings: Settings, tweet_id: str
+) -> TweetData:
+    async with pool.acquire() as c:
+        return await tweet_cached(serial(c), http, settings, tweet_id, fresh_engagement=False)
+
+
+def _basic_tweet_fetch(
+    pool: asyncpg.Pool, http: httpx.AsyncClient, settings: Settings, tweet_id: str
+) -> asyncio.Task[TweetData]:
+    loop = asyncio.get_running_loop()
+    slot = (loop, tweet_id)
+    task = _basic_tweet_fetches.get(slot)
+    if task is None:
+        task = loop.create_task(_tweet_on_own_conn(pool, http, settings, tweet_id))
+        _basic_tweet_fetches[slot] = task
+
+        def done(t: asyncio.Task[TweetData]) -> None:
+            if _basic_tweet_fetches.get(slot) is t:
+                del _basic_tweet_fetches[slot]
+            if not t.cancelled() and t.exception() is not None:  # retrieved: no warning
+                log.info("basic_x.background_fetch_failed", error=str(t.exception())[:120])
+
+        task.add_done_callback(done)
+    return task
+
+
 async def basic_x_load(
     conn: asyncpg.Connection,
     http: httpx.AsyncClient,
     settings: Settings,
     x: XInfo,
+    pool: asyncpg.Pool | None = None,
 ) -> BasicXLoad:
-    """Tier A: OK snapshot from x_tweet / x_profile. Tier B: one timed fetch when missing."""
+    """Tier A: OK snapshot from x_tweet / x_profile. Tier B: one timed fetch when missing.
+
+    With a pool, the tier-B tweet fetch runs on its own connection and is shielded from the
+    read's timeout (audit 2026-10-23 TS-1): a read that gives up after basic_x_timeout_s
+    leaves it to finish and store the post in x_tweet, so the next read finds it in tier A.
+    Without a pool (it would have to write on this job's connection after the job moved on)
+    the fetch is cancelled at the timeout, as before."""
     out = BasicXLoad()
     if not settings.enable_basic_x:
         return out
@@ -479,7 +518,10 @@ async def basic_x_load(
         try:
             async with asyncio.timeout(settings.basic_x_timeout_s):
                 # single flight: a copycat wave (and the same mint's full read) fetch it once
-                t = await tweet_cached(sconn, http, settings, tid, fresh_engagement=False)
+                if pool is not None:
+                    t = await asyncio.shield(_basic_tweet_fetch(pool, http, settings, tid))
+                else:
+                    t = await tweet_cached(sconn, http, settings, tid, fresh_engagement=False)
         except TimeoutError:
             out.caveats.append(
                 f"basic x: tweet fetch timed out after {settings.basic_x_timeout_s:g} s"
@@ -1301,9 +1343,13 @@ async def media_hashes(
             )
             return mh
 
-    # the downloads run concurrently: a cold full analysis should not wait 4x for media
-    missing = [u for u in urls if u not in cached]
-    for mh in await asyncio.gather(*(fetch_one(u) for u in missing)):
-        cached[mh.url] = mh
+    # the downloads run concurrently: a cold full analysis should not wait 4x for media.
+    # run_all, not a bare gather: each download writes its row on the job's connection, and
+    # one that failed must cancel (and wait out) the others before the error reaches the
+    # worker's queue.fail() on that same connection (audit 2026-10-23 TS-2)
+    async def keep(url: str) -> None:
+        cached[url] = await fetch_one(url)
+
+    await run_all([keep(u) for u in urls if u not in cached])
     out = [cached[u] for u in urls]
     return out

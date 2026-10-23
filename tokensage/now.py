@@ -12,6 +12,7 @@ GeckoTerminal. Results are kept in lookup_cache ("now:<mint>", "heat:<story>").
 from __future__ import annotations
 
 import re
+import time
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -35,6 +36,35 @@ HEAT_KEY = "heat:"  # lookup_cache: a story's heat, shared by every coin on it
 HEAT_TTL = timedelta(minutes=5)
 HEAT_STALE_MAX = 2 * HEAT_TTL  # a failed refresh falls back to cached heat only this young
 HEAT_FAILED_TTL = timedelta(minutes=3)  # retry a failed or rate-limited lookup soon
+
+# A failed refresh that fell back to a recent cached heat writes nothing, so the coins waiting
+# on the story's single flight each searched again in turn (audit 2026-10-23 TS-3). The
+# leader's outcome is kept here, per process, until HEAT_FAILED_TTL or until the stale row
+# passes HEAT_STALE_MAX, whichever is first; waiters take it instead of searching.
+_HEAT_FALLBACK_MAX = 2000
+_heat_fallback: dict[str, tuple[float, StoryHeat]] = {}
+
+
+def _fallback_get(key: str) -> StoryHeat | None:
+    hit = _heat_fallback.get(key)
+    if hit is None:
+        return None
+    if hit[0] <= time.monotonic():
+        _heat_fallback.pop(key, None)
+        return None
+    return hit[1].model_copy(deep=True)
+
+
+def _fallback_keep(key: str, heat: StoryHeat, row_age: timedelta) -> None:
+    ttl = min(HEAT_FAILED_TTL, HEAT_STALE_MAX - row_age).total_seconds()
+    if ttl <= 0:
+        return
+    _heat_fallback.pop(key, None)
+    _heat_fallback[key] = (time.monotonic() + ttl, heat.model_copy(deep=True))
+    while len(_heat_fallback) > _HEAT_FALLBACK_MAX:
+        _heat_fallback.pop(next(iter(_heat_fallback)))
+
+
 # a lineage original counts as the story only for these kinds: an "original" has none
 LINEAGE_STORY_KINDS = ("early_copy", "copy", "late_copy", "reference")
 MIN_STORY_LEN = 3
@@ -321,6 +351,9 @@ async def _story_heat(
         ttl = HEAT_TTL if cached.status == "ok" else HEAT_FAILED_TTL
         if datetime.now(UTC) - row["fetched_at"] < ttl:
             return cached
+    shared = _fallback_get(key)
+    if shared is not None:
+        return shared  # the single flight's leader just failed and fell back to this
     heat: StoryHeat
     try:
         pools = await geckoterminal.search_pools(http, story)
@@ -348,7 +381,10 @@ async def _story_heat(
         and isinstance(row["value"], dict)
         and datetime.now(UTC) - row["fetched_at"] <= HEAT_STALE_MAX
     ):
-        return StoryHeat.model_validate(row["value"])  # the last good one, if still recent
+        stale = StoryHeat.model_validate(row["value"])  # the last good one, if still recent
+        _fallback_keep(key, stale, datetime.now(UTC) - row["fetched_at"])
+        return stale
+    _heat_fallback.pop(key, None)
     await conn.execute(
         """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
            on conflict (key) do update set value=excluded.value, fetched_at=now()""",

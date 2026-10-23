@@ -150,6 +150,12 @@ class _SearchMemo:
 search_memo = _SearchMemo()
 
 
+def dexscreener_search_fresh(term: str) -> bool:
+    """Whether the memo holds an unexpired answer for the term (no network, no side effect)."""
+    hit = search_memo.done.get(_search_key(term))
+    return hit is not None and hit[0] > time.monotonic()
+
+
 async def dexscreener_search_cached(http: httpx.AsyncClient, term: str) -> list[SameNameToken]:
     """dexscreener_search, shared per normalised term for DEX_SEARCH_TTL_S; never raises
     (beyond cancellation)."""

@@ -4,13 +4,11 @@ because it costs ~250 MB RSS. Never raises."""
 from __future__ import annotations
 
 import asyncio
-import io
 import threading
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from PIL import Image
 
 from tokensage import cpu
 
@@ -122,11 +120,15 @@ def _read(data: bytes) -> tuple[list[OcrLine], str | None]:
     if eng is None:
         return [], _failed or "ocr unavailable"
     try:
-        from tokensage.engine.image import MAX_PIXELS, SAFE_FORMATS, to_rgb
+        from tokensage.engine.image import open_checked, to_rgb
 
-        with Image.open(io.BytesIO(data), formats=SAFE_FORMATS) as img:
-            if img.size[0] * img.size[1] > MAX_PIXELS:
+        try:
+            opened = open_checked(data)  # header precheck before any pixels (SD-1)
+        except ValueError as e:
+            if str(e) == "image too large":
                 return [], "image too large"
+            raise
+        with opened as img:
             try:
                 img.seek(0)
             except Exception:  # noqa: BLE001
