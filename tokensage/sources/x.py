@@ -26,6 +26,8 @@ from tokensage.resolve.metadata import clean_url
 log = structlog.get_logger("x")
 
 FX = "https://api.fxtwitter.com/2"
+# how much longer fetch_tweet waits on a preferred mirror once a lesser one answered "ok"
+FETCH_TWEET_GRACE_S = 1.0
 VX = "https://api.vxtwitter.com"
 SYND = "https://cdn.syndication.twimg.com/tweet-result"
 OEMBED = "https://publish.x.com/oembed"
@@ -654,20 +656,48 @@ async def fetch_tweet(
             return None
 
     tasks = [asyncio.ensure_future(ask(fn)) for fn in (fx_tweet, vx_tweet, syndication_tweet)]
+    synd_task = tasks[2]
     deleted: TweetData | None = None
     try:
-        synd_task = tasks[2]
-        for task in tasks:
-            t = await task
-            if t is None:
-                continue
-            # a deleted verdict from a mirror can be stale; keep looking for an "ok"
-            if t.status != "ok":
-                deleted = deleted or t
-                continue
-            if task is not synd_task:
+        # Answers are taken as they arrive (audit 2026-10-23 TS-1): the preferred mirror
+        # still wins, but once a less preferred one has an "ok", the better ones get only
+        # FETCH_TWEET_GRACE_S more. Waiting on FxTwitter first threw away good copies from
+        # the others whenever it was slow but up, and a basic read's 3 s ran out.
+        results: dict[int, TweetData | None] = {}
+        pending = set(tasks)
+        grace_until: float | None = None
+        loop = asyncio.get_running_loop()
+        while True:
+            best = next(
+                (i for i in range(len(tasks)) if (r := results.get(i)) and r.status == "ok"),
+                None,
+            )
+            if best is not None and all(i in results for i in range(best)):
+                break  # nothing preferred is still out
+            if not pending:
+                break
+            timeout = None if grace_until is None else max(0.0, grace_until - loop.time())
+            done, pending = await asyncio.wait(
+                pending, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+            )
+            if not done:
+                break  # the grace ran out: use the best answer in hand
+            for task in done:
+                t = task.result()
+                results[tasks.index(task)] = t
+                if t is not None and t.status == "ok" and grace_until is None:
+                    grace_until = loop.time() + FETCH_TWEET_GRACE_S
+        if best is not None:
+            t = results[best]
+            assert t is not None
+            if tasks[best] is not synd_task:
                 _merge_links(t, await synd_task)
             return t
+        # a deleted verdict from a mirror can be stale; it is used only when none says "ok"
+        for i in range(len(tasks)):
+            t = results.get(i)
+            if t is not None:
+                deleted = deleted or t
     finally:
         for task in tasks:
             task.cancel()

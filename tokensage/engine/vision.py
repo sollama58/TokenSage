@@ -17,7 +17,6 @@ onnxruntime is imported only when the model is first needed. Never raises.
 from __future__ import annotations
 
 import asyncio
-import io
 import threading
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -203,13 +202,10 @@ def preprocess(data: bytes) -> np.ndarray:
     """First frame, transparency on white, squashed to 224x224 (as SigLIP was trained)."""
     from PIL import Image, ImageFile
 
-    from tokensage.engine.image import SAFE_FORMATS
+    from tokensage.engine.image import open_checked
 
     ImageFile.LOAD_TRUNCATED_IMAGES = True
-    with Image.open(io.BytesIO(data), formats=SAFE_FORMATS) as img:
-        w, h = img.size
-        if w * h > MAX_PIXELS:
-            raise ValueError("image too large")
+    with open_checked(data) as img:  # header precheck and size check before any pixels
         if img.format == "JPEG":
             img.draft("RGB", (SIZE * 2, SIZE * 2))
         img.seek(0)

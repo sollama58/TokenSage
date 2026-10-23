@@ -22,6 +22,126 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # tries every plugin it has (PSD, TGA, SGI, EPS...) on whatever a URL returns.
 SAFE_FORMATS = ("PNG", "JPEG", "GIF", "WEBP", "AVIF")
 
+# GIF limits for the header walk below (audit 2026-10-23 SD-1). A logo GIF has a few hundred
+# frames at most and no real comment; Pillow joins comment sub-blocks quadratically
+# (GHSA-74r2-7ff9-mjj2: a 5 MB GIF of comments cost 4 s per open) and n_frames walks them all.
+GIF_MAX_FRAMES = 2000
+GIF_MAX_COMMENT_BYTES = 64 * 1024
+GIF_MAX_BLOCKS = 200_000  # sub-blocks walked; a 5 MB GIF of full 255-byte blocks is ~20k
+
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+
+
+def _too_large(w: int, h: int) -> bool:
+    return w * h > MAX_PIXELS
+
+
+def _gif_check(data: bytes) -> None:
+    """Walk the GIF block structure (linear, no decoding): every frame inside MAX_PIXELS, at
+    most GIF_MAX_FRAMES frames, GIF_MAX_COMMENT_BYTES of comments, GIF_MAX_BLOCKS blocks."""
+    n = len(data)
+    if n < 13:
+        raise ValueError("truncated gif header")
+    if _too_large(int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little")):
+        raise ValueError("image too large")
+    pos = 13
+    flags = data[10]
+    if flags & 0x80:
+        pos += 3 << ((flags & 7) + 1)
+    frames = comment = blocks = 0
+
+    def skip_sub_blocks(p: int, count_comment: bool) -> int:
+        nonlocal comment, blocks
+        while p < n:
+            size = data[p]
+            p += 1
+            if size == 0:
+                return p
+            blocks += 1
+            if blocks > GIF_MAX_BLOCKS:
+                raise ValueError("gif has too many blocks")
+            if count_comment:
+                comment += size
+                if comment > GIF_MAX_COMMENT_BYTES:
+                    raise ValueError("gif comment too large")
+            p += size
+        return p
+
+    while pos < n:
+        tag = data[pos]
+        if tag == 0x3B:  # trailer
+            break
+        if tag == 0x21:  # extension
+            if pos + 1 >= n:
+                break
+            label = data[pos + 1]
+            pos = skip_sub_blocks(pos + 2, count_comment=label == 0xFE)
+        elif tag == 0x2C:  # image descriptor
+            if pos + 10 > n:
+                break
+            # Pillow grows the canvas to a frame that reaches past the screen: offset + size
+            fx = int.from_bytes(data[pos + 1 : pos + 3], "little")
+            fy = int.from_bytes(data[pos + 3 : pos + 5], "little")
+            fw = int.from_bytes(data[pos + 5 : pos + 7], "little")
+            fh = int.from_bytes(data[pos + 7 : pos + 9], "little")
+            if _too_large(fx + fw, fy + fh):
+                raise ValueError("image too large")
+            frames += 1
+            if frames > GIF_MAX_FRAMES:
+                raise ValueError("gif has too many frames")
+            fflags = data[pos + 9]
+            pos += 10
+            if fflags & 0x80:
+                pos += 3 << ((fflags & 7) + 1)
+            pos = skip_sub_blocks(pos + 1, count_comment=False)  # +1: LZW minimum code size
+        else:
+            break  # garbage: Pillow stops here too
+
+
+def precheck(data: bytes) -> None:
+    """Refuse oversized images from their headers alone, before Pillow allocates anything.
+
+    Pillow 12.3 fills an APNG's first frame at its IHDR size before Image.open's own
+    MAX_IMAGE_PIXELS check (GHSA-5xm2-6676-qcp9: a 126-byte file allocated ~1 GB), so the
+    check after open comes too late. PNG (IHDR), GIF (screen and every frame) and WebP
+    (VP8X canvas, VP8/VP8L frame) are checked here; JPEG and AVIF are checked from the size
+    Image.open reads lazily, which allocates no pixels. Raises ValueError."""
+    if data[:8] == _PNG_SIG:
+        if len(data) < 24 or data[12:16] != b"IHDR":
+            raise ValueError("png without IHDR")
+        if _too_large(int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")):
+            raise ValueError("image too large")
+    elif data[:6] in (b"GIF87a", b"GIF89a"):
+        _gif_check(data)
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        chunk = data[12:16]
+        if chunk == b"VP8X":
+            w = int.from_bytes(data[24:27], "little") + 1
+            h = int.from_bytes(data[27:30], "little") + 1
+        elif chunk == b"VP8L":
+            bits = int.from_bytes(data[21:25], "little")
+            w, h = (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        elif chunk == b"VP8 ":
+            w = int.from_bytes(data[26:28], "little") & 0x3FFF
+            h = int.from_bytes(data[28:30], "little") & 0x3FFF
+        else:
+            return
+        if _too_large(w, h):
+            raise ValueError("image too large")
+
+
+def open_checked(data: bytes) -> Image.Image:
+    """Image.open on the safe decoders, after precheck, with the lazily read size checked
+    too (no pixels are decoded yet). The caller closes it (use as a context manager)."""
+    precheck(data)
+    img = Image.open(io.BytesIO(data), formats=SAFE_FORMATS)
+    w, h = img.size
+    if w * h > MAX_PIXELS:
+        img.close()
+        raise ValueError("image too large")
+    return img
+
+
 _CSS = {
     "black": (0, 0, 0),
     "white": (255, 255, 255),
@@ -142,10 +262,8 @@ def _frame(img: Image.Image, index: int) -> Image.Image:
 
 
 def features(data: bytes) -> ImageFeatures:
-    with Image.open(io.BytesIO(data), formats=SAFE_FORMATS) as img:
+    with open_checked(data) as img:
         w, h = img.size
-        if w * h > MAX_PIXELS:
-            raise ValueError("image too large")
         n_frames = int(getattr(img, "n_frames", 1) or 1)
         animated = n_frames > 1
         fmt = img.format

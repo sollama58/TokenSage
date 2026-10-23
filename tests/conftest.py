@@ -91,6 +91,14 @@ def _empty_search_memo() -> None:
     search_memo.clear()
 
 
+@pytest.fixture(autouse=True)
+def _empty_heat_fallback() -> None:
+    """A previous test's failed story-heat refresh must not stand in for the one a test mocks."""
+    from tokensage import now
+
+    now._heat_fallback.clear()
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> str:
     if not DB_AVAILABLE:
