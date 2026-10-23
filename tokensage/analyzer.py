@@ -271,21 +271,19 @@ EXT_LOOKUP_SKIP_DB_NAMESAKES = 50
 def _ext_lookups_allowed() -> bool:
     from tokensage.net.breaker import breaker
 
-    return breaker.allow("pumpfun_search") or breaker.allow("dexscreener_search")
+    return breaker.allow("dexscreener_search")
 
 
 async def _external_namesakes(
     http: httpx.AsyncClient, ticker: str | None, name_compact: str
 ) -> list[SameNameToken]:
-    """Best-effort same-name coins from pump.fun and DexScreener search; never raises."""
+    """Best-effort same-name coins from DexScreener search; never raises. (pump.fun's
+    /coins/search was asked too until its route went away: 404 since 2026-10-17.)"""
     if not _ext_lookups_allowed():
         return []
     try:
-        ext = await asyncio.gather(
-            lookups.pumpfun_search(http, ticker or name_compact),
-            lookups.dexscreener_search(http, ticker or name_compact),
-        )
-        return lookups.filter_same_name([*ext[0], *ext[1]], ticker, name_compact)
+        ext = await lookups.dexscreener_search(http, ticker or name_compact)
+        return lookups.filter_same_name(ext, ticker, name_compact)
     except Exception as e:  # noqa: BLE001 - lookups are optional
         log.info("lookups.failed", error=str(e)[:120])
         return []
@@ -1630,13 +1628,17 @@ async def analyze(
     hints: dict[str, Any] | None = None,
     requested_by: str | None = None,
     pool: asyncpg.Pool | None = None,
+    fetched: md.Metadata | None = None,
 ) -> int:
     """Resolve + fetch + engine + persist. Returns the new analysis.version.
     Raises AnalyzeFailed for definitive per-CA failures (404/422 at the API).
 
     hints: metadata the caller already has (name, symbol, description, image_url, twitter,
     telegram, website, created_at). They replace the metadata fetch and, for a mint not yet
-    visible on-chain, the on-chain read; they never turn into a 404."""
+    visible on-chain, the on-chain read; they never turn into a 404.
+
+    fetched: the metadata (with its logo bytes) the caller fetched and persisted moments ago
+    (retry_metadata), so the logo is not fetched again with its JSON just to be hashed."""
     if ctx.rpc is None:
         raise RuntimeError("SOLANA_RPC_URL is not configured; the analyzer cannot resolve CAs")
     t0 = time.perf_counter()
@@ -1671,12 +1673,13 @@ async def analyze(
         # The caller already has the metadata: skip the IPFS round trip, still fetch the
         # image (guarded) so the logo can be hashed and compared.
         m = md.from_hints(hints)
-        # An IPFS logo already hashed (and, at full depth, already OCR'd) needs no download:
-        # its content key comes from the CID, and the bytes would only be hashed again.
+        # An IPFS logo already hashed (and, at full depth with OCR on, already OCR'd) needs no
+        # download: its content key comes from the CID, and the bytes would only be hashed
+        # again. With OCR off, read_ocr never looks at the bytes, so none are fetched for it.
         ipfs_key = md.ipfs_content_key(m.image_url)
         if ipfs_key:
             cached_feats = await _cached_image_features(conn, ipfs_key)
-            if cached_feats is not None and depth == "full":
+            if cached_feats is not None and depth == "full" and ctx.settings.enable_ocr:
                 if await fulldepth.ocr_cached(conn, ipfs_key) is None:
                     cached_feats = None  # OCR has not run on it yet: it needs the bytes
         if cached_feats is not None:
@@ -1728,7 +1731,14 @@ async def analyze(
                 cached_feats = await _cached_image_features(conn, m.image_content_key)
         elif m.image_content_key:
             cached_feats = await _cached_image_features(conn, m.image_content_key)
-            if cached_feats is None and m.image_url:
+            if (
+                cached_feats is None
+                and fetched is not None
+                and fetched.image_bytes
+                and fetched.image_content_key == m.image_content_key
+            ):
+                image_bytes = fetched.image_bytes  # stored just now: the bytes are in hand
+            elif cached_feats is None and m.image_url:
                 # older row without hashes: fetch the image again (cached by CID upstream)
                 refetched = await md.fetch_metadata(ctx.http, r.uri, ctx.settings)
                 image_bytes = refetched.image_bytes
@@ -2459,7 +2469,7 @@ async def retry_metadata(
     attempts += 1 if m.status != "ok" else 0
     await md.persist(conn, mint, m, attempts)
     if m.status == "ok":
-        return await analyze(conn, ctx, mint, depth)
+        return await analyze(conn, ctx, mint, depth, fetched=m)
     if await _finalize_metadata(conn, mint, m, attempts):
         # the state is final; the stored analysis says partial, so re-run it once to clear
         # that (the API would otherwise keep re-analysing it every 60 s)

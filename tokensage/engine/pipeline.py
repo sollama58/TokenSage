@@ -63,7 +63,7 @@ class SameNameToken:
     name: str | None
     symbol: str | None
     created_at: datetime | None
-    source: str  # db | pumpfun_search | dexscreener
+    source: str  # db | dexscreener (pumpfun_search on reads stored before 2026-10-23)
 
 
 @dataclass

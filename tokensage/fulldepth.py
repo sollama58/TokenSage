@@ -478,7 +478,8 @@ async def basic_x_load(
             return out
         try:
             async with asyncio.timeout(settings.basic_x_timeout_s):
-                t = await _tweet_cached(sconn, http, settings, tid, fresh_engagement=False)
+                # single flight: a copycat wave (and the same mint's full read) fetch it once
+                t = await tweet_cached(sconn, http, settings, tid, fresh_engagement=False)
         except TimeoutError:
             out.caveats.append(
                 f"basic x: tweet fetch timed out after {settings.basic_x_timeout_s:g} s"
@@ -501,7 +502,7 @@ async def basic_x_load(
             return out
         try:
             async with asyncio.timeout(settings.basic_x_timeout_s):
-                p = await _profile_cached(sconn, http, handle)
+                p = await profile_cached(sconn, http, handle)
         except TimeoutError:
             out.caveats.append(
                 f"basic x: profile fetch timed out after {settings.basic_x_timeout_s:g} s"
@@ -1227,27 +1228,36 @@ async def media_hashes(
     conn: asyncpg.Connection, http: httpx.AsyncClient, settings: Settings, urls: list[str]
 ) -> list[Any]:
     """Fetch (SSRF-guarded, same size/time caps as logos) and hash each media URL. Cached by
-    URL: hashes forever, failures retried after 6 h."""
+    URL: hashes forever, failures retried after 6 h. One download per URL in flight: the
+    full reads of a copycat wave link the same post, and the later ones find its row."""
     from tokensage.engine import image as image_stage
     from tokensage.engine.xmatch import MediaHash
     from tokensage.net.safe_fetch import FetchError, UnsafeUrl
     from tokensage.resolve.metadata import fetch_url
 
-    cached: dict[str, MediaHash] = {}
-    for url in urls:
+    conn = serial(conn)  # the downloads below store their rows concurrently
+
+    async def stored(url: str) -> MediaHash | None:
         row = await conn.fetchrow("select * from x_media where url=$1", url)
         if row and (
             row["status"] == "ok" or datetime.now(UTC) - row["fetched_at"] < MEDIA_FAILED_RETRY
         ):
-            cached[url] = MediaHash(
+            return MediaHash(
                 url=url,
                 status=row["status"],
                 phash=row["phash"],
                 phash_mirror=row["phash_mirror"],
                 error=row["error"],
             )
+        return None
 
-    async def fetch_one(url: str) -> tuple[MediaHash, int | None]:
+    cached: dict[str, MediaHash] = {}
+    for url in urls:
+        hit = await stored(url)
+        if hit is not None:
+            cached[url] = hit
+
+    async def download(url: str) -> tuple[MediaHash, int | None]:
         try:
             f = await fetch_url(
                 http, _small(url), settings, max_bytes=settings.image_max_bytes, accept="image/*"
@@ -1266,23 +1276,30 @@ async def media_hashes(
         except Exception as e:  # noqa: BLE001 - undecodable image etc.
             return MediaHash(url=url, status="failed", error=f"{type(e).__name__}: {e}"[:200]), None
 
+    async def fetch_one(url: str) -> MediaHash:
+        async with _single_flight(f"xmedia:{url}"):
+            hit = await stored(url)  # another read may have hashed it while this one waited
+            if hit is not None:
+                return hit
+            mh, dhash = await download(url)
+            await conn.execute(
+                """insert into x_media (url, status, phash, phash_mirror, dhash, error, fetched_at)
+                   values ($1, $2, $3, $4, $5, $6, now())
+                   on conflict (url) do update set status=excluded.status, phash=excluded.phash,
+                     phash_mirror=excluded.phash_mirror, dhash=excluded.dhash,
+                     error=excluded.error, fetched_at=now()""",
+                mh.url,
+                mh.status,
+                mh.phash,
+                mh.phash_mirror,
+                dhash,
+                mh.error,
+            )
+            return mh
+
     # the downloads run concurrently: a cold full analysis should not wait 4x for media
     missing = [u for u in urls if u not in cached]
-    fetched = await asyncio.gather(*(fetch_one(u) for u in missing))
-    for mh, dhash in fetched:
-        await conn.execute(
-            """insert into x_media (url, status, phash, phash_mirror, dhash, error, fetched_at)
-               values ($1, $2, $3, $4, $5, $6, now())
-               on conflict (url) do update set status=excluded.status, phash=excluded.phash,
-                 phash_mirror=excluded.phash_mirror, dhash=excluded.dhash,
-                 error=excluded.error, fetched_at=now()""",
-            mh.url,
-            mh.status,
-            mh.phash,
-            mh.phash_mirror,
-            dhash,
-            mh.error,
-        )
+    for mh in await asyncio.gather(*(fetch_one(u) for u in missing)):
         cached[mh.url] = mh
     out = [cached[u] for u in urls]
     return out

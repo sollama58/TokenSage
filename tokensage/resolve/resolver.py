@@ -22,6 +22,7 @@ import httpx
 import structlog
 
 from tokensage.config import Settings
+from tokensage.net.breaker import breaker
 from tokensage.resolve import metaplex
 from tokensage.resolve.fees import CreatorFee, resolve_creator_fee, sharing_config_pda
 from tokensage.resolve.pump_ca import (
@@ -242,17 +243,37 @@ async def read_pair_mint(rpc: SolanaRpc, mint: str) -> tuple[dict[str, str] | No
 # ----------------------------------------------------------------- creation time
 
 
+PUMP_COINS_SOURCE = "pumpfun_coins"
+PUMP_COINS_TIMEOUT_S = 6.0
+# A 403 is Cloudflare refusing this egress, not the coin: every analysis would ask again and
+# get the same refusal, so the route stays off this long before one probe is let through.
+PUMP_COINS_BLOCKED_S = 60.0
+
+
 async def _created_from_frontend_api(
     http: httpx.AsyncClient, mint: str
 ) -> tuple[datetime | None, str | None]:
+    """pump.fun's creation time (and creator) for the coin; (None, None) when it does not
+    answer, or while its breaker is open (the answer a failed call gives)."""
+    src = PUMP_COINS_SOURCE
+    if not breaker.allow_probe(src, PUMP_COINS_TIMEOUT_S):
+        return None, None
     try:
         r = await http.get(
             f"https://frontend-api-v3.pump.fun/coins-v2/{mint}",
             headers={"Origin": "https://pump.fun"},
-            timeout=6.0,
+            timeout=PUMP_COINS_TIMEOUT_S,
         )
     except httpx.HTTPError:
+        breaker.failure(src)
         return None, None
+    if r.status_code == 403:
+        breaker.open_for(src, PUMP_COINS_BLOCKED_S)
+        return None, None
+    if r.status_code == 429 or r.status_code >= 500:
+        breaker.failure(src)
+        return None, None
+    breaker.success(src)  # the API answered; a 404 is about this coin
     if r.status_code != 200:
         return None, None
     try:

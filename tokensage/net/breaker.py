@@ -13,6 +13,7 @@ import asyncpg
 class _State:
     failures: int = 0
     open_until: float = 0.0
+    probing: bool = False  # allow_probe let one caller through; the others are held off
 
 
 @dataclass
@@ -24,6 +25,17 @@ class CircuitBreaker:
     def allow(self, source: str) -> bool:
         st = self.states.get(source)
         return not st or st.open_until <= time.monotonic()
+
+    def allow_probe(self, source: str, hold_s: float) -> bool:
+        """allow(), but once an open breaker's cooldown ends only one caller goes through:
+        the others are held off for hold_s (the probe's own timeout) or until it reports."""
+        if not self.allow(source):
+            return False
+        st = self.states.get(source)
+        if st is not None and st.failures >= self.threshold:
+            st.open_until = time.monotonic() + hold_s
+            st.probing = True
+        return True
 
     MAX_SOURCES = 2000
 
@@ -37,6 +49,7 @@ class CircuitBreaker:
         st = self.states.setdefault(source, _State())
         st.failures = max(st.failures, self.threshold)
         st.open_until = time.monotonic() + seconds
+        st.probing = False
 
     def failure(self, source: str) -> bool:
         """Record a failure; True if the breaker just opened."""
@@ -46,8 +59,9 @@ class CircuitBreaker:
                 del self.states[k]
         st = self.states.setdefault(source, _State())
         st.failures += 1
-        if st.failures >= self.threshold and st.open_until <= time.monotonic():
+        if st.failures >= self.threshold and (st.probing or st.open_until <= time.monotonic()):
             st.open_until = time.monotonic() + self.cooldown_s
+            st.probing = False
             return True
         return False
 

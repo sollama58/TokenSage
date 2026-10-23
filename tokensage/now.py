@@ -301,6 +301,20 @@ async def story_heat(
     # v3: the lineage original is part of the key, so stories that share a name but not an
     # original don't share a leader
     key = f"{HEAT_KEY}v3:{kind}:{_compact(story)}:{story_mint or ''}"
+    # single flight: the coins of one story refresh together, and only the first should spend
+    # the GeckoTerminal search and peak (10 calls a minute); the others find its heat cached
+    async with fulldepth._single_flight(key):
+        return await _story_heat(conn, http, story, kind, story_mint, key)
+
+
+async def _story_heat(
+    conn: asyncpg.Connection,
+    http: httpx.AsyncClient,
+    story: str,
+    kind: str,
+    story_mint: str | None,
+    key: str,
+) -> StoryHeat:
     row = await conn.fetchrow("select value, fetched_at from lookup_cache where key=$1", key)
     if row and isinstance(row["value"], dict):
         cached = StoryHeat.model_validate(row["value"])

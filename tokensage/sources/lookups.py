@@ -1,7 +1,8 @@
 """Best-effort external lookups for copycat context: other coins with the same name/ticker.
 
-pump.fun frontend-api search (unofficial, may be Cloudflare-blocked) and DexScreener search
-(free). Both are throttled by the per-source circuit breaker and never raise.
+DexScreener search (free), throttled by the per-source circuit breaker; it never raises.
+pump.fun's frontend-api search was asked too until its route went away (404 since
+2026-10-17); it is no longer called.
 """
 
 from __future__ import annotations
@@ -16,9 +17,6 @@ from tokensage.net.breaker import breaker
 
 log = structlog.get_logger("lookups")
 
-PUMP_SEARCH = "https://frontend-api-v3.pump.fun/coins/search"
-# How long a 404 from the search route keeps it off (see pumpfun_search).
-PUMP_SEARCH_GONE_S = 6 * 3600.0
 DEX_SEARCH = "https://api.dexscreener.com/latest/dex/search"
 
 
@@ -34,56 +32,6 @@ def _ts_ms(v: object) -> datetime | None:
 def _str_or_none(v: object) -> str | None:
     """A name / symbol field: strings only (a number or list there is not a name)."""
     return v if isinstance(v, str) and v else None
-
-
-async def pumpfun_search(
-    http: httpx.AsyncClient, term: str, limit: int = 20
-) -> list[SameNameToken]:
-    src = "pumpfun_search"
-    if not term or not breaker.allow(src):
-        return []
-    try:
-        r = await http.get(
-            PUMP_SEARCH,
-            params={"searchTerm": term, "limit": limit, "offset": 0, "includeNsfw": "true"},
-            headers={"Origin": "https://pump.fun", "Accept": "application/json"},
-            timeout=5.0,
-        )
-        if r.status_code == 404:
-            # The route itself is gone ("Cannot GET /coins/search", seen 2026-10-17), not the
-            # term: probing it every breaker cooldown was ~720 failed calls a day.
-            breaker.open_for(src, PUMP_SEARCH_GONE_S)
-            log.warning("lookups.pumpfun_search_gone", status=404)
-            return []
-        if r.status_code != 200:
-            breaker.failure(src)
-            return []
-        data = r.json()
-    except (httpx.HTTPError, ValueError) as e:
-        breaker.failure(src)
-        log.info("lookups.pumpfun_search_failed", error=str(e)[:120])
-        return []
-    breaker.success(src)
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        items = data.get("coins") or data.get("items") or []
-    else:
-        items = []  # a JSON string / number body (an upstream error message)
-    out: list[SameNameToken] = []
-    for it in items if isinstance(items, list) else []:
-        if not isinstance(it, dict) or not it.get("mint"):
-            continue
-        out.append(
-            SameNameToken(
-                mint=str(it["mint"]),
-                name=_str_or_none(it.get("name")),
-                symbol=_str_or_none(it.get("symbol")),
-                created_at=_ts_ms(it.get("created_timestamp")),
-                source="pumpfun_search",
-            )
-        )
-    return out
 
 
 async def dexscreener_search(http: httpx.AsyncClient, term: str) -> list[SameNameToken]:
