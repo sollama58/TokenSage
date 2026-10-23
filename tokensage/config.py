@@ -159,8 +159,13 @@ class Settings(BaseSettings):
     # reported by its numeric account id; its login is not looked up (since rules 0.22.0).
     fee_recipient_cache_days: int = 7
     twitterapi_io_key: str = ""
+    # pump.mypinata.cloud serves only what Pump.fun pinned (403 for any other CID), and dweb.link
+    # and ipfs.io answer most reads with 429s, so a logo pinned elsewhere fell through to
+    # gateway.pinata.cloud (3-7 s) or the race timeout. ipfs.filebase.io answers those in ~0.4 s
+    # (checked 2026-10-23), so it goes second.
     ipfs_gateways: str = (
-        "https://pump.mypinata.cloud,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"
+        "https://pump.mypinata.cloud,https://ipfs.filebase.io,https://dweb.link,https://ipfs.io,"
+        "https://gateway.pinata.cloud"
     )
     fetch_connect_timeout_s: float = 5.0
     fetch_total_timeout_s: float = 10.0

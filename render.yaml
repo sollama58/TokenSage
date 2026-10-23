@@ -23,7 +23,7 @@ envVarGroups:
       - key: PAID_X_DAILY_USD_CAP
         value: "1.00"
       - key: IPFS_GATEWAYS
-        value: "https://pump.mypinata.cloud,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"
+        value: "https://pump.mypinata.cloud,https://ipfs.filebase.io,https://dweb.link,https://ipfs.io,https://gateway.pinata.cloud"
       # Helius plan for the admin panel's credit gauge (/admin); nothing throttles on it.
       # Free: 1000000 and 10; Developer: 10000000 and 50 (the plan since 2026-10-17).
       # BILLING_DAY is the day of the month credits reset.
