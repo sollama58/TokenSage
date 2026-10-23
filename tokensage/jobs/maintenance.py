@@ -15,7 +15,7 @@ from typing import Any
 import asyncpg
 import structlog
 
-from tokensage import queue, recall
+from tokensage import envreport, queue, recall
 from tokensage.config import get_settings
 from tokensage.db import create_pool
 from tokensage.logging import configure_logging
@@ -638,6 +638,8 @@ async def run_once() -> dict[str, Any]:
 
 async def main() -> int:
     configure_logging(get_settings().log_level)
+    # For TrenchScanner's Admin > Environment, on a connection of its own apart from run_once's.
+    await envreport.publish_quietly(get_settings().database_url, "maintenance")
     stats = await run_once()
     log.info("maintenance.done", **stats)
     return 1 if stats["failed_steps"] else 0

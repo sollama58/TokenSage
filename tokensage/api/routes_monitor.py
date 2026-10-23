@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 import asyncpg
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import Field
 
+from tokensage import envreport
 from tokensage.api.auth import require_monitor
 from tokensage.api.routes_admin import MONITOR_RESPONSES
 from tokensage.api.schemas import _Model
@@ -690,3 +691,84 @@ async def signals(
         ),
         analyses=[AnalysisCount(**dict(a)) for a in analyses],
     )
+
+
+# ---------------------------------------------------------------- env
+
+
+class EnvService(_Model):
+    id: str
+    label: str
+    reported_at: datetime | None = Field(description="When it last started; null: never")
+    commit: str | None
+    live: bool = Field(description="Read from this process now, not a stored report")
+
+
+class EnvCell(_Model):
+    need: Literal["required", "expected", "optional"] | None
+    state: Literal["set", "empty", "missing", "unknown"]
+    hint: str | None = Field(description="A setting's value, a URL's host, a secret's length")
+
+
+class EnvRow(_Model):
+    key: str
+    group: str
+    kind: Literal["secret", "url", "setting"]
+    note: str | None
+    differs: bool = Field(description="Meant to match across services, and the set ones don't")
+    cells: dict[str, EnvCell]
+
+
+class EnvResponse(_Model):
+    services: list[EnvService]
+    vars: list[EnvRow]
+
+
+@router.get("/env", response_model=EnvResponse, responses=MONITOR_RESPONSES)
+async def env(request: Request, response: Response) -> EnvResponse:
+    """Which of the env vars each service is meant to have are set on it, never the values:
+    the api's own read now, every other service's as it reported when it last started."""
+    async with _pool(request).acquire() as conn:
+        rows = await conn.fetch(
+            "select service, vars, commit, reported_at from service_env order by service"
+        )
+    stored = {r["service"]: r for r in rows}
+    reports: dict[str, dict[str, envreport.VarReport]] = {
+        s: envreport.read_vars(r["vars"]) for s, r in stored.items()
+    }
+    reports["api"] = envreport.report()
+    services = [
+        EnvService(
+            id=sid,
+            label=label,
+            reported_at=None if sid == "api" or sid not in stored else stored[sid]["reported_at"],
+            commit=envreport.commit()
+            if sid == "api"
+            else (stored[sid]["commit"] if sid in stored else None),
+            live=sid == "api",
+        )
+        for sid, label in envreport.SERVICES
+    ]
+    out: list[EnvRow] = []
+    for spec in envreport.MANIFEST:
+        cells: dict[str, EnvCell] = {}
+        for s in services:
+            v = reports.get(s.id, {}).get(spec.key)
+            cells[s.id] = EnvCell(
+                need=spec.on.get(s.id),
+                state=v.state if v else "unknown",
+                hint=v.hint if v else None,
+            )
+        out.append(
+            EnvRow(
+                key=spec.key,
+                group=spec.group,
+                kind=spec.kind,
+                note=spec.note,
+                differs=spec.same
+                and envreport.differs([reports.get(s.id, {}).get(spec.key) for s in services]),
+                cells=cells,
+            )
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return EnvResponse(services=services, vars=out)

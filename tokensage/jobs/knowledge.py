@@ -18,7 +18,7 @@ import asyncpg
 import httpx
 import structlog
 
-from tokensage import gazetteer_db
+from tokensage import envreport, gazetteer_db
 from tokensage.config import Settings, get_settings
 from tokensage.db import create_pool
 from tokensage.engine import image as image_stage
@@ -202,6 +202,7 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     pool = await create_pool(settings.database_url, min_size=1, max_size=2)
+    await envreport.publish_quietly(pool, "knowledge")  # for TrenchScanner's Admin > Environment
     metrics.meter.configure(
         ipfs_gateways=settings.ipfs_gateway_list, costs=settings.helius_credit_costs
     )

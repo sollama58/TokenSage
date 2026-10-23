@@ -19,6 +19,7 @@ MONITOR_PATHS = (
     "/admin/v1/status",
     "/admin/v1/usage",
     "/admin/v1/recall",
+    "/admin/v1/env",
 )
 
 
