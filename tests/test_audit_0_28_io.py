@@ -390,26 +390,23 @@ async def test_concurrent_lookups_fetch_once(
 
 @respx.mock
 async def test_search_lookups_never_raise_on_odd_json() -> None:
-    respx.get(url__startswith=lookups.PUMP_SEARCH).mock(
-        return_value=httpx.Response(200, json="Too many requests")
-    )
     respx.get(url__startswith=lookups.DEX_SEARCH).mock(
         return_value=httpx.Response(200, json={"pairs": [None, 5]})
     )
     async with httpx.AsyncClient() as http:
-        assert await lookups.pumpfun_search(http, "pepe") == []
         assert await lookups.dexscreener_search(http, "pepe") == []
-        respx.get(url__startswith=lookups.PUMP_SEARCH).mock(
+        respx.get(url__startswith=lookups.DEX_SEARCH).mock(
             return_value=httpx.Response(
-                200, json={"coins": [{"mint": "M2", "name": 5, "symbol": ["PEPE"]}]}
+                200,
+                json={"pairs": [{"chainId": "solana", "baseToken": {"address": "M2", "name": 5}}]},
             )
         )
+        got = await lookups.dexscreener_search(http, "pepe")
+        assert len(got) == 1 and got[0].name is None and got[0].symbol is None
+        assert lookups.filter_same_name(got, "PEPE", "pepe") == []
         respx.get(url__startswith=lookups.DEX_SEARCH).mock(
             return_value=httpx.Response(200, json=[1, 2])
         )
-        got = await lookups.pumpfun_search(http, "pepe")
-        assert len(got) == 1 and got[0].name is None and got[0].symbol is None
-        assert lookups.filter_same_name(got, "PEPE", "pepe") == []
         assert await lookups.dexscreener_search(http, "pepe") == []
 
 
@@ -532,17 +529,3 @@ async def test_get_asset_sends_named_params_and_misses_on_rpc_error() -> None:
     async with httpx.AsyncClient() as http:
         assert await SolanaRpc(RPC, http).get_asset("MintA") is None
     assert sent == [{"id": "MintA"}]
-
-
-@respx.mock
-async def test_pumpfun_search_404_turns_the_route_off() -> None:
-    from tokensage.net.breaker import breaker
-
-    route = respx.get(url__startswith=lookups.PUMP_SEARCH).mock(
-        return_value=httpx.Response(404, json={"message": "Cannot GET /coins/search"})
-    )
-    async with httpx.AsyncClient() as http:
-        assert await lookups.pumpfun_search(http, "pepe") == []
-        assert await lookups.pumpfun_search(http, "doge") == []
-    assert route.call_count == 1
-    assert not breaker.allow("pumpfun_search")

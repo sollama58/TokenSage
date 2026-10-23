@@ -241,8 +241,9 @@ async def test_db_context_adds_external_namesakes_after_ours(
     db: asyncpg.Connection,
     settings,  # type: ignore[no-untyped-def]
 ) -> None:
-    """The pump.fun / DexScreener searches run alongside the database queries; their
-    matches still join same_name after the database's, without duplicates."""
+    """The DexScreener search runs alongside the database queries; its matches still join
+    same_name after the database's, without duplicates (nor the coin itself). pump.fun's
+    /coins/search (404 since 2026-10-17) is not asked any more."""
     from tokensage import analyzer
     from tokensage.net.breaker import breaker
 
@@ -251,9 +252,11 @@ async def test_db_context_adds_external_namesakes_after_ours(
     await _token(db, "mine", "Sahur Cat", "SAHUR", NOW)
     ms = int((NOW - timedelta(hours=2)).timestamp() * 1000)
 
+    other_hosts: list[str] = []
+
     def answer(req: httpx.Request) -> httpx.Response:
         if req.url.host == "api.dexscreener.com":
-            base = [("dx1", "SAHUR"), ("dbm", "SAHUR"), ("dx2", "OTHER")]
+            base = [("dx1", "SAHUR"), ("dbm", "SAHUR"), ("mine", "SAHUR"), ("dx2", "OTHER")]
             return httpx.Response(
                 200,
                 json={
@@ -267,23 +270,15 @@ async def test_db_context_adds_external_namesakes_after_ours(
                     ]
                 },
             )
-        coins = [("pf1", "SAHUR"), ("mine", "SAHUR"), ("pf2", "NOPE")]
-        return httpx.Response(
-            200,
-            json=[
-                {"mint": a, "name": "y", "symbol": sym, "created_timestamp": ms} for a, sym in coins
-            ],
-        )
+        other_hosts.append(str(req.url.host))
+        return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
         ctx = SimpleNamespace(settings=settings, http=http)
         r = SimpleNamespace(mint="mine", created_at=NOW, creator=None)
         dbc = await analyzer._db_context(db, ctx, r, None, None, "SAHUR", "sahurcat", [])  # type: ignore[arg-type]
-    assert [(t.mint, t.source) for t in dbc.same_name] == [
-        ("dbm", "db"),
-        ("pf1", "pumpfun_search"),
-        ("dx1", "dexscreener"),
-    ]
+    assert [(t.mint, t.source) for t in dbc.same_name] == [("dbm", "db"), ("dx1", "dexscreener")]
+    assert other_hosts == []  # frontend-api-v3.pump.fun/coins/search is not called
 
 
 # ----------------------------------------------------------------- the day's top tokens by volume

@@ -257,7 +257,7 @@ Typical cost of a cold resolve: 2–3 RPC calls plus 1 metadata fetch, well insi
   - Reportedly samples rather than covers the chain (Chainstack, Sept 2026). Fine for a corpus; gaps only weaken copycat counts.
 - pump.fun's own NATS feed (`wss://prod-v2.nats.realtime.pump.fun`, subject `newCoinCreated.prod`) uses credentials scraped from their web bundle that can rotate at any time. Do not build on it.
 
-**On-demand copycat lookups (no corpus needed):** pump.fun `GET frontend-api-v3.pump.fun/coins/search?searchTerm=<ticker or name>` (unofficial, throttled) returns other coins with the same name and their creation times. DexScreener `GET https://api.dexscreener.com/latest/dex/search?q=<ticker>` (free) covers graduated coins. Together with the `known_coin` table and every token TokenSage has already analysed, this answers "is this the original or a clone?" well enough for v1.
+**On-demand copycat lookups (no corpus needed):** pump.fun `GET frontend-api-v3.pump.fun/coins/search?searchTerm=<ticker or name>` (unofficial, throttled) returned other coins with the same name and their creation times until the route went away (404 since 2026-10-17); it is no longer called. DexScreener `GET https://api.dexscreener.com/latest/dex/search?q=<ticker>` (free) covers graduated coins. Together with the `known_coin` table and every token TokenSage has already analysed, this answers "is this the original or a clone?" well enough for v1.
 
 ### 4.2 Token metadata (description, image, socials)
 
