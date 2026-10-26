@@ -1229,6 +1229,26 @@
         "title": "DbStatement",
         "type": "object"
       },
+      "DbTerminated": {
+        "additionalProperties": false,
+        "properties": {
+          "pid": {
+            "title": "Pid",
+            "type": "integer"
+          },
+          "terminated": {
+            "description": "False when no such session was found.",
+            "title": "Terminated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pid",
+          "terminated"
+        ],
+        "title": "DbTerminated",
+        "type": "object"
+      },
       "DepthTiming": {
         "additionalProperties": false,
         "properties": {
@@ -6500,6 +6520,64 @@
           }
         ],
         "summary": "Db Activity",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/db/sessions/{pid}/terminate": {
+      "post": {
+        "description": "End one database session (pg_terminate_backend): its open transaction rolls back and\nthe locks it held are released. For a connection a dead process left behind holding a\nlock every analysis then waits on. Admin key only; this request's own session and\nother databases' sessions are refused.",
+        "operationId": "db_terminate_admin_v1_db_sessions__pid__terminate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "title": "Pid",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbTerminated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden (monitor or admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Db Terminate",
         "tags": [
           "admin"
         ]

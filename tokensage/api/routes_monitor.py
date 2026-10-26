@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import Field
 
 from tokensage import envreport
-from tokensage.api.auth import require_monitor
+from tokensage.api.auth import require_admin, require_monitor
 from tokensage.api.routes_admin import MONITOR_RESPONSES
 from tokensage.api.schemas import _Model
 from tokensage.net import metrics
@@ -779,6 +779,33 @@ async def db_activity(
         statements=statements,
         statements_available=available,
     )
+
+
+class DbTerminated(_Model):
+    pid: int
+    terminated: bool = Field(description="False when no such session was found.")
+
+
+@router.post(
+    "/db/sessions/{pid}/terminate",
+    response_model=DbTerminated,
+    responses=MONITOR_RESPONSES,
+    dependencies=[Depends(require_admin)],
+)
+async def db_terminate(request: Request, response: Response, pid: int) -> DbTerminated:
+    """End one database session (pg_terminate_backend): its open transaction rolls back and
+    the locks it held are released. For a connection a dead process left behind holding a
+    lock every analysis then waits on. Admin key only; this request's own session and
+    other databases' sessions are refused."""
+    async with _pool(request).acquire() as conn:
+        ok = await conn.fetchval(
+            """select pg_terminate_backend(pid) from pg_stat_activity
+               where pid = $1 and pid <> pg_backend_pid()
+                 and datname = current_database() and backend_type = 'client backend'""",
+            pid,
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return DbTerminated(pid=pid, terminated=bool(ok))
 
 
 # ---------------------------------------------------------------- signals

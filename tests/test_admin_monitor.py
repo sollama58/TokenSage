@@ -248,9 +248,14 @@ async def test_db_activity_lists_busy_sessions(client: httpx.AsyncClient, migrat
         assert all("pg_stat_activity" not in s["query"] for s in d["sessions"])
         assert d["sessions_max"] is None or d["sessions_max"] > 0
         assert isinstance(d["statements"], list) and isinstance(d["statements_available"], bool)
-        sleeper.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        # the admin key may end that session; its statement is cancelled
+        pid = mine[0]["pid"]
+        r = await client.post(f"/admin/v1/db/sessions/{pid}/terminate", headers=ADMIN)
+        assert r.status_code == 200 and r.json() == {"pid": pid, "terminated": True}
+        with pytest.raises((asyncpg.PostgresError, asyncpg.InterfaceError)):
             await sleeper
+        r = await client.post(f"/admin/v1/db/sessions/{pid}/terminate", headers=ADMIN)
+        assert r.json()["terminated"] is False
     finally:
         await other.close()
 
