@@ -17,8 +17,10 @@ from tokensage import cpu, envreport, fulldepth, queue
 from tokensage.analyzer import (
     AnalyzeFailed,
     Context,
+    JobProgress,
     RetryRescheduled,
     analyze,
+    job_progress,
     retry_metadata,
 )
 from tokensage.config import Settings, get_settings
@@ -163,10 +165,21 @@ class Worker:
             # lost (another slot, process or the maintenance requeue owns the job now) going
             # on would analyse the coin twice, and every status write would miss anyway.
             lost = asyncio.Event()
+            # Set before the task is made, so the task's copy of the context carries the same
+            # object: the job reports its stage into it, and this slot reads it back.
+            progress = JobProgress()
+            token = job_progress.set(progress)
             work = asyncio.create_task(self._process(conn, job))
+            job_progress.reset(token)
             heartbeat = asyncio.create_task(self._heartbeat(job, work, lost))
             try:
-                await work
+                async with asyncio.timeout(self.settings.job_max_s or None):
+                    await work
+            except TimeoutError:
+                # Over job_max_s: the heartbeat kept its lease alive however long it hung, so
+                # the slot is taken back here. The job's connection may be mid-query (or the
+                # reason it hung); it is dropped, and the failure is written on a fresh one.
+                await self._stop_overrun(conn, job, work, progress.stage)
             except asyncio.CancelledError:
                 if lost.is_set():
                     log.warning("worker.job_abandoned", job_id=job.id, kind=job.kind)
@@ -177,6 +190,28 @@ class Worker:
                 heartbeat.cancel()
                 self.active_jobs.discard(job.id)
             return True
+
+    async def _stop_overrun(
+        self, conn: asyncpg.Connection, job: queue.Job, work: asyncio.Task[None], stage: str
+    ) -> None:
+        cap = self.settings.job_max_s
+        log.error("worker.job_timeout", job_id=job.id, kind=job.kind, stage=stage, max_s=cap)
+        work.cancel()
+        # a job hung in a thread or an uncancellable wait never answers the cancel: don't wait on it
+        await asyncio.wait({work}, timeout=5.0)
+        conn.terminate()
+        where = f" (stage: {stage})" if stage else ""
+        try:
+            async with self.pool.acquire() as c:
+                await queue.fail(
+                    c,
+                    job.id,
+                    f"job timed out after {cap:g} s{where}",
+                    self.settings.job_max_attempts,
+                    lease_token=job.lease_token,
+                )
+        except Exception as e:  # noqa: BLE001 - the slot is freed either way
+            log.warning("worker.job_timeout_fail_failed", job_id=job.id, error=str(e)[:120])
 
     async def _heartbeat(
         self, job: queue.Job, work: asyncio.Task[None], lost: asyncio.Event
@@ -288,7 +323,9 @@ class Worker:
                     requested_by=job.requested_by,
                     pool=self.pool,
                 )
-                if await queue.complete(conn, job.id, version, job.lease_token):
+                progress = job_progress.get()
+                timing = progress.timing if progress is not None else None
+                if await queue.complete(conn, job.id, version, job.lease_token, timing=timing):
                     bound.info("job.done", version=version)
                 else:
                     bound.warning("job.done_after_lease_lost", version=version)

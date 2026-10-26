@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 import asyncpg
@@ -90,6 +91,27 @@ async def test_release_returns_job_untouched(conn: asyncpg.Connection) -> None:
     row = await conn.fetchrow("select status, attempts, locked_until from job where id=$1", j.id)
     assert row and row["status"] == "pending" and row["attempts"] == 0
     assert row["locked_until"] is None
+
+
+async def test_complete_keeps_the_timing_under_the_payload(conn: asyncpg.Connection) -> None:
+    j = await queue.enqueue(conn, "analyze", MINT, "basic")
+    await conn.execute('update job set payload = \'{"hints": {"name": "x"}}\' where id=$1', j.id)
+    claimed = await queue.claim(conn, 60)
+    assert claimed is not None and claimed.id == j.id
+    assert await queue.complete(
+        conn, j.id, 1, claimed.lease_token, timing={"resolve_ms": 12, "total_ms": 340}
+    )
+    row = await conn.fetchrow("select payload::text as p from job where id=$1", j.id)
+    assert row is not None
+    payload = json.loads(row["p"])
+    assert payload["hints"] == {"name": "x"}  # the hints stay
+    assert payload["timing"] == {"resolve_ms": 12, "total_ms": 340}
+    # without a timing the payload is left alone
+    j2 = await queue.enqueue(conn, "analyze", "M2", "basic")
+    c2 = await queue.claim(conn, 60)
+    assert c2 is not None and c2.id == j2.id
+    assert await queue.complete(conn, j2.id, 1, c2.lease_token)
+    assert await conn.fetchval("select payload from job where id=$1", j2.id) is None
 
 
 async def test_complete_notifies_waiter(migrated_db: str, conn: asyncpg.Connection) -> None:

@@ -11,6 +11,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -109,6 +110,33 @@ from tokensage.sources.x import TweetData
 from tokensage.versions import TREND_INPUTS_KEY
 
 log = structlog.get_logger("analyzer")
+
+
+@dataclass
+class JobProgress:
+    """What a running analysis is doing, for the worker that runs it: the stage it is in (named
+    when the worker stops it at job_max_s) and, once done, how long each stage took (stored on
+    the job, summarised by GET /admin/v1/queue). The worker creates one per job and sets it in
+    job_progress before starting the job's task, so the task sees the same object."""
+
+    stage: str = ""
+    timing: dict[str, int] | None = None
+
+
+job_progress: ContextVar[JobProgress | None] = ContextVar("job_progress", default=None)
+
+
+def _stage(name: str) -> None:
+    p = job_progress.get()
+    if p is not None:
+        p.stage = name
+
+
+# How long a read waits for a second pool connection before running its reference queries on
+# its own connection instead. The pool holds concurrency + 6; waiting with no limit held the
+# job's own connection while the pool was busy (2026-10-26 slot audit).
+EXTRA_CONN_WAIT_S = 5.0
+
 
 _REFERENT_KINDS: dict[str, ReferentKind] = {
     "famous_animal": "famous_animal",
@@ -427,10 +455,17 @@ async def _prefetch_db_reads(
         # a query still running on it made the worker's queue.fail() hit "another operation
         # is in progress", leaving the job `running` until its lease ran out (and the pool
         # took `extra` back mid-query the other way round).
-        async with pool.acquire() as extra:
-            names, refs = await asyncio.gather(
-                names_and_market(main), reference_data(extra), return_exceptions=True
-            )
+        try:
+            async with pool.acquire(timeout=EXTRA_CONN_WAIT_S) as extra:
+                names, refs = await asyncio.gather(
+                    names_and_market(main), reference_data(extra), return_exceptions=True
+                )
+        except TimeoutError:
+            # no second connection within the wait (gather itself returns its exceptions)
+            log.info("analysis.extra_connection_unavailable", wait_s=EXTRA_CONN_WAIT_S)
+            x_reuse, creator_count, same_rows, top_rows = await names_and_market(main)
+            meta_counts, gazetteer, coins, logos = await reference_data(main)
+            return x_reuse, creator_count, same_rows, meta_counts, top_rows, gazetteer, coins, logos
         if isinstance(names, BaseException):
             raise names
         if isinstance(refs, BaseException):
@@ -1654,6 +1689,7 @@ async def analyze(
         if hints
         else None
     )
+    _stage("resolve")
     try:
         r = await resolve(
             conn, ctx.rpc, ctx.http, ctx.settings, mint, created_hint=_hint_created_at(hints)
@@ -1669,6 +1705,7 @@ async def analyze(
     resolve_ms = int((time.perf_counter() - phase) * 1000)
     phase = time.perf_counter()
 
+    _stage("metadata")
     m: md.Metadata | None = None
     image_bytes: bytes | None = None
     cached_feats: image_stage.ImageFeatures | None = None
@@ -1774,6 +1811,7 @@ async def analyze(
     if logo_feats is None and image_bytes:
         # Hash while _db_context runs its non-logo queries (and external name searches).
         logo_hash_task = asyncio.create_task(cpu.run(image_stage.analyze, image_bytes, [], 0))
+    _stage("db_context")
     dbc = await _db_context(
         conn,
         ctx,
@@ -1792,6 +1830,7 @@ async def analyze(
     phase = time.perf_counter()
     if logo_feats is None and logo_hash_task is not None:
         logo_feats = logo_hash_task.result().features
+    _stage("pair")
     pair_task = asyncio.create_task(pair_lookup.lookup(conn, ctx.rpc, r.quote_mint))
     embed_task = (
         asyncio.create_task(cpu.run(embed.default_encoder, ctx.settings))
@@ -1819,18 +1858,21 @@ async def analyze(
     full_depth_ms = 0
     basic_x_ms = 0
     if depth == "full":
+        _stage("full_depth")
         out, timed_out = await _full_depth(conn, ctx, r, m, x, inp, image_bytes)
         full_depth_ms = int((time.perf_counter() - phase) * 1000)
         phase = time.perf_counter()
     else:
         basic_x_caveats: list[str] = []
         if ctx.settings.enable_basic_x and x is not None:
+            _stage("basic_x")
             inp.x_url_handle = x.ref.url_handle
             phase_x = time.perf_counter()
             bx = await fulldepth.basic_x_load(conn, ctx.http, ctx.settings, x, pool=pool)
             basic_x_ms = int((time.perf_counter() - phase_x) * 1000)
             inp.tweet, inp.profile = bx.tweet, bx.profile
             basic_x_caveats = bx.caveats
+        _stage("engine")
         out = await cpu.run(run_basic, inp)
         if basic_x_caveats:
             out.caveats.extend(basic_x_caveats)
@@ -1852,6 +1894,7 @@ async def analyze(
     if m and m.image_content_key and out.image.features and image_bytes:
         await _persist_image(conn, m.image_content_key, out)
 
+    _stage("extras")
     extras = await _read_extras(conn, ctx, r, out)
     doc = build_document(r, m, depth, out, x, hint_use, extras)
     hint_private = _hint_private_to_caller(
@@ -1877,25 +1920,27 @@ async def analyze(
         score=score,
         label=doc.referent.label if doc.referent else None,
     )
+    _stage("persist")
     if not hint_private:
         await _store_xref(conn, r.mint, doc.x)
     version = await _store_analysis(conn, doc, store_read=not hint_private)
     if depth == "full":
         await _store_trend_inputs(conn, r.mint, out)
     persist_ms = int((time.perf_counter() - phase) * 1000)
-    log.info(
-        "analysis.timing",
-        mint=mint,
-        depth=depth,
-        resolve_ms=resolve_ms,
-        metadata_ms=metadata_ms,
-        db_context_ms=db_context_ms,
-        engine_ms=engine_ms,
-        full_depth_ms=full_depth_ms,
-        basic_x_ms=basic_x_ms,
-        persist_ms=persist_ms,
-        total_ms=int((time.perf_counter() - t0) * 1000),
-    )
+    timing = {
+        "resolve_ms": resolve_ms,
+        "metadata_ms": metadata_ms,
+        "db_context_ms": db_context_ms,
+        "engine_ms": engine_ms,
+        "full_depth_ms": full_depth_ms,
+        "basic_x_ms": basic_x_ms,
+        "persist_ms": persist_ms,
+        "total_ms": int((time.perf_counter() - t0) * 1000),
+    }
+    log.info("analysis.timing", mint=mint, depth=depth, **timing)
+    progress = job_progress.get()
+    if progress is not None:
+        progress.timing = timing
     return version
 
 

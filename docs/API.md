@@ -608,7 +608,7 @@ everything else: key listing, create, limit changes, rotate and revoke, `/jobs` 
 | `GET /admin/v1/recall?hours=24` | How often the engine resolved what coins refer to, per depth |
 | `GET /admin/v1/helius?days=30&hours=48` | Solana RPC (Helius) calls and credits: this hour, today, last 24 h and 7 days, the billing cycle so far, its projection at the last 24 hours' pace against `HELIUS_PLAN_CREDITS`, days until the credits run out, 429s, errors, latency and peak requests per second; a per-method table; hourly and daily series |
 | `GET /admin/v1/upstreams?hours=24` | Every upstream (Helius, Wikipedia, Google News and Trends, GeckoTerminal, CoinGecko, the X sources, IPFS gateways, pump.fun, `other` for metadata hosts): calls, errors, error rate, 429s, average and max latency, peak req/s, circuit-breaker state, and calls per hour |
-| `GET /admin/v1/queue?hours=24` | Job timing per depth (queue wait, processing and total, p50/p95/max), counts per kind, failures by error code, jobs per hour, who requested them, retried and stuck jobs |
+| `GET /admin/v1/queue?hours=24` | Job timing per depth (queue wait, processing and total, p50/p95/max), where an analysis's processing time goes (`stages`: resolve, metadata, db_context, basic_x, engine, full_depth, persist, total; p50/p95 per depth), counts per kind, failures by error code, jobs per hour, who requested them, retried and stuck jobs, and jobs running past `JOB_MAX_S` (`long_running`) |
 | `GET /admin/v1/signals?hours=6` | Each trend source's status as recent full reads saw it, knowledge-table freshness (trends, known coins, top volume, gazetteer, tokens), paid X spend against its cap, and analyses per depth with how many found a referent |
 
 ### Admin panel

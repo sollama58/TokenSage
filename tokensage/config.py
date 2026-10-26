@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # `now` jobs a key may start per UTC day (joining an open one is free); past it the call
     # answers 429 quota_exceeded. TrenchScanner refreshes each band coin about every 4 min.
     now_per_day: int = 50_000
+    # The refresh's place in the analyzer queue. It ran at PRIORITY_API (10), ahead of every
+    # read: on 2026-10-26, 22k refreshes a day took the slots while the reads a decision waits
+    # on queued behind them. Between the batch tiers now: behind a normal read (50), ahead of
+    # a launch read (70). A refresh feeds 14 decision-time inputs that are filled on 7-14% of
+    # decisions; a read feeds the other ~60.
+    now_priority: int = 60
 
     # --- basic-depth X interpretation (since rules 0.36.0) ---
     # On depth=basic, use cached tweet/profile text when present (tier A), and optionally
@@ -197,6 +203,14 @@ class Settings(BaseSettings):
     cpu_threads: int = 3
     job_lease_s: int = 120
     job_max_attempts: int = 3
+    # A job still running after this long is stopped, its slot freed and the job failed (the
+    # claim retries it while attempts remain). The lease alone never freed a slot: the
+    # heartbeat renews it while the job runs, hung or not. On 2026-10-26 nine of the twelve
+    # analyzer slots had been held since 10-23 by six basic reads and three metadata retries
+    # that never finished, and reads queued 17-23 minutes behind the three slots left. The cap
+    # is far above a real job: a full read ends at its 20 s deadline, a cold basic read within
+    # ~30 s of fetch timeouts. 0 turns it off.
+    job_max_s: float = 300.0
     # A low-priority launch read still waiting after this long is dropped (queue.expire_stale_low):
     # TrenchScanner stops asking after ~11 minutes, and a backlog of them filled the queue.
     batch_low_max_wait_s: float = 900.0

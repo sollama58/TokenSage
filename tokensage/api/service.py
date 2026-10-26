@@ -549,7 +549,7 @@ async def now_items(
 
             if not j.inserted:
                 return
-            if await queue.pending_count(conn, queue.PRIORITY_API) > settings.max_queue_depth:
+            if await queue.pending_count(conn, settings.now_priority) > settings.max_queue_depth:
                 raise errors.overloaded()
             used = await usage.bump(conn, NOW_USAGE_KEY + requested_by, requests=1)
             if used.requests > settings.now_per_day:
@@ -565,7 +565,7 @@ async def now_items(
                     "now",
                     m,
                     "full",
-                    priority=queue.PRIORITY_API,
+                    priority=settings.now_priority,
                     requested_by=requested_by,
                     reuse_done_within_s=min(30, settings.now_max_age_s),
                     before_commit=charge,

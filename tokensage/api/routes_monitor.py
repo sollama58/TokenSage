@@ -213,6 +213,17 @@ class Requester(_Model):
     jobs: int
 
 
+class StageTiming(_Model):
+    """One stage of an analysis, over the done jobs that recorded it (payload.timing, written
+    by the analyzer worker since 2026-10-26)."""
+
+    depth: str | None
+    stage: str
+    n: int
+    p50_s: float | None
+    p95_s: float | None
+
+
 class JobsResponse(_Model):
     hours: int
     by_depth: list[DepthTiming]
@@ -222,6 +233,11 @@ class JobsResponse(_Model):
     requesters: list[Requester]
     retried: int
     stuck_running: int
+    # running longer than JOB_MAX_S: the worker should have stopped these (a slot each)
+    long_running: int = 0
+    # where an analysis's time goes, per depth: resolve, metadata, db_context, basic_x,
+    # engine, full_depth, persist, total
+    stages: list[StageTiming] = Field(default_factory=list)
 
 
 class TrendSourceRow(_Model):
@@ -524,9 +540,10 @@ async def queue_stats(
     response: Response,
     hours: Annotated[int, Query(ge=1, le=24 * 7)] = 24,
 ) -> JobsResponse:
-    """Job timing by depth (queue wait, processing and total, p50/p95), counts by kind,
-    failures by error code, hourly throughput and who asked, over `hours`. Jobs are kept
-    for 7 days."""
+    """Job timing by depth (queue wait, processing and total, p50/p95), the analysis stages
+    (where the processing time goes), counts by kind, failures by error code, hourly
+    throughput and who asked, over `hours`. Jobs are kept for 7 days."""
+    settings = request.app.state.settings
     async with _pool(request).acquire() as conn:
         depth = await conn.fetch(
             """select depth,
@@ -587,10 +604,28 @@ async def queue_stats(
                    and (finished_at > now() - make_interval(hours => $1)
                         or status in ('pending', 'running'))) as retried,
                  count(*) filter (where status = 'running' and locked_until < now())
-                   as stuck_running
+                   as stuck_running,
+                 count(*) filter (where status = 'running' and $2::float > 0
+                   and started_at < now() - make_interval(secs => $2)) as long_running
                from job
                where status in ('pending', 'running')
                   or finished_at > now() - make_interval(hours => $1)""",
+            hours,
+            float(settings.job_max_s),
+        )
+        stages = await conn.fetch(
+            """select j.depth, s.stage, count(*) as n,
+                 percentile_cont(0.5) within group (order by
+                   (j.payload->'timing'->>(s.stage || '_ms'))::float / 1000) as p50,
+                 percentile_cont(0.95) within group (order by
+                   (j.payload->'timing'->>(s.stage || '_ms'))::float / 1000) as p95
+               from job j
+               cross join unnest(array['resolve', 'metadata', 'db_context', 'basic_x',
+                                       'engine', 'full_depth', 'persist', 'total']) as s(stage)
+               where j.kind = 'analyze' and j.status = 'done'
+                 and j.finished_at > now() - make_interval(hours => $1)
+                 and j.payload->'timing' ? (s.stage || '_ms')
+               group by j.depth, s.stage order by j.depth, s.stage""",
             hours,
         )
     response.headers["Cache-Control"] = "no-store"
@@ -617,6 +652,17 @@ async def queue_stats(
         requesters=[Requester(**dict(w)) for w in who],
         retried=int(extra["retried"]),
         stuck_running=int(extra["stuck_running"]),
+        long_running=int(extra["long_running"]),
+        stages=[
+            StageTiming(
+                depth=s["depth"],
+                stage=s["stage"],
+                n=int(s["n"]),
+                p50_s=_f(s["p50"]),
+                p95_s=_f(s["p95"]),
+            )
+            for s in stages
+        ],
     )
 
 

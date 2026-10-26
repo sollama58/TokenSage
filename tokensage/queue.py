@@ -298,9 +298,12 @@ async def complete(
     job_id: int,
     result_version: int | None,
     lease_token: str | None = None,
+    timing: dict[str, Any] | None = None,
 ) -> bool:
     """Mark a running job done. With a lease_token (the one claim() handed out) the job is
-    only touched while that lease is still held: False means someone else owns it now."""
+    only touched while that lease is still held: False means someone else owns it now.
+    `timing` (an analysis's stage times, analyzer.JobProgress) is kept under payload.timing,
+    where GET /admin/v1/queue summarises it."""
     async with conn.transaction():
         key = await conn.fetchrow("select kind, mint, depth from job where id=$1", job_id)
         if key is not None:
@@ -310,12 +313,16 @@ async def complete(
             )
         res = await conn.execute(
             """update job set status='done', finished_at=now(), locked_until=null,
-               lease_token=null, result_version=$2, last_error=null
+               lease_token=null, result_version=$2, last_error=null,
+               payload = case when $4::text is null then payload
+                         else coalesce(payload, '{}'::jsonb)
+                              || jsonb_build_object('timing', $4::text::jsonb) end
                where id=$1 and status='running'
                  and ($3::text is null or lease_token = $3)""",
             job_id,
             result_version,
             lease_token,
+            json.dumps(timing) if timing is not None else None,
         )
         if not _one_row(res):
             return False
