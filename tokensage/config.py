@@ -191,6 +191,13 @@ class Settings(BaseSettings):
     # Concurrent claim/process loops in the analyzer worker. Cold analyses wait mostly on
     # IPFS/X/RPC, so several in flight multiply throughput. Each loop holds one DB connection.
     worker_concurrency: int = 12
+    # How many analyses may run their database stage (db_context: name, creator, X-reuse,
+    # meta-word and logo lookups over the token tables) at the same time. Every slot used to
+    # run it at once: on 2026-10-26, when #91 brought nine stuck slots back to life, twelve
+    # concurrent db_context stages took the stage from ~3 s to ~31 s each, past the 30 s
+    # command timeout, and reads failed in bulk (done/hour fell from ~1,400 to under 100).
+    # The other slots keep fetching metadata, images and X meanwhile.
+    db_context_concurrency: int = 4
     # On SIGTERM, in-flight jobs get this long to finish before they are handed back to the
     # queue (Render waits maxShutdownDelaySeconds=60 before killing the process).
     worker_shutdown_grace_s: float = 45.0

@@ -475,6 +475,18 @@ async def _prefetch_db_reads(
     return x_reuse, creator_count, same_rows, meta_counts, top_rows, gazetteer, coins, logos
 
 
+# One gate per event loop (tests run many; the worker one). Sized by db_context_concurrency.
+_db_gate: tuple[asyncio.AbstractEventLoop, int, asyncio.Semaphore] | None = None
+
+
+def _db_context_gate(limit: int) -> asyncio.Semaphore:
+    global _db_gate  # noqa: PLW0603 - one semaphore per loop, sized by the settings
+    loop = asyncio.get_running_loop()
+    if _db_gate is None or _db_gate[0] is not loop or _db_gate[1] != limit:
+        _db_gate = (loop, limit, asyncio.Semaphore(max(1, limit)))
+    return _db_gate[2]
+
+
 async def _db_context(
     conn: asyncpg.Connection,
     ctx: Context,
@@ -497,20 +509,27 @@ async def _db_context(
         else None
     )
     try:
-        return await _db_context_queries(
-            conn,
-            ctx,
-            r,
-            x,
-            ticker,
-            name_compact,
-            meta_words,
-            logo,
-            ext_task,
-            normalized,
-            logo_hash_task,
-            pool,
-        )
+        # At most db_context_concurrency analyses query the token tables at once; the rest wait
+        # here, holding no extra connection, while their external searches above still run.
+        queued_at = time.perf_counter()
+        async with _db_context_gate(ctx.settings.db_context_concurrency):
+            waited_s = time.perf_counter() - queued_at
+            if waited_s >= 5:
+                log.info("analysis.db_context_waited", mint=r.mint, wait_s=round(waited_s, 1))
+            return await _db_context_queries(
+                conn,
+                ctx,
+                r,
+                x,
+                ticker,
+                name_compact,
+                meta_words,
+                logo,
+                ext_task,
+                normalized,
+                logo_hash_task,
+                pool,
+            )
     finally:
         if ext_task is not None and not ext_task.done():
             ext_task.cancel()
