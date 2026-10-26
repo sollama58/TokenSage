@@ -666,6 +666,121 @@ async def queue_stats(
     )
 
 
+# ---------------------------------------------------------------- database
+
+
+class DbSession(_Model):
+    pid: int
+    state: str | None = None
+    age_s: float | None = Field(None, description="Seconds since the current query started.")
+    wait_event_type: str | None = None
+    wait_event: str | None = None
+    application_name: str | None = None
+    query: str = Field("", description="The statement's first 400 characters.")
+
+
+class DbStatement(_Model):
+    """One row of pg_stat_statements, when the extension is installed."""
+
+    calls: int
+    total_s: float = Field(description="Total execution time over the extension's window.")
+    mean_ms: float
+    max_ms: float | None = None
+    rows: int
+    query: str
+
+
+class DbResponse(_Model):
+    sessions: list[DbSession] = Field(
+        description="Connections busy or in a transaction, oldest query first (this one excluded)."
+    )
+    sessions_idle: int
+    sessions_max: int | None = Field(None, description="The server's max_connections.")
+    statements: list[DbStatement] = Field(
+        default_factory=list,
+        description="Costliest statements (pg_stat_statements, when on; else empty).",
+    )
+    statements_available: bool
+
+
+@router.get("/db", response_model=DbResponse, responses=MONITOR_RESPONSES)
+async def db_activity(
+    request: Request,
+    response: Response,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> DbResponse:
+    """What the database is doing now: every busy connection with its current statement and
+    how long it has run (pg_stat_activity), and the statements that cost the most in all
+    (pg_stat_statements, when installed). For a slow analysis stage this names the query:
+    on 2026-10-26 the db_context stage went to 30 s with nothing on this side to say why."""
+    async with _pool(request).acquire() as conn:
+        rows = await conn.fetch(
+            """select pid, state, application_name, wait_event_type, wait_event,
+                      extract(epoch from (now() - query_start)) as age_s,
+                      left(query, 400) as query
+               from pg_stat_activity
+               where datname = current_database() and pid <> pg_backend_pid()
+                 and backend_type = 'client backend'
+                 and state is not null and state <> 'idle'
+               order by query_start nulls last
+               limit $1""",
+            limit,
+        )
+        idle = await conn.fetchval(
+            """select count(*) from pg_stat_activity
+               where datname = current_database() and backend_type = 'client backend'
+                 and state = 'idle'"""
+        )
+        max_conn = await conn.fetchval(
+            "select setting::int from pg_settings where name = 'max_connections'"
+        )
+        statements: list[DbStatement] = []
+        available = False
+        try:
+            stat_rows = await conn.fetch(
+                """select calls, total_exec_time, mean_exec_time, max_exec_time, rows,
+                          left(query, 400) as query
+                   from pg_stat_statements
+                   where dbid = (select oid from pg_database where datname = current_database())
+                   order by total_exec_time desc
+                   limit $1""",
+                limit,
+            )
+            available = True
+            statements = [
+                DbStatement(
+                    calls=int(r["calls"]),
+                    total_s=round(float(r["total_exec_time"]) / 1000, 1),
+                    mean_ms=round(float(r["mean_exec_time"]), 1),
+                    max_ms=_f(r["max_exec_time"]),
+                    rows=int(r["rows"]),
+                    query=r["query"] or "",
+                )
+                for r in stat_rows
+            ]
+        except (asyncpg.UndefinedTableError, asyncpg.InsufficientPrivilegeError):
+            pass
+    response.headers["Cache-Control"] = "no-store"
+    return DbResponse(
+        sessions=[
+            DbSession(
+                pid=int(r["pid"]),
+                state=r["state"],
+                age_s=_f(r["age_s"]),
+                wait_event_type=r["wait_event_type"],
+                wait_event=r["wait_event"],
+                application_name=r["application_name"] or None,
+                query=r["query"] or "",
+            )
+            for r in rows
+        ],
+        sessions_idle=int(idle or 0),
+        sessions_max=int(max_conn) if max_conn is not None else None,
+        statements=statements,
+        statements_available=available,
+    )
+
+
 # ---------------------------------------------------------------- signals
 
 
