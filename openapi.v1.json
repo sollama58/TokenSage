@@ -2437,6 +2437,11 @@
             "title": "Hours",
             "type": "integer"
           },
+          "long_running": {
+            "default": 0,
+            "title": "Long Running",
+            "type": "integer"
+          },
           "requesters": {
             "items": {
               "$ref": "#/components/schemas/Requester"
@@ -2447,6 +2452,13 @@
           "retried": {
             "title": "Retried",
             "type": "integer"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageTiming"
+            },
+            "title": "Stages",
+            "type": "array"
           },
           "stuck_running": {
             "title": "Stuck Running",
@@ -4088,6 +4100,62 @@
           "spend_today_usd"
         ],
         "title": "SourceHealth",
+        "type": "object"
+      },
+      "StageTiming": {
+        "additionalProperties": false,
+        "description": "One stage of an analysis, over the done jobs that recorded it (payload.timing, written\nby the analyzer worker since 2026-10-26).",
+        "properties": {
+          "depth": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "p50_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 S"
+          },
+          "p95_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 S"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "depth",
+          "stage",
+          "n",
+          "p50_s",
+          "p95_s"
+        ],
+        "title": "StageTiming",
         "type": "object"
       },
       "StatusResponse": {
@@ -6880,7 +6948,7 @@
     },
     "/admin/v1/queue": {
       "get": {
-        "description": "Job timing by depth (queue wait, processing and total, p50/p95), counts by kind,\nfailures by error code, hourly throughput and who asked, over `hours`. Jobs are kept\nfor 7 days.",
+        "description": "Job timing by depth (queue wait, processing and total, p50/p95), the analysis stages\n(where the processing time goes), counts by kind, failures by error code, hourly\nthroughput and who asked, over `hours`. Jobs are kept for 7 days.",
         "operationId": "queue_stats_admin_v1_queue_get",
         "parameters": [
           {

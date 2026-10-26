@@ -241,7 +241,7 @@ class _Pool:
         self.conn = conn
 
     @contextlib.asynccontextmanager
-    async def acquire(self) -> AsyncIterator[_Conn]:
+    async def acquire(self, timeout: float | None = None) -> AsyncIterator[_Conn]:
         yield self.conn
 
 

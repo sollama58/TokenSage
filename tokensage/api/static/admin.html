@@ -343,6 +343,7 @@ function renderQueue(st, q) {
     tile("Failed (24 h)", num(qs.failed_24h), qs.done_24h + qs.failed_24h ? `${pct((100 * qs.failed_24h) / (qs.done_24h + qs.failed_24h), 2)} of finished` : "", qs.failed_24h ? "warn" : "good"),
     tile("Retried", num(q.retried), "jobs needing >1 attempt"),
     tile("Stuck running", num(q.stuck_running), "lease expired", q.stuck_running ? "bad" : "good"),
+    tile("Over time cap", num(q.long_running), "running past JOB_MAX_S", q.long_running ? "bad" : "good"),
     tile("Analyze done/failed", `${num(done)}/${num(failed)}`, `last ${q.hours} h`),
   ].join("");
   $("qHourly").innerHTML = bars(
@@ -446,6 +447,7 @@ function renderAlerts(st, h, q, u, s) {
   const qs = st.queue;
   if (qs.oldest_pending_s > 120) a.push(["bad", `The oldest pending job has waited ${secs(qs.oldest_pending_s)}.`]);
   if (q.stuck_running) a.push(["bad", `${q.stuck_running} running job(s) have an expired lease; is a worker down?`]);
+  if (q.long_running) a.push(["bad", `${q.long_running} job(s) have run past JOB_MAX_S and still hold a slot; the analyzer should have stopped them.`]);
   const fin = qs.done_24h + qs.failed_24h;
   if (fin && qs.failed_24h / fin > 0.05) a.push(["warn", `${pct((100 * qs.failed_24h) / fin)} of jobs failed in the last 24 h.`]);
   for (const b of u.breakers.filter((b) => b.state === "open")) a.push(["bad", `Circuit breaker open for ${b.source} (${b.failures} failures).`]);

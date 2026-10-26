@@ -77,6 +77,57 @@ async def test_worker_processes_jobs_and_handles_unknown_kind(
         await asyncio.wait_for(task, timeout=5)
 
 
+async def test_worker_stops_a_job_over_its_time_cap_and_frees_the_slot(
+    pool: asyncpg.Pool, migrated_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26: nine of twelve analyzer slots were held by jobs 'running' since 10-23, their
+    leases renewed by the heartbeat. A job over job_max_s is failed, its slot runs the next job,
+    and the failure names the stage it hung in."""
+    from tokensage import analyzer
+    from tokensage import worker as worker_mod
+
+    real_analyze = worker_mod.analyze
+    hung = asyncio.Event()
+
+    async def analyze_or_hang(conn, ctx, mint, depth, **kw):  # type: ignore[no-untyped-def]
+        if mint == "HANGMINT":
+            analyzer._stage("metadata")
+            hung.set()
+            await asyncio.sleep(3600)
+        return await real_analyze(conn, ctx, mint, depth, **kw)
+
+    monkeypatch.setattr(worker_mod, "analyze", analyze_or_hang)
+    settings = _settings(migrated_db)
+    settings.job_max_s = 0.5
+    settings.job_max_attempts = 1  # fail() marks it failed on the first strike
+    w = Worker(pool, settings, concurrency=1)
+    task = asyncio.create_task(w.run())
+    try:
+        async with pool.acquire() as c:
+            stuck = await queue.enqueue(c, "analyze", "HANGMINT", "basic", priority=10)
+            good = await queue.enqueue(c, "analyze", MINT, "basic")
+        await asyncio.wait_for(hung.wait(), timeout=5)
+        for _ in range(100):
+            async with pool.acquire() as c:
+                s = await queue.get(c, stuck.id)
+                g = await queue.get(c, good.id)
+            if s and g and s.status == "failed" and g.status == "done":
+                break
+            await asyncio.sleep(0.1)
+        assert s and s.status == "failed", s
+        assert "timed out after 0.5 s (stage: metadata)" in (s.last_error or ""), s.last_error
+        # the one slot went on to the next job
+        assert g and g.status == "done" and g.result_version == 1
+        # the finished analysis recorded where its time went
+        async with pool.acquire() as c:
+            payload = await c.fetchval("select payload from job where id=$1", good.id)
+        assert payload and set(payload["timing"]) >= {"resolve_ms", "engine_ms", "total_ms"}
+        assert not w.active_jobs
+    finally:
+        w.request_stop()
+        await asyncio.wait_for(task, timeout=5)
+
+
 async def test_worker_stops_promptly_when_idle(pool: asyncpg.Pool, migrated_db: str) -> None:
     w = Worker(pool, _settings(migrated_db))
     task = asyncio.create_task(w.run())

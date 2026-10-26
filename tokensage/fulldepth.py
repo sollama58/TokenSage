@@ -462,11 +462,17 @@ async def _profile_snapshot_ok(conn: asyncpg.Connection, handle: str) -> Profile
 _basic_tweet_fetches: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Task[TweetData]] = {}
 
 
+# The background tweet fetch outlives the read that started it; bounded so that one which never
+# finishes cannot keep a pool connection for good (2026-10-26 slot audit).
+BACKGROUND_FETCH_MAX_S = 60.0
+
+
 async def _tweet_on_own_conn(
     pool: asyncpg.Pool, http: httpx.AsyncClient, settings: Settings, tweet_id: str
 ) -> TweetData:
-    async with pool.acquire() as c:
-        return await tweet_cached(serial(c), http, settings, tweet_id, fresh_engagement=False)
+    async with asyncio.timeout(BACKGROUND_FETCH_MAX_S):
+        async with pool.acquire(timeout=settings.basic_x_timeout_s) as c:
+            return await tweet_cached(serial(c), http, settings, tweet_id, fresh_engagement=False)
 
 
 def _basic_tweet_fetch(

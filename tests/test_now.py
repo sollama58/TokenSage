@@ -205,6 +205,15 @@ async def test_tokens_now_end_to_end(client: httpx.AsyncClient, migrated_db: str
     assert items[1]["status"] == "invalid"
     it = items[0]
     assert it["status"] == "complete", it
+    # the refresh queues behind a decision's read (normal, 50), ahead of a launch read (70)
+    conn = await asyncpg.connect(migrated_db)
+    try:
+        prio = await conn.fetchval(
+            "select priority from job where kind='now' and mint=$1", SPL_MINT
+        )
+    finally:
+        await conn.close()
+    assert prio == 60
     assert it["trend"] is not None and it["trend"]["sources"]
     heat = it["story_heat"]
     assert heat["status"] == "ok" and heat["story"] == "Moo Deng" and heat["coins"] == 2

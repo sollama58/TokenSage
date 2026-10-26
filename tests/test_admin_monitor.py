@@ -175,11 +175,15 @@ async def test_monitor_routes(client: httpx.AsyncClient, migrated_db: str) -> No
         metrics.meter.record("google_news", "GET", ok=False, ms=300, rate_limited=True, now=now)
         await metrics.flush(conn)
         await conn.execute(
-            """insert into job (kind, mint, depth, status, created_at, started_at, finished_at)
+            """insert into job (kind, mint, depth, status, created_at, started_at, finished_at,
+                                payload)
                values ('analyze', 'M1', 'basic', 'done', now() - interval '10 s',
-                       now() - interval '8 s', now()),
+                       now() - interval '8 s', now(),
+                       '{"timing": {"resolve_ms": 100, "engine_ms": 20, "total_ms": 8000}}'),
                       ('analyze', 'M2', 'full', 'failed', now() - interval '5 s',
-                       now() - interval '4 s', now())"""
+                       now() - interval '4 s', now(), null),
+                      ('analyze', 'M3', 'basic', 'running', now() - interval '1 h',
+                       now() - interval '20 min', null, null)"""
         )
         await conn.execute(
             "update job set error_code='not_found', last_error='gone' where mint='M2'"
@@ -211,9 +215,16 @@ async def test_monitor_routes(client: httpx.AsyncClient, migrated_db: str) -> No
     assert depth["basic"]["done"] == 1
     assert 1.5 < depth["basic"]["wait_p50_s"] < 2.5
     assert depth["full"]["failed"] == 1
+    # where the processing time goes, from the timing the worker stores on each done job
+    stages = {(s["depth"], s["stage"]): s for s in q["stages"]}
+    assert stages[("basic", "total")]["n"] == 1 and stages[("basic", "total")]["p50_s"] == 8.0
+    assert stages[("basic", "resolve")]["p95_s"] == 0.1
+    assert ("basic", "basic_x") not in stages  # not recorded: not reported
+    # M3 has run for 20 minutes against a 300 s cap: the worker should have stopped it
+    assert q["long_running"] == 1 and q["stuck_running"] == 0
     assert q["errors"][0]["error_code"] == "not_found"
     assert len(q["hourly"]) == 24
-    assert sum(hr["created"] for hr in q["hourly"]) == 2
+    assert sum(hr["created"] for hr in q["hourly"]) == 3  # M1, M2 and the running M3
     assert sum(hr["done"] for hr in q["hourly"]) == 1
     assert sum(hr["failed"] for hr in q["hourly"]) == 1
 
