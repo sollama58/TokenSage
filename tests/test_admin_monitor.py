@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import UTC, datetime
 
@@ -231,6 +232,32 @@ async def test_monitor_routes(client: httpx.AsyncClient, migrated_db: str) -> No
     s = (await client.get("/admin/v1/signals", headers=ADMIN)).json()
     assert {k["name"] for k in s["knowledge"]} >= {"trend_term", "known_coin", "top_volume"}
     assert s["paid_x"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_db_activity_lists_busy_sessions(client: httpx.AsyncClient, migrated_db: str) -> None:
+    assert (await client.get("/admin/v1/db")).status_code == 403
+    # a second connection mid-statement shows up with its query and age; this one is left out
+    other = await asyncpg.connect(migrated_db)
+    try:
+        sleeper = asyncio.create_task(other.execute("select pg_sleep(2) /* monitor-test */"))
+        await asyncio.sleep(0.3)
+        d = (await client.get("/admin/v1/db", headers=ADMIN)).json()
+        mine = [s for s in d["sessions"] if "monitor-test" in s["query"]]
+        assert len(mine) == 1 and mine[0]["state"] == "active" and mine[0]["age_s"] >= 0.2
+        assert all("pg_stat_activity" not in s["query"] for s in d["sessions"])
+        assert d["sessions_max"] is None or d["sessions_max"] > 0
+        assert isinstance(d["statements"], list) and isinstance(d["statements_available"], bool)
+        # the admin key may end that session; its statement is cancelled
+        pid = mine[0]["pid"]
+        r = await client.post(f"/admin/v1/db/sessions/{pid}/terminate", headers=ADMIN)
+        assert r.status_code == 200 and r.json() == {"pid": pid, "terminated": True}
+        with pytest.raises((asyncpg.PostgresError, asyncpg.InterfaceError)):
+            await sleeper
+        r = await client.post(f"/admin/v1/db/sessions/{pid}/terminate", headers=ADMIN)
+        assert r.json()["terminated"] is False
+    finally:
+        await other.close()
 
 
 @pytest.mark.asyncio

@@ -1058,6 +1058,197 @@
         "title": "DayPoint",
         "type": "object"
       },
+      "DbResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "description": "Connections busy or in a transaction, oldest query first (this one excluded).",
+            "items": {
+              "$ref": "#/components/schemas/DbSession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "sessions_idle": {
+            "title": "Sessions Idle",
+            "type": "integer"
+          },
+          "sessions_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The server's max_connections.",
+            "title": "Sessions Max"
+          },
+          "statements": {
+            "description": "Costliest statements (pg_stat_statements, when on; else empty).",
+            "items": {
+              "$ref": "#/components/schemas/DbStatement"
+            },
+            "title": "Statements",
+            "type": "array"
+          },
+          "statements_available": {
+            "title": "Statements Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sessions",
+          "sessions_idle",
+          "statements_available"
+        ],
+        "title": "DbResponse",
+        "type": "object"
+      },
+      "DbSession": {
+        "additionalProperties": false,
+        "properties": {
+          "age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds since the current query started.",
+            "title": "Age S"
+          },
+          "application_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Name"
+          },
+          "pid": {
+            "title": "Pid",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "description": "The statement's first 400 characters.",
+            "title": "Query",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "wait_event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait Event"
+          },
+          "wait_event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait Event Type"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "title": "DbSession",
+        "type": "object"
+      },
+      "DbStatement": {
+        "additionalProperties": false,
+        "description": "One row of pg_stat_statements, when the extension is installed.",
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "max_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Ms"
+          },
+          "mean_ms": {
+            "title": "Mean Ms",
+            "type": "number"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "total_s": {
+            "description": "Total execution time over the extension's window.",
+            "title": "Total S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "calls",
+          "total_s",
+          "mean_ms",
+          "rows",
+          "query"
+        ],
+        "title": "DbStatement",
+        "type": "object"
+      },
+      "DbTerminated": {
+        "additionalProperties": false,
+        "properties": {
+          "pid": {
+            "title": "Pid",
+            "type": "integer"
+          },
+          "terminated": {
+            "description": "False when no such session was found.",
+            "title": "Terminated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pid",
+          "terminated"
+        ],
+        "title": "DbTerminated",
+        "type": "object"
+      },
       "DepthTiming": {
         "additionalProperties": false,
         "properties": {
@@ -6273,6 +6464,125 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/v1/db": {
+      "get": {
+        "description": "What the database is doing now: every busy connection with its current statement and\nhow long it has run (pg_stat_activity), and the statements that cost the most in all\n(pg_stat_statements, when installed). For a slow analysis stage this names the query:\non 2026-10-26 the db_context stage went to 30 s with nothing on this side to say why.",
+        "operationId": "db_activity_admin_v1_db_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden (monitor or admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Db Activity",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v1/db/sessions/{pid}/terminate": {
+      "post": {
+        "description": "End one database session (pg_terminate_backend): its open transaction rolls back and\nthe locks it held are released. For a connection a dead process left behind holding a\nlock every analysis then waits on. Admin key only; this request's own session and\nother databases' sessions are refused.",
+        "operationId": "db_terminate_admin_v1_db_sessions__pid__terminate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "title": "Pid",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbTerminated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden (monitor or admin key required)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Db Terminate",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/v1/env": {
       "get": {
         "description": "Which of the env vars each service is meant to have are set on it, never the values:\nthe api's own read now, every other service's as it reported when it last started.",
