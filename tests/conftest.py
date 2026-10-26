@@ -99,6 +99,15 @@ def _empty_heat_fallback() -> None:
     now._heat_fallback.clear()
 
 
+@pytest.fixture(autouse=True)
+def _empty_meta_counts_cache() -> None:
+    """Every test counts the tokens it inserted itself: a previous test's cached current-meta
+    counts (same launch slot, same words) must not stand in for them."""
+    from tokensage import analyzer
+
+    analyzer.reset_meta_counts_cache()
+
+
 @pytest.fixture(scope="session")
 def migrated_db() -> str:
     if not DB_AVAILABLE:

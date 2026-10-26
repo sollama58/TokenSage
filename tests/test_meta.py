@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -235,6 +236,68 @@ async def test_meta_totals_leave_out_only_this_token_and_only_when_it_is_in_the_
     assert await totals("mine") == (3, 7)  # its own row is in the window: left out
     assert await totals("unknown") == (4, 8)  # a mint without a row takes nothing off
     assert await totals("ancient") == (4, 8)  # its row is outside the window: nothing off
+
+
+@needs_db
+async def test_meta_counts_are_cached_per_launch_slot_and_shared_between_concurrent_reads(
+    db: asyncpg.Connection,
+) -> None:
+    """The 90-day scans run once per launch slot (and once per word): a second token of the
+    same slot takes its counts from the cache and only looks up its own row, and readers
+    that miss together share one scan. The own-row subtraction stays exact per token."""
+    from tokensage import analyzer
+
+    for i in range(3):
+        await _token(db, f"r{i}", "Some Coin", "SOME", NOW - timedelta(hours=i + 1))
+    await _token(db, "mine", "Some Coin", "SOME", NOW)
+    await _token(db, "other", "Other Thing", "OTH", NOW + timedelta(minutes=1))
+
+    scans: list[str] = []
+
+    class Counting:
+        """The connection, counting the scans (asyncpg's methods cannot be patched) and
+        taking one query at a time, as a pool connection does."""
+
+        lock = asyncio.Lock()
+
+        async def fetch(self, q: str, *a: object) -> object:
+            scans.append("words")
+            async with self.lock:
+                return await db.fetch(q, *a)
+
+        async def fetchrow(self, q: str, *a: object) -> object:
+            if "count(*)" in q:
+                scans.append("totals")
+            async with self.lock:
+                return await db.fetchrow(q, *a)
+
+    conn = Counting()
+
+    async def counts(mint: str, when: datetime, words: list[str]) -> MetaCounts:
+        r = SimpleNamespace(mint=mint, created_at=when)
+        return await analyzer._meta_counts(conn, r, words, window_hours=24, history_days=90)  # type: ignore[arg-type]
+
+    a, b = await asyncio.gather(
+        counts("mine", NOW, ["some"]), counts("other", NOW, ["some", "other"])
+    )
+    # one totals scan for both; the word scans: "some" once, "other" once (b missed it)
+    assert scans.count("totals") == 1
+    assert scans.count("words") <= 2
+    assert (a.recent_total, a.history_total) == (4, 4)  # 5 rows, its own left out
+    assert (b.recent_total, b.history_total) == (4, 4)
+    assert [(w.word, w.recent, w.total) for w in a.words] == [("some", 3, 3)]
+    assert [(w.word, w.recent, w.total) for w in b.words] == [("some", 4, 4), ("other", 0, 0)]
+
+    scans.clear()
+    # a third token of the same slot: no scan at all, only its own-row lookup
+    c = await counts("r0", NOW + timedelta(minutes=2), ["some", "other"])
+    assert scans == []
+    assert (c.recent_total, c.history_total) == (4, 4)
+    assert [(w.word, w.recent, w.total) for w in c.words] == [("some", 3, 3), ("other", 1, 1)]
+
+    # a token of a later slot counts again
+    await counts("r1", NOW + timedelta(seconds=analyzer.META_COUNTS_SLOT_S), ["some"])
+    assert scans.count("totals") == 1
 
 
 async def test_db_context_adds_external_namesakes_after_ours(
