@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime
 
 import asyncpg
 import httpx
@@ -24,6 +24,7 @@ from tests.fixtures.chain import (
 from tests.test_x_sources import FX_OK, TID
 from tokensage.api.schemas import TokenResponse
 from tokensage.net import safe_fetch
+from tokensage.sources import geckoterminal
 from tokensage.sources import x as xs
 
 pytestmark = needs_db
@@ -88,6 +89,10 @@ def _install_x(router: respx.MockRouter, fx_calls: list[int]) -> None:
             text=RSS,
         )
     )
+    # the story's heat (rules 0.37.0): GeckoTerminal finds no pool on it
+    router.get(url__startswith=f"{geckoterminal.BASE}/search/pools").mock(
+        return_value=httpx.Response(200, json={"data": [], "included": []})
+    )
 
 
 async def test_full_depth_fills_x_trend_and_caches(
@@ -135,11 +140,33 @@ async def test_full_depth_fills_x_trend_and_caches(
     # caches populated
     assert await db.fetchval("select status from x_tweet where tweet_id=$1", TID) == "ok"
     assert await db.fetchval("select count(*) from x_profile") == 1
+    # the story's heat rides on the read (rules 0.37.0, model audit 2026-10-26 §16): the
+    # referent searched on GeckoTerminal, nothing found on it, no second call needed
+    assert a.story_heat is not None and a.story_heat.status == "ok"
+    assert a.story_heat.story_kind == "referent" and "Peanut" in a.story_heat.story
+    assert a.story_heat.coins == 0 and a.story_heat.leader is None
+    assert not any(c.startswith("story heat") for c in a.caveats)
     # one news check for the trend hit; the name is not searched ("Peanut the Squirrel" is
-    # everyday words, in some headline whatever is trending)
+    # everyday words, in some headline whatever is trending). The heat and the read's own
+    # `now` row are the other two.
     assert (
-        await db.fetchval("select count(*) from lookup_cache where key not like 'trendin:%'") == 1
+        await db.fetchval(
+            "select count(*) from lookup_cache where key not like 'trendin:%' "
+            "and key not like 'heat:%' and key not like 'now:%'"
+        )
+        == 1
     )
+    assert await db.fetchval("select count(*) from lookup_cache where key like 'heat:%'") == 1
+    # the read stands as the refresh: tokens:now right after it is served from it, no job
+    with respx.mock(assert_all_called=False) as router:
+        r_now = await client.post("/v1/tokens:now", json={"cas": [T22_MINT]})
+        assert not router.calls
+    assert r_now.status_code == 200, r_now.text
+    it = r_now.json()["items"][0]
+    assert it["status"] == "complete"
+    assert datetime.fromisoformat(it["as_of"].replace("Z", "+00:00")) == a.analyzed_at
+    assert it["trend"]["matched"] is True and it["story_heat"]["coins"] == 0
+    assert await db.fetchval("select count(*) from job where kind='now'") == 0
     # the referents the trend match ran on, for the decision-time refresh (audit M5)
     inputs = await db.fetchval("select value from lookup_cache where key like 'trendin:%'")
     refs = json.loads(inputs)["referents"]

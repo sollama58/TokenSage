@@ -22,7 +22,7 @@ import httpx
 import structlog
 
 from tokensage import fulldepth
-from tokensage.api.schemas import HeatLeader, StoryHeat, Trend
+from tokensage.api.schemas import Analysis, HeatLeader, StoryHeat, Trend
 from tokensage.engine import trends
 from tokensage.engine.context import Ev, ReferentCandidate
 from tokensage.engine.knowledge import load_knowledge
@@ -394,6 +394,37 @@ async def _story_heat(
     return heat
 
 
+async def _store(conn: asyncpg.Connection, mint: str, value: dict[str, Any]) -> None:
+    await conn.execute(
+        """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
+           on conflict (key) do update set value=excluded.value, fetched_at=now()""",
+        NOW_KEY + mint,
+        value,
+    )
+
+
+def body_from_read(doc: Analysis) -> dict[str, Any]:
+    """The NowItem body a full read itself yields (since rules 0.37.0): its trend block is the
+    match of its moment, and its story_heat the lookup the read just made. Stored under
+    now:<mint> by the analyzer, so a consumer that asks for the refresh right after the read
+    (TrenchScanner does, for every band coin) is served at once instead of starting a job that
+    would redo both (model audit 2026-10-26 §16)."""
+    return {
+        "ca": doc.mint,
+        "status": "complete",
+        "as_of": doc.analyzed_at.isoformat(),
+        "trend": doc.trend.model_dump(mode="json"),
+        "story_heat": doc.story_heat.model_dump(mode="json") if doc.story_heat else None,
+        "rules": RULES_VERSION,
+    }
+
+
+async def store_from_read(conn: asyncpg.Connection, doc: Analysis) -> None:
+    """Keep a full read's own trend and heat as the mint's current refresh (body_from_read)."""
+    await _store(conn, doc.mint, body_from_read(doc))
+    log.info("now.from_read", mint=doc.mint)
+
+
 async def refresh(conn: asyncpg.Connection, http: httpx.AsyncClient, mint: str) -> dict[str, Any]:
     """Refresh one mint and store it under now:<mint>. The stored value is a NowItem body."""
     row = await conn.fetchrow(_LATEST_FULL_SQL, mint)
@@ -423,11 +454,6 @@ async def refresh(conn: asyncpg.Connection, http: httpx.AsyncClient, mint: str) 
             "story_heat": heat.model_dump(mode="json") if heat else None,
             "rules": RULES_VERSION,
         }
-    await conn.execute(
-        """insert into lookup_cache (key, value, fetched_at) values ($1, $2, now())
-           on conflict (key) do update set value=excluded.value, fetched_at=now()""",
-        NOW_KEY + mint,
-        value,
-    )
+    await _store(conn, mint, value)
     log.info("now.refreshed", mint=mint, status=value["status"])
     return value

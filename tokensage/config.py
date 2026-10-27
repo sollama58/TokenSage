@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     # a launch read (70). A refresh feeds 14 decision-time inputs that are filled on 7-14% of
     # decisions; a read feeds the other ~60.
     now_priority: int = 60
+    # A full read looks up its story's heat too, so the block is in the analysis itself (model
+    # audit 2026-10-26 §16: TrenchScanner's first decision on a coin saw the read but never the
+    # refresh, which it asked for only afterwards; the now fields were null on 80-97% of
+    # decisions). The lookup runs after the engine (it needs the lineage and referent), so it
+    # has its own cap on top of FULL_DEPTH_DEADLINE_S: two GeckoTerminal calls, shared by every
+    # coin on the story for 5 minutes. Past the cap the read is complete without the block.
+    story_heat_timeout_s: float = 5.0
 
     # --- basic-depth X interpretation (since rules 0.36.0) ---
     # On depth=basic, use cached tweet/profile text when present (tier A), and optionally

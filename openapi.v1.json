@@ -288,6 +288,17 @@
             "title": "Schema Version",
             "type": "string"
           },
+          "story_heat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoryHeat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full depth, since rules 0.37.0: how the coin's story trades at the read, the same block POST /v1/tokens:now refreshes (its leading coin on GeckoTerminal, by the lineage original's name or the referent's label). A consumer deciding on a fresh read has it without a second call. Null at basic depth, when the coin has no story to search (no lineage original, a generic or missing referent), and when the lookup did not finish within STORY_HEAT_TIMEOUT_S (a caveat says so; tokens:now has it)"
+          },
           "summary": {
             "title": "Summary",
             "type": "string"
