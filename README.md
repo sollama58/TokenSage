@@ -35,16 +35,18 @@ start commands.
 `INLINE_ANALYZER=true` runs the analyzer inside the web process. In production it runs as the
 separate `tokensage-analyzer` worker (`python -m tokensage.worker`).
 
-**Memory note:** `depth=full` loads RapidOCR lazily (~250 MB extra). With the engine that is
-~400–450 MB, which is tight on Render's 512 MB Starter; if the worker is OOM-killed, move
-`tokensage-analyzer` to `standard` (2 GB) in `render.yaml`. `depth=basic` never loads OCR.
+**Memory note:** `tokensage-analyzer` runs on `standard` (2 GB) in `render.yaml`: it holds 12
+concurrent jobs, and RapidOCR (~250 MB, loaded lazily, and off since 2026-10-16 unless
+`ENABLE_OCR=true`) and SigLIP (~220 MB) would not fit 512 MB beside them. `depth=basic` never
+loads OCR.
 
 ## Develop
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run mypy tokensage scripts
-uv run pytest -q                          # DB tests need a Postgres at DATABASE_URL
+TS_REQUIRE_DB=1 uv run pytest -q          # DB tests need a Postgres at DATABASE_URL; without
+                                          # TS_REQUIRE_DB=1 they skip when it is unreachable
 uv run python scripts/export_openapi.py   # after changing any route or schema
 ```
 
