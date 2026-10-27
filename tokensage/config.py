@@ -204,7 +204,13 @@ class Settings(BaseSettings):
     # concurrent db_context stages took the stage from ~3 s to ~31 s each, past the 30 s
     # command timeout, and reads failed in bulk (done/hour fell from ~1,400 to under 100).
     # The other slots keep fetching metadata, images and X meanwhile.
+    # The wait for a slot is stored apart from the queries (timing db_wait_ms against
+    # db_context_ms, GET /admin/v1/queue's stages): size this from that split.
     db_context_concurrency: int = 4
+    # GET /admin/v1/status flags the database past this size. The disk is Render's 15 GB
+    # default (render.yaml); retention is meant to hold it at 6-9 GB, and it grew about
+    # 190 MB a day in October (2026-10-27 audit DB-4: no alarm before the disk fills).
+    db_size_alarm_mb: int = 12_288
     # On SIGTERM, in-flight jobs get this long to finish before they are handed back to the
     # queue (Render waits maxShutdownDelaySeconds=60 before killing the process).
     worker_shutdown_grace_s: float = 45.0

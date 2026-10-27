@@ -68,6 +68,13 @@ HOSTS: list[tuple[str, str]] = [
     ("pump.fun", "pump_fun"),
 ]
 OTHER = "other"
+# Sources whose 404 is an answer, not a failure: a deleted or protected post (the X mirrors;
+# oEmbed is only asked once the others found no live copy, so nearly all its answers are 404),
+# a pageview day not published yet (Wikimedia, about a day behind). Counted as errors, they
+# read as a dead upstream on the panel (2026-10-27 audit TS-6: x_oembed 33/33, wikimedia 1/1).
+NOT_FOUND_IS_AN_ANSWER = frozenset(
+    {"x_oembed", "x_fxtwitter", "x_vxtwitter", "x_syndication", "wikimedia"}
+)
 
 
 def parse_costs(spec: str) -> dict[str, int]:
@@ -250,7 +257,8 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         meter.record(
             source,
             request.method,
-            ok=resp.status_code < 400,
+            ok=resp.status_code < 400
+            or (resp.status_code == 404 and source in NOT_FOUND_IS_AN_ANSWER),
             ms=(time.perf_counter() - t0) * 1000,
             rate_limited=resp.status_code == 429,
         )

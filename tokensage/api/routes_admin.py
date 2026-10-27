@@ -131,6 +131,9 @@ class DatabaseSize(_Model):
 
     size_mb: float
     tables: list[TableSize]
+    # DB_SIZE_ALARM_MB, and whether size_mb is past it (the 15 GB disk is near)
+    alarm_mb: float | None = None
+    over_alarm: bool = False
 
 
 class StatusResponse(_Model):
@@ -290,6 +293,8 @@ async def status(request: Request, response: Response) -> StatusResponse:
         recall_24h=rec,
         database=DatabaseSize(
             size_mb=round(int(size) / 1_048_576, 1),
+            alarm_mb=float(settings.db_size_alarm_mb),
+            over_alarm=int(size) / 1_048_576 >= settings.db_size_alarm_mb,
             tables=[
                 TableSize(table=t["table"], mb=round(int(t["bytes"]) / 1_048_576, 1))
                 for t in tables

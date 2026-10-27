@@ -103,6 +103,25 @@ async def test_a_failed_lookup_is_a_caveat_not_a_failed_read(
     assert doc.caveats == ["story heat: lookup failed; POST /v1/tokens:now refreshes it"]
 
 
+@pytest.mark.parametrize("status", ["failed", "rate_limited"])
+async def test_a_heat_that_came_back_failed_is_not_done(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """now.story_heat answers a GeckoTerminal failure or 429 with a heat of that status, not a
+    raise. The read keeps the block, but it is not done, so the read is not stored as the
+    mint's refresh for NOW_MAX_AGE_S (2026-10-27 audit TS-4)."""
+
+    async def failed(*_a: object) -> StoryHeat:
+        return StoryHeat(story="Moo Deng", story_kind="referent", status=status, as_of=None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(now, "story_heat", failed)
+    doc = _doc(referent=_referent())
+    heat, done = await analyzer._read_story_heat(None, _ctx(), doc)  # type: ignore[arg-type]
+    assert not done and heat is not None and heat.status == status
+    detail = "rate limited" if status == "rate_limited" else "lookup failed"
+    assert doc.caveats == [f"story heat: {detail}; POST /v1/tokens:now refreshes it"]
+
+
 def test_the_read_is_a_complete_now_item() -> None:
     """What the analyzer stores under now:<mint> is what tokens:now serves: the read's trend
     and heat, as of the read, under the current rules (service.fresh checks both)."""

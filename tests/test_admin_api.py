@@ -158,6 +158,8 @@ async def test_status_usage_and_jobs(client: httpx.AsyncClient, migrated_db: str
     assert "depths" in s["recall_24h"]
     assert s["database"]["size_mb"] > 0
     assert {"table", "mb"} <= set(s["database"]["tables"][0])
+    # the size alarm (audit DB-4): a test database is far under the 12 GB default
+    assert s["database"]["alarm_mb"] == 12_288 and s["database"]["over_alarm"] is False
 
     u = (await client.get("/admin/v1/usage?days=1&key=tester", headers=ADMIN)).json()
     assert len(u["rows"]) == 1 and u["rows"][0]["requests"] >= 1

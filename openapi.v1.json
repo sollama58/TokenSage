@@ -1020,6 +1020,22 @@
         "additionalProperties": false,
         "description": "pg_database_size and the largest tables (indexes and TOAST included), so the disk can\nbe watched from the panel: Render shows it only on the dashboard (audit 2026-10-16, I15).",
         "properties": {
+          "alarm_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alarm Mb"
+          },
+          "over_alarm": {
+            "default": false,
+            "title": "Over Alarm",
+            "type": "boolean"
+          },
           "size_mb": {
             "title": "Size Mb",
             "type": "number"

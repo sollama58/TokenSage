@@ -63,14 +63,17 @@ def _closed_breakers() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_upstream_cooldowns() -> None:
+def _no_upstream_cooldowns(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 429 a previous test provoked must not leave an IPFS gateway or GeckoTerminal cooling
-    down for the next."""
+    down for the next. GeckoTerminal's call spacing is off unless a test turns it on: a test's
+    mocked calls would otherwise wait MIN_GAP_S apart."""
     from tokensage.net import ipfs
     from tokensage.sources import geckoterminal
 
     ipfs._gateway_cooldown.clear()
     geckoterminal._cooldown_until = 0.0
+    geckoterminal._next_at = 0.0
+    monkeypatch.setattr(geckoterminal, "MIN_GAP_S", 0.0)
 
 
 @pytest.fixture(autouse=True)

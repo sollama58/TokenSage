@@ -160,8 +160,18 @@ HEAT_CALLS_PER_MIN = 10
 # used to call again at once and draw another 429.
 COOLDOWN_S = 60.0
 COOLDOWN_MAX_S = 300.0
+# Inside that minute the calls are spaced, not sent in a burst: ten at once drew 429s together
+# from the shared egress, and each 429 then paused every lookup for COOLDOWN_S (2026-10-27
+# audit TS-5: 40.8% of 9,542 calls failed). A cell-rate gate: one call per MIN_GAP_S, with
+# HEAT_BURST let through back to back so a search and its leader's peak still pair up. A call
+# whose turn is under MAX_WAIT_S away waits for it; a later one is RateLimited, as when over
+# the minute's budget.
+MIN_GAP_S = 60.0 / HEAT_CALLS_PER_MIN
+HEAT_BURST = 2
+MAX_WAIT_S = 2.0
 _calls: list[float] = []
 _cooldown_until = 0.0
+_next_at = 0.0  # when the gate's schedule is next free (monotonic)
 
 
 def _start_cooldown(retry_after: str | None) -> None:
@@ -173,7 +183,8 @@ def _start_cooldown(retry_after: str | None) -> None:
     _cooldown_until = time.monotonic() + min(max(wait, 1.0), COOLDOWN_MAX_S)
 
 
-def _spend() -> None:
+async def _spend() -> None:
+    global _next_at
     now = time.monotonic()
     if now < _cooldown_until:
         raise RateLimited("cooling down after a 429")
@@ -181,7 +192,15 @@ def _spend() -> None:
         _calls.pop(0)
     if len(_calls) >= HEAT_CALLS_PER_MIN:
         raise RateLimited("story-heat budget spent for this minute")
-    _calls.append(now)
+    # the gate: this call's turn comes once the schedule, less the burst allowance, has passed
+    turn = max(now, _next_at - (HEAT_BURST - 1) * MIN_GAP_S)
+    wait = turn - now
+    if wait > MAX_WAIT_S:
+        raise RateLimited("story-heat calls are spaced out; none free in time")
+    _next_at = max(_next_at, now) + MIN_GAP_S
+    _calls.append(turn)
+    if wait > 0:
+        await asyncio.sleep(wait)
 
 
 async def _get(http: httpx.AsyncClient, path: str, params: dict) -> dict | None:
@@ -189,7 +208,7 @@ async def _get(http: httpx.AsyncClient, path: str, params: dict) -> dict | None:
     src = "geckoterminal"
     if not breaker.allow(src):
         return None
-    _spend()
+    await _spend()
     try:
         r = await http.get(
             f"{BASE}{path}", params=params, headers={"Accept": "application/json"}, timeout=10.0
