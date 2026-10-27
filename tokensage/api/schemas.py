@@ -857,6 +857,54 @@ class Versions(_Model):
     models: dict[str, str] = {}
 
 
+class HeatLeader(_Model):
+    mint: str
+    name: str
+    symbol: str
+    pool: str = Field(description="Its busiest pool on GeckoTerminal")
+    mcap_usd: float | None = Field(default=None, description="Market cap (else FDV), USD")
+    change_5m_pct: float | None = None
+    change_1h_pct: float | None = None
+    volume_5m_usd: float = 0.0
+    volume_1h_usd: float = 0.0
+    peak_minutes_ago: int | None = Field(
+        default=None,
+        description="Minutes since its highest 15-minute high of the last 24 h (0: at its "
+        "peak now; large: the story already played out). Null when the candles failed",
+    )
+    from_peak_pct: float | None = Field(
+        default=None, description="Its latest price against that high, percent (<= 0)"
+    )
+
+
+class StoryHeat(_Model):
+    """How the coin's story trades right now (rules 0.34.0), from GeckoTerminal."""
+
+    story: str = Field(
+        description="The phrase searched: the lineage original's name, else the referent's label"
+    )
+    story_kind: Literal["lineage", "referent"]
+    status: Literal["ok", "failed", "rate_limited"] = Field(
+        description="ok: GeckoTerminal answered; failed / rate_limited: no numbers this time "
+        "(rate_limited: the free tier's per-minute budget was spent)"
+    )
+    as_of: datetime | None = None
+    coins: int = Field(
+        default=0,
+        description="Coins whose name or ticker carries the story (or the lineage original) "
+        "among GeckoTerminal's top 20 Solana pools for it; the asking coin may be one of them",
+    )
+    leader: HeatLeader | None = Field(
+        default=None,
+        description="The one with the largest market cap (the asking coin itself when its "
+        "mint is leader.mint); null when none",
+    )
+    wave_volume_1h_usd: float = Field(
+        default=0.0, description="Their summed volume in the last hour, USD"
+    )
+    wave_volume_5m_usd: float = 0.0
+
+
 class Analysis(_Model):
     schema_version: str = SCHEMA_VERSION
     mint: str
@@ -881,6 +929,15 @@ class Analysis(_Model):
     image: ImageInfo = ImageInfo()
     x: XInfo | None = None
     trend: Trend = Trend()
+    story_heat: StoryHeat | None = Field(
+        default=None,
+        description="Full depth, since rules 0.37.0: how the coin's story trades at the read, "
+        "the same block POST /v1/tokens:now refreshes (its leading coin on GeckoTerminal, by "
+        "the lineage original's name or the referent's label). A consumer deciding on a fresh "
+        "read has it without a second call. Null at basic depth, when the coin has no story "
+        "to search (no lineage original, a generic or missing referent), and when the lookup "
+        "did not finish within STORY_HEAT_TIMEOUT_S (a caveat says so; tokens:now has it)",
+    )
     flags: list[Flag] = []
     summary: str
     evidence: list[Evidence] = []
@@ -1034,54 +1091,6 @@ class BatchItem(_Model):
 class BatchResponse(_Model):
     items: list[BatchItem]
     request_id: str
-
-
-class HeatLeader(_Model):
-    mint: str
-    name: str
-    symbol: str
-    pool: str = Field(description="Its busiest pool on GeckoTerminal")
-    mcap_usd: float | None = Field(default=None, description="Market cap (else FDV), USD")
-    change_5m_pct: float | None = None
-    change_1h_pct: float | None = None
-    volume_5m_usd: float = 0.0
-    volume_1h_usd: float = 0.0
-    peak_minutes_ago: int | None = Field(
-        default=None,
-        description="Minutes since its highest 15-minute high of the last 24 h (0: at its "
-        "peak now; large: the story already played out). Null when the candles failed",
-    )
-    from_peak_pct: float | None = Field(
-        default=None, description="Its latest price against that high, percent (<= 0)"
-    )
-
-
-class StoryHeat(_Model):
-    """How the coin's story trades right now (rules 0.34.0), from GeckoTerminal."""
-
-    story: str = Field(
-        description="The phrase searched: the lineage original's name, else the referent's label"
-    )
-    story_kind: Literal["lineage", "referent"]
-    status: Literal["ok", "failed", "rate_limited"] = Field(
-        description="ok: GeckoTerminal answered; failed / rate_limited: no numbers this time "
-        "(rate_limited: the free tier's per-minute budget was spent)"
-    )
-    as_of: datetime | None = None
-    coins: int = Field(
-        default=0,
-        description="Coins whose name or ticker carries the story (or the lineage original) "
-        "among GeckoTerminal's top 20 Solana pools for it; the asking coin may be one of them",
-    )
-    leader: HeatLeader | None = Field(
-        default=None,
-        description="The one with the largest market cap (the asking coin itself when its "
-        "mint is leader.mint); null when none",
-    )
-    wave_volume_1h_usd: float = Field(
-        default=0.0, description="Their summed volume in the last hour, USD"
-    )
-    wave_volume_5m_usd: float = 0.0
 
 
 class NowRequest(_Model):

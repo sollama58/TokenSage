@@ -22,6 +22,7 @@ import httpx
 import structlog
 
 from tokensage import cpu, fulldepth, gazetteer_db, queue, recall
+from tokensage import now as now_refresh
 from tokensage.api.schemas import (
     Analysis,
     Category,
@@ -41,6 +42,7 @@ from tokensage.api.schemas import (
     ReferentKind,
     ReferentWave,
     Severity,
+    StoryHeat,
     Versions,
     XAccount,
     XAuthor,
@@ -2047,6 +2049,13 @@ async def analyze(
         doc.analysis_requested_by = requested_by
     if inp.tweet is not None and inp.tweet.status == "ok":
         _attach_post_details(doc.x, inp.tweet)
+    heat_done = False
+    story_heat_ms = 0
+    if depth == "full":
+        _stage("story_heat")
+        doc.story_heat, heat_done = await _read_story_heat(conn, ctx, doc)
+        story_heat_ms = int((time.perf_counter() - phase) * 1000)
+        phase = time.perf_counter()
     if timed_out:
         doc.timed_out = timed_out
         doc.caveats.append(
@@ -2068,6 +2077,12 @@ async def analyze(
     version = await _store_analysis(conn, doc, store_read=not hint_private)
     if depth == "full":
         await _store_trend_inputs(conn, r.mint, out)
+        # The read's own trend and heat stand as the refresh for NOW_MAX_AGE_S: a tokens:now
+        # call that follows the read is answered from it. Not when the heat lookup gave up
+        # (the refresh would say "no story" for 5 minutes), the trend index was not read in
+        # time (the match is not the moment's) or the read is private to a caller.
+        if heat_done and not hint_private and "trends" not in timed_out:
+            await now_refresh.store_from_read(conn, doc)
     persist_ms = int((time.perf_counter() - phase) * 1000)
     timing = {
         "resolve_ms": resolve_ms,
@@ -2075,6 +2090,7 @@ async def analyze(
         "db_context_ms": db_context_ms,
         "engine_ms": engine_ms,
         "full_depth_ms": full_depth_ms,
+        "story_heat_ms": story_heat_ms,
         "basic_x_ms": basic_x_ms,
         "persist_ms": persist_ms,
         "total_ms": int((time.perf_counter() - t0) * 1000),
@@ -2090,6 +2106,36 @@ async def analyze(
 
 
 TIMED_OUT = "timed out (full-depth deadline)"
+
+
+async def _read_story_heat(
+    conn: asyncpg.Connection, ctx: Context, doc: Analysis
+) -> tuple[StoryHeat | None, bool]:
+    """A full read's story heat (since rules 0.37.0): the block POST /v1/tokens:now refreshes,
+    looked up once here so the read carries it (model audit 2026-10-26 §16: a consumer's first
+    decision saw the read and never the refresh it asked for afterwards). It needs the read's
+    lineage and referent, so it runs after the engine, under STORY_HEAT_TIMEOUT_S of its own;
+    the GeckoTerminal search and peak are shared by every coin on the story for 5 minutes
+    (now.story_heat), so a wave pays them once. Returns (heat, done): done is False when the
+    lookup gave up (timed out or failed), in which case the read says so in a caveat and the
+    refresh is left to tokens:now; a coin with no story to search is done with None."""
+    body = {
+        "lineage": doc.lineage.model_dump(mode="json") if doc.lineage else None,
+        "referent": doc.referent.model_dump(mode="json") if doc.referent else None,
+    }
+    if now_refresh.story_of(body) is None:
+        return None, True
+    try:
+        async with asyncio.timeout(ctx.settings.story_heat_timeout_s):
+            return await now_refresh.story_heat(conn, ctx.http, body), True
+    except TimeoutError:
+        log.info("analysis.story_heat_timeout", mint=doc.mint)
+        detail = f"did not answer within {ctx.settings.story_heat_timeout_s:g} s"
+    except Exception as e:  # noqa: BLE001 - an optional enrichment
+        log.info("analysis.story_heat_failed", mint=doc.mint, error=str(e)[:120])
+        detail = "lookup failed"
+    doc.caveats.append(f"story heat: {detail}; POST /v1/tokens:now refreshes it")
+    return None, False
 
 
 class _Steps:

@@ -146,8 +146,14 @@ async def test_request_bodies_over_the_cap_are_refused(migrated_db: str) -> None
 
 
 async def _full_reads(db: str, mints: list[str]) -> None:
+    """Full reads with no refresh of their own: since rules 0.37.0 a full read the analyzer
+    made stands as its mint's refresh (now.store_from_read), and an earlier test's read of the
+    same mint would be served complete here instead of starting the job this test counts."""
     conn = await asyncpg.connect(db)
     try:
+        await conn.execute(
+            "delete from lookup_cache where key = any($1::text[])", [f"now:{m}" for m in mints]
+        )
         for m in mints:
             await conn.execute(
                 "insert into token (mint, created_at) values ($1, now()) on conflict do nothing",
