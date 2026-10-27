@@ -1208,6 +1208,8 @@ TokenSage/
 
 ## 13. Open questions and verification checklist
 
+> **Status (2026-10-27):** closed. TokenSage is in production, so these are no longer gates. The owner decisions are made in `tokensage/config.py`: Q1 `default_depth="full"` and `accept_non_pump=True`; Q2 `enable_corpus=False` (no corpus ingester); Q12 `enable_paid_x=False` with a $1/day cap (`paid_x_daily_usd_cap`) if it is ever turned on. The source questions (Q3-Q8) are answered by production behaviour, which the `/admin/v1/upstreams` and `/status` meters report; Q9's prices are out of date (the analyzer runs on `standard`, see `render.yaml`); Q10-Q11 matter less with OCR and the vision model off by default (`enable_ocr`, `enable_clip`). Kept below as written.
+
 Unless noted, these must be resolved by the Phase 0 smoke test.
 
 1. **From the owner / consumer app:** expected request rate (average and peak), latency needs (is "202, poll again" acceptable, or must most calls finish synchronously?), whether `basic` or `full` should be the default depth, and whether non-pump.fun mints should be analysed or rejected (`ACCEPT_NON_PUMP`).
