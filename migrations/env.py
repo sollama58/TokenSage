@@ -55,12 +55,27 @@ def _connect_with_retry(engine: Engine) -> Connection:
             time.sleep(CONNECT_RETRY_S)
 
 
+# The api and the analyzer both migrate before they start (render.yaml preDeployCommand), so
+# a deploy runs two upgrades at once. A session advisory lock lets one through at a time: the
+# second finds the database at head and does nothing. Session-level, not transaction-level,
+# because the concurrent index builds run in autocommit blocks between transactions.
+MIGRATION_LOCK_SQL = "hashtext('tokensage:migrations')"
+
+
 def run_migrations_online() -> None:
     engine = create_engine(_sync_url(), pool_pre_ping=True)
     with _connect_with_retry(engine) as connection:
-        context.configure(connection=connection)
-        with context.begin_transaction():
-            context.run_migrations()
+        connection.exec_driver_sql(f"select pg_advisory_lock({MIGRATION_LOCK_SQL})")
+        connection.commit()
+        try:
+            context.configure(connection=connection)
+            with context.begin_transaction():
+                context.run_migrations()
+        finally:
+            if connection.in_transaction():
+                connection.rollback()
+            connection.exec_driver_sql(f"select pg_advisory_unlock({MIGRATION_LOCK_SQL})")
+            connection.commit()
 
 
 if context.is_offline_mode():

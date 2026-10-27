@@ -300,6 +300,30 @@ async def test_meta_counts_are_cached_per_launch_slot_and_shared_between_concurr
     assert scans.count("totals") == 1
 
 
+@needs_db
+async def test_meta_counts_keep_a_namesake_whose_row_came_after_the_cached_scan(
+    db: asyncpg.Connection,
+) -> None:
+    """A word wave inside one launch slot: B's row is inserted after A's read filled the
+    cache, so the cached counts never held B. B must not take its own row off them, or it
+    loses A (2026-10-27 audit TS-1: (0, 0) where the uncached read says (1, 1))."""
+    from tokensage import analyzer
+
+    async def zorb(mint: str, when: datetime) -> list[tuple[str, int, int]]:
+        r = SimpleNamespace(mint=mint, created_at=when)
+        mc = await analyzer._meta_counts(db, r, ["zorb"], window_hours=24, history_days=90)  # type: ignore[arg-type]
+        return [(w.word, w.recent, w.total) for w in mc.words]
+
+    later = NOW + timedelta(minutes=2)
+    await _token(db, "A", "Zorb Coin", "ZORB", NOW)
+    assert await zorb("A", NOW) == [("zorb", 0, 0)]
+    await _token(db, "B", "Zorb Coin", "ZORB", later)
+    cached = await zorb("B", later)
+    analyzer.reset_meta_counts_cache()
+    assert await zorb("B", later) == [("zorb", 1, 1)]
+    assert cached == [("zorb", 1, 1)]
+
+
 async def test_db_context_adds_external_namesakes_after_ours(
     db: asyncpg.Connection,
     settings,  # type: ignore[no-untyped-def]

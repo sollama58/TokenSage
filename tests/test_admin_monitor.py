@@ -180,7 +180,9 @@ async def test_monitor_routes(client: httpx.AsyncClient, migrated_db: str) -> No
                                 payload)
                values ('analyze', 'M1', 'basic', 'done', now() - interval '10 s',
                        now() - interval '8 s', now(),
-                       '{"timing": {"resolve_ms": 100, "engine_ms": 20, "total_ms": 8000}}'),
+                       '{"timing": {"resolve_ms": 100, "engine_ms": 20, "db_wait_ms": 3000,
+                                    "db_context_ms": 400, "story_heat_ms": 0,
+                                    "total_ms": 8000}}'),
                       ('analyze', 'M2', 'full', 'failed', now() - interval '5 s',
                        now() - interval '4 s', now(), null),
                       ('analyze', 'M3', 'basic', 'running', now() - interval '1 h',
@@ -221,6 +223,10 @@ async def test_monitor_routes(client: httpx.AsyncClient, migrated_db: str) -> No
     assert stages[("basic", "total")]["n"] == 1 and stages[("basic", "total")]["p50_s"] == 8.0
     assert stages[("basic", "resolve")]["p95_s"] == 0.1
     assert ("basic", "basic_x") not in stages  # not recorded: not reported
+    # the wait at the database gate is its own stage, apart from the queries (audit TS-2)
+    assert stages[("basic", "db_wait")]["p50_s"] == 3.0
+    assert stages[("basic", "db_context")]["p50_s"] == 0.4
+    assert stages[("basic", "story_heat")]["n"] == 1
     # M3 has run for 20 minutes against a 300 s cap: the worker should have stopped it
     assert q["long_running"] == 1 and q["stuck_running"] == 0
     assert q["errors"][0]["error_code"] == "not_found"

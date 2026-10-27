@@ -43,7 +43,9 @@ services:
     dockerfilePath: ./Dockerfile
     preDeployCommand: alembic upgrade head
     healthCheckPath: /healthz
-    autoDeployTrigger: commit
+    # Deploy once CI is green on the commit, not on the push: a red main (a merge skew) stayed
+    # out of production only by luck (2026-10-27 audit DB-5). Same on every service below.
+    autoDeployTrigger: checksPass
     buildFilter:
       paths: ["tokensage/**", "migrations/**", "alembic.ini", "data/**", "Dockerfile", "pyproject.toml", "uv.lock", "render.yaml"]
       ignoredPaths: ["**/*.md", "tests/**", "docs/**"]
@@ -76,7 +78,10 @@ services:
     dockerfilePath: ./Dockerfile
     numInstances: 1
     maxShutdownDelaySeconds: 60
-    autoDeployTrigger: commit
+    # The analyzer can boot before the api's pre-deploy has migrated: it migrates too, and the
+    # two runs take turns (migrations/env.py, advisory lock), so the second is a no-op.
+    preDeployCommand: alembic upgrade head
+    autoDeployTrigger: checksPass
     buildFilter:
       paths: ["tokensage/**", "data/**", "Dockerfile", "pyproject.toml", "uv.lock", "render.yaml"]
       ignoredPaths: ["**/*.md", "tests/**", "docs/**"]
@@ -107,6 +112,7 @@ services:
     plan: starter
     region: oregon
     schedule: "17 3 * * *" # daily 03:17 UTC
+    autoDeployTrigger: checksPass
     dockerfilePath: ./Dockerfile
     envVars:
       - fromGroup: tokensage-shared
@@ -123,6 +129,7 @@ services:
     plan: starter
     region: oregon
     schedule: "7 * * * *" # hourly
+    autoDeployTrigger: checksPass
     dockerfilePath: ./Dockerfile
     envVars:
       - fromGroup: tokensage-shared

@@ -121,7 +121,15 @@ async def test_worker_stops_a_job_over_its_time_cap_and_frees_the_slot(
         # the finished analysis recorded where its time went
         async with pool.acquire() as c:
             payload = await c.fetchval("select payload from job where id=$1", good.id)
-        assert payload and set(payload["timing"]) >= {"resolve_ms", "engine_ms", "total_ms"}
+        assert payload and set(payload["timing"]) >= {
+            "resolve_ms",
+            "db_wait_ms",
+            "db_context_ms",
+            "pair_ms",
+            "engine_ms",
+            "extras_ms",
+            "total_ms",
+        }
         assert not w.active_jobs
     finally:
         w.request_stop()

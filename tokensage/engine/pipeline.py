@@ -94,6 +94,9 @@ class DbContext:
     top_volume: list[meta.TopVolume] = field(default_factory=list)
     # stored reads of the coins this one may copy (lineage.candidate_mints), by mint
     originals: dict[str, PriorRead] = field(default_factory=dict)
+    # how long the read waited at the analyzer's database gate before these were queried
+    # (timing only: the stage's db_wait_ms, apart from its query time)
+    db_wait_ms: int = 0
 
 
 @dataclass

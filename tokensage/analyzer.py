@@ -519,7 +519,7 @@ async def _db_context(
             waited_s = time.perf_counter() - queued_at
             if waited_s >= 5:
                 log.info("analysis.db_context_waited", mint=r.mint, wait_s=round(waited_s, 1))
-            return await _db_context_queries(
+            dbc = await _db_context_queries(
                 conn,
                 ctx,
                 r,
@@ -533,6 +533,8 @@ async def _db_context(
                 logo_hash_task,
                 pool,
             )
+            dbc.db_wait_ms = int(waited_s * 1000)
+            return dbc
     finally:
         if ext_task is not None and not ext_task.done():
             ext_task.cancel()
@@ -801,12 +803,15 @@ async def _prior_reads(conn: asyncpg.Connection, mints: list[str]) -> dict[str, 
 # took 30 s a read, every worker running the same count at once). The counts do not depend on
 # the token, only on its launch time and the words of its name, so they are kept in process
 # for a while, keyed by the launch time rounded down to a slot. Within one slot the same
-# totals and the same word counts serve every token, and only one scan runs per miss.
+# totals and the same word counts serve every token, and only one scan runs per miss. Each
+# entry keeps the database time of its scan: a token whose row came after it was never counted,
+# so its own row is taken off only the counts that saw it.
 META_COUNTS_SLOT_S = 600
 _META_COUNTS_MAX_WORDS = 20_000
 _META_WORD_SCAN_LIMIT = 50  # words per scan: more than any one name has (meta max_words 6)
-_meta_cache: dict[tuple[Any, ...], tuple[float, int, int]] = {}
-_meta_inflight: dict[tuple[Any, ...], asyncio.Future[tuple[int, int]]] = {}
+MetaScan = tuple[int, int, datetime]  # recent, total, the database time of the scan
+_meta_cache: dict[tuple[Any, ...], tuple[float, MetaScan]] = {}
+_meta_inflight: dict[tuple[Any, ...], asyncio.Future[MetaScan]] = {}
 
 
 def reset_meta_counts_cache() -> None:
@@ -824,29 +829,29 @@ def _meta_slot(created_at: datetime | None) -> datetime:
     return datetime.fromtimestamp(secs, UTC)
 
 
-def _meta_cached(key: tuple[Any, ...]) -> tuple[int, int] | None:
+def _meta_cached(key: tuple[Any, ...]) -> MetaScan | None:
     hit = _meta_cache.get(key)
     if hit is None:
         return None
     if time.monotonic() - hit[0] > META_COUNTS_SLOT_S:
         _meta_cache.pop(key, None)
         return None
-    return hit[1], hit[2]
+    return hit[1]
 
 
-def _meta_store(key: tuple[Any, ...], recent: int, total: int) -> None:
+def _meta_store(key: tuple[Any, ...], scan: MetaScan) -> None:
     if len(_meta_cache) >= _META_COUNTS_MAX_WORDS:
         now = time.monotonic()
         for k in [k for k, v in _meta_cache.items() if now - v[0] > META_COUNTS_SLOT_S]:
             _meta_cache.pop(k, None)
         if len(_meta_cache) >= _META_COUNTS_MAX_WORDS:
             _meta_cache.clear()
-    _meta_cache[key] = (time.monotonic(), recent, total)
+    _meta_cache[key] = (time.monotonic(), scan)
 
 
 async def _meta_shared(
-    key: tuple[Any, ...], scan: Callable[[], Coroutine[Any, Any, tuple[int, int]]]
-) -> tuple[int, int]:
+    key: tuple[Any, ...], scan: Callable[[], Coroutine[Any, Any, MetaScan]]
+) -> MetaScan:
     """The cached counts under `key`, else one `scan` shared by every caller that misses while
     it runs (the scan is the expensive part; eight copies of it at once each take longer)."""
     hit = _meta_cached(key)
@@ -867,7 +872,7 @@ async def _meta_shared(
         _meta_inflight.pop(key, None)
     if not fut.done():
         fut.set_result(out)
-    _meta_store(key, *out)
+    _meta_store(key, out)
     return out
 
 
@@ -887,26 +892,27 @@ async def _meta_counts(
     the `history_days` before it, plus the totals: the current-meta signal's inputs. The
     counts come from the process cache when a token of the same launch slot (or carrying the
     same word) was read in the last META_COUNTS_SLOT_S; this token's own row is taken off
-    afterwards, from one primary-key lookup."""
+    afterwards, from one primary-key lookup, from each count whose scan saw it."""
     slot = _meta_slot(r.created_at)
     cfg = (slot, window_hours, history_days)
 
-    async def scan_totals() -> tuple[int, int]:
+    async def scan_totals() -> MetaScan:
         started = time.monotonic()
         row = await conn.fetchrow(
-            f"""select count(*) filter (where {_META_RECENT}) as recent, count(*) as total
+            f"""select count(*) filter (where {_META_RECENT}) as recent, count(*) as total,
+                       statement_timestamp() as scan_at
                 from token t where {_META_BOUNDS}""",
             slot,
             window_hours,
             history_days,
         )
         log.info("meta_counts.totals_scanned", ms=int((time.monotonic() - started) * 1000))
-        return int(row["recent"] or 0), int(row["total"] or 0)
+        return int(row["recent"] or 0), int(row["total"] or 0), row["scan_at"]
 
-    recent_total, history_total = await _meta_shared(("meta_totals", *cfg), scan_totals)
+    recent_total, history_total, totals_at = await _meta_shared(("meta_totals", *cfg), scan_totals)
 
     # the words are lowercase [a-z0-9]+ (meta.candidate_words), safe inside the regex
-    counts: dict[str, tuple[int, int]] = {}
+    counts: dict[str, MetaScan] = {}
     missing: list[str] = []
     for w in words:
         hit = _meta_cached(("meta_word", w, *cfg))
@@ -918,7 +924,8 @@ async def _meta_counts(
         batch = missing[:_META_WORD_SCAN_LIMIT]
         started = time.monotonic()
         rows = await conn.fetch(
-            f"""select w, count(*) filter (where {_META_RECENT}) as recent, count(*) as total
+            f"""select w, count(*) filter (where {_META_RECENT}) as recent, count(*) as total,
+                       statement_timestamp() as scan_at
                 from unnest($4::text[]) as w
                 left join token t on lower(coalesce(t.name, '')) ~ ('\\m' || w || '\\M')
                   and {_META_BOUNDS}
@@ -933,15 +940,22 @@ async def _meta_counts(
             words=len(batch),
             ms=int((time.monotonic() - started) * 1000),
         )
-        found = {row["w"]: (int(row["recent"] or 0), int(row["total"] or 0)) for row in rows}
+        found = {
+            row["w"]: (int(row["recent"] or 0), int(row["total"] or 0), row["scan_at"])
+            for row in rows
+        }
+        scanned_at = rows[0]["scan_at"] if rows else datetime.now(UTC)
         for w in batch:
-            counts[w] = found.get(w, (0, 0))
-            _meta_store(("meta_word", w, *cfg), *counts[w])
+            counts[w] = found.get(w, (0, 0, scanned_at))
+            _meta_store(("meta_word", w, *cfg), counts[w])
 
     # this token's own row, when it lies inside the window: off the totals, and off each word
-    # its name carries (the regex above, in Python: the words are plain [a-z0-9]+)
+    # its name carries (the regex above, in Python: the words are plain [a-z0-9]+), but only
+    # from the counts whose scan ran after the row was inserted (a cached scan from before it
+    # never counted it)
     mine = await conn.fetchrow(
-        f"""select ({_META_RECENT}) as recent, lower(coalesce(t.name, '')) as name
+        f"""select ({_META_RECENT}) as recent, lower(coalesce(t.name, '')) as name,
+                   t.first_seen_at
             from token t where t.mint = $4 and {_META_BOUNDS}""",
         slot,
         window_hours,
@@ -950,16 +964,18 @@ async def _meta_counts(
     )
     if mine is not None:
         in_recent = bool(mine["recent"])
-        recent_total -= in_recent
-        history_total -= 1
+        seen = mine["first_seen_at"]
+        if seen <= totals_at:
+            recent_total -= in_recent
+            history_total -= 1
         for w in list(counts):
-            if re.search(rf"\b{w}\b", mine["name"]):
-                rc, tot = counts[w]
-                counts[w] = (max(0, rc - in_recent), max(0, tot - 1))
+            rc, tot, at = counts[w]
+            if seen <= at and re.search(rf"\b{w}\b", mine["name"]):
+                counts[w] = (max(0, rc - in_recent), max(0, tot - 1), at)
     return MetaCounts(
         recent_total=max(0, recent_total),
         history_total=max(0, history_total),
-        words=[MetaWord(w, *counts[w]) for w in words if w in counts],
+        words=[MetaWord(w, *counts[w][:2]) for w in words if w in counts],
     )
 
 
@@ -1970,7 +1986,10 @@ async def analyze(
         logo_hash_task=logo_hash_task,
         pool=pool,
     )
-    db_context_ms = int((time.perf_counter() - phase) * 1000)
+    # the stage without its wait at the gate: what the queries took (2026-10-27 audit TS-2: the
+    # tail mixed the two, so it could not say whether the gate or the database was slow)
+    db_wait_ms = dbc.db_wait_ms
+    db_context_ms = max(0, int((time.perf_counter() - phase) * 1000) - db_wait_ms)
     phase = time.perf_counter()
     if logo_feats is None and logo_hash_task is not None:
         logo_feats = logo_hash_task.result().features
@@ -1998,6 +2017,8 @@ async def analyze(
     if embed_task is not None:
         inp.encoder = await embed_task
     await _queue_pair_analysis(conn, inp.pair)
+    pair_ms = int((time.perf_counter() - phase) * 1000)
+    phase = time.perf_counter()
     timed_out: list[str] = []
     full_depth_ms = 0
     basic_x_ms = 0
@@ -2049,6 +2070,8 @@ async def analyze(
         doc.analysis_requested_by = requested_by
     if inp.tweet is not None and inp.tweet.status == "ok":
         _attach_post_details(doc.x, inp.tweet)
+    extras_ms = int((time.perf_counter() - phase) * 1000)
+    phase = time.perf_counter()
     heat_done = False
     story_heat_ms = 0
     if depth == "full":
@@ -2087,11 +2110,14 @@ async def analyze(
     timing = {
         "resolve_ms": resolve_ms,
         "metadata_ms": metadata_ms,
+        "db_wait_ms": db_wait_ms,
         "db_context_ms": db_context_ms,
+        "pair_ms": pair_ms,
         "engine_ms": engine_ms,
         "full_depth_ms": full_depth_ms,
         "story_heat_ms": story_heat_ms,
         "basic_x_ms": basic_x_ms,
+        "extras_ms": extras_ms,
         "persist_ms": persist_ms,
         "total_ms": int((time.perf_counter() - t0) * 1000),
     }
@@ -2127,7 +2153,16 @@ async def _read_story_heat(
         return None, True
     try:
         async with asyncio.timeout(ctx.settings.story_heat_timeout_s):
-            return await now_refresh.story_heat(conn, ctx.http, body), True
+            heat = await now_refresh.story_heat(conn, ctx.http, body)
+        # a GeckoTerminal failure or 429 comes back as a heat with that status, not a raise:
+        # the read keeps it, but it is not done, so it is not stored as the mint's refresh
+        # (2026-10-27 audit TS-4: a failed heat stood as "the moment's" for NOW_MAX_AGE_S)
+        if heat is None or heat.status == "ok":
+            return heat, True
+        log.info("analysis.story_heat_failed", mint=doc.mint, error=heat.status)
+        detail = "rate limited" if heat.status == "rate_limited" else "lookup failed"
+        doc.caveats.append(f"story heat: {detail}; POST /v1/tokens:now refreshes it")
+        return heat, False
     except TimeoutError:
         log.info("analysis.story_heat_timeout", mint=doc.mint)
         detail = f"did not answer within {ctx.settings.story_heat_timeout_s:g} s"

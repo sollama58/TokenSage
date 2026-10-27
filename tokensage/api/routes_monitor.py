@@ -620,8 +620,9 @@ async def queue_stats(
                  percentile_cont(0.95) within group (order by
                    (j.payload->'timing'->>(s.stage || '_ms'))::float / 1000) as p95
                from job j
-               cross join unnest(array['resolve', 'metadata', 'db_context', 'basic_x',
-                                       'engine', 'full_depth', 'persist', 'total']) as s(stage)
+               cross join unnest(array['resolve', 'metadata', 'db_wait', 'db_context',
+                                       'pair', 'basic_x', 'engine', 'full_depth', 'extras',
+                                       'story_heat', 'persist', 'total']) as s(stage)
                where j.kind = 'analyze' and j.status = 'done'
                  and j.finished_at > now() - make_interval(hours => $1)
                  and j.payload->'timing' ? (s.stage || '_ms')

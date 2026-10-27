@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from tokensage import analyzer
+from tokensage.engine.pipeline import DbContext
 
 
 @pytest.mark.asyncio
@@ -20,24 +21,27 @@ async def test_db_context_runs_on_a_bounded_number_of_slots(
     running = 0
     peak = 0
 
-    async def fake_queries(*_args: object, **_kwargs: object) -> str:
+    async def fake_queries(*_args: object, **_kwargs: object) -> DbContext:
         nonlocal running, peak
         running += 1
         peak = max(peak, running)
         await asyncio.sleep(0.02)
         running -= 1
-        return "dbc"
+        return DbContext()
 
     monkeypatch.setattr(analyzer, "_db_context_queries", fake_queries)
     ctx = SimpleNamespace(settings=SimpleNamespace(db_context_concurrency=2), http=None)
     r = SimpleNamespace(mint="M", created_at=None, creator=None)
 
-    async def one() -> str:
+    async def one() -> DbContext:
         return await analyzer._db_context(None, ctx, r, None, None, None, "")  # type: ignore[arg-type]
 
     results = await asyncio.gather(*(one() for _ in range(6)))
-    assert results == ["dbc"] * 6
     assert peak == 2
+    # each read records its wait at the gate, apart from its queries (2026-10-27 audit TS-2):
+    # the first two went straight in, the last two waited two turns of 20 ms
+    waits = sorted(d.db_wait_ms for d in results)
+    assert waits[:2] == [0, 0] and waits[-1] >= 30
 
     # A new limit from the settings sizes a new gate; the old one is not kept.
     ctx.settings.db_context_concurrency = 3
