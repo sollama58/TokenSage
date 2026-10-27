@@ -22,6 +22,7 @@ from tests.fixtures.chain import (
     public_resolver,
 )
 from tests.test_x_sources import FX_OK, TID
+from tokensage import now
 from tokensage.api.schemas import TokenResponse
 from tokensage.net import safe_fetch
 from tokensage.sources import geckoterminal
@@ -140,10 +141,13 @@ async def test_full_depth_fills_x_trend_and_caches(
     # caches populated
     assert await db.fetchval("select status from x_tweet where tweet_id=$1", TID) == "ok"
     assert await db.fetchval("select count(*) from x_profile") == 1
-    # the story's heat rides on the read (rules 0.37.0, model audit 2026-10-26 §16): the
-    # referent searched on GeckoTerminal, nothing found on it, no second call needed
+    # the story's heat rides on the read (rules 0.37.0, model audit 2026-10-26 §16): the same
+    # story the refresh would search (the lineage original of this sequel, else the referent),
+    # nothing found on it on GeckoTerminal, no second call needed
     assert a.story_heat is not None and a.story_heat.status == "ok"
-    assert a.story_heat.story_kind == "referent" and "Peanut" in a.story_heat.story
+    story = now.story_of(a.model_dump(mode="json"))
+    assert story is not None and (a.story_heat.story, a.story_heat.story_kind) == story[:2]
+    assert "Peanut" in a.story_heat.story
     assert a.story_heat.coins == 0 and a.story_heat.leader is None
     assert not any(c.startswith("story heat") for c in a.caveats)
     # one news check for the trend hit; the name is not searched ("Peanut the Squirrel" is
