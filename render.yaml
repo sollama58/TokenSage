@@ -140,7 +140,10 @@ services:
 
 databases:
   - name: tokensage-db
-    plan: basic-256mb # 'free' expires after 30 days
+    # basic-1gb (0.5 CPU, 1 GB RAM) since 2026-10-28: on 256 MB the token table did not stay
+    # cached, and the read's database queries were its tail (p95 8-10 s against a 0.6 s median,
+    # with no wait at the 4-slot gate; 2026-10-27 audit DB-4 / TS-2). 'free' expires after 30 days.
+    plan: basic-1gb
     # Disk: Render's default 15 GB (no diskSizeGB here). Nothing was pruned until 2026-10-16
     # (database audit, I1); the hourly maintenance now condenses every analysis after 7 days
     # (about 60% of it), keeps a token's heavy rows 30 days and the slim token row 90
