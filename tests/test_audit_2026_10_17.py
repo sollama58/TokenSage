@@ -4,7 +4,7 @@ key carries the lineage original (L1), and "probably refers to" (L3)."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +46,13 @@ async def _cache_ok_heat(conn: asyncpg.Connection, key: str, age_s: int) -> None
 
 
 @needs_db
-@pytest.mark.parametrize(("age_s", "served"), [(7 * 60, "ok"), (11 * 60, "failed")])
+@pytest.mark.parametrize(
+    ("age_s", "served"),
+    [
+        (int((now.HEAT_TTL + timedelta(minutes=2)).total_seconds()), "ok"),
+        (int((now.HEAT_STALE_MAX + timedelta(minutes=1)).total_seconds()), "failed"),
+    ],
+)
 async def test_story_heat_falls_back_only_to_recent_heat(
     migrated_db: str,
     clean_tables: None,
@@ -136,3 +142,22 @@ def test_mid_confidence_referent_wording_is_probable() -> None:
     """L3: the Probable wording convention, not "most likely"."""
     assert render_summary._verb(0.7) == "probably refers to"
     assert render_summary._verb(0.9) == "refers to" and render_summary._verb(0.5) == "may refer to"
+
+
+def test_geckoterminal_cooldown_doubles_while_refused_and_resets_on_an_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Check-in 2026-10-29: a flat 60 s pause still met 80-90% 429s, so each 429 in a row doubles
+    the pause up to COOLDOWN_MAX_S."""
+    from tokensage.sources import geckoterminal
+
+    monkeypatch.setattr(geckoterminal.time, "monotonic", lambda: 1000.0)
+    waits = []
+    for _ in range(6):
+        geckoterminal._start_cooldown(None)
+        waits.append(geckoterminal._cooldown_until - 1000.0)
+    assert waits == [60.0, 120.0, 240.0, 480.0, 600.0, 600.0]
+    # a short Retry-After never undercuts the doubling
+    geckoterminal._refusals = 1
+    geckoterminal._start_cooldown("5")
+    assert geckoterminal._cooldown_until - 1000.0 == 120.0

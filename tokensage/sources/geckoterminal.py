@@ -155,11 +155,15 @@ class RateLimited(Exception):
 # The free tier allows about 30 calls a minute per IP; the story-heat lookups keep under
 # this many in any 60 s so the daily top-volume pull still gets through. From Render's egress
 # the real allowance is far lower: at 20 a minute 58% of calls came back 429 (audit 2026-10-17).
-HEAT_CALLS_PER_MIN = 10
+# 5 since 2026-10-29 (was 10): see now.py HEAT_TTL. The egress's allowance is shared with every
+# other Render service in the region, so what is left for us moves without notice.
+HEAT_CALLS_PER_MIN = 5
 # After a 429 no call goes out until this passes (Retry-After, else COOLDOWN_S): the next lookup
-# used to call again at once and draw another 429.
+# used to call again at once and draw another 429. Each 429 in a row doubles it, up to
+# COOLDOWN_MAX_S, and an answered call resets it: at a flat 60 s, 85% of calls still came back
+# 429 on 2026-10-29.
 COOLDOWN_S = 60.0
-COOLDOWN_MAX_S = 300.0
+COOLDOWN_MAX_S = 600.0
 # Inside that minute the calls are spaced, not sent in a burst: ten at once drew 429s together
 # from the shared egress, and each 429 then paused every lookup for COOLDOWN_S (2026-10-27
 # audit TS-5: 40.8% of 9,542 calls failed). A cell-rate gate: one call per MIN_GAP_S, with
@@ -172,14 +176,17 @@ MAX_WAIT_S = 2.0
 _calls: list[float] = []
 _cooldown_until = 0.0
 _next_at = 0.0  # when the gate's schedule is next free (monotonic)
+_refusals = 0  # 429s in a row since the last answered call
 
 
 def _start_cooldown(retry_after: str | None) -> None:
-    global _cooldown_until
+    global _cooldown_until, _refusals
+    _refusals += 1
     try:
         wait = float(retry_after) if retry_after else COOLDOWN_S
     except ValueError:
         wait = COOLDOWN_S
+    wait = max(wait, COOLDOWN_S * 2 ** min(_refusals - 1, 10))
     _cooldown_until = time.monotonic() + min(max(wait, 1.0), COOLDOWN_MAX_S)
 
 
@@ -225,6 +232,8 @@ async def _get(http: httpx.AsyncClient, path: str, params: dict) -> dict | None:
             breaker.failure(src)
         log.info("geckoterminal.status", status=r.status_code, path=path[:60])
         return None
+    global _refusals
+    _refusals = 0
     breaker.success(src)
     try:
         doc = r.json()
