@@ -303,7 +303,7 @@ async def test_story_heat_waiters_reuse_the_leaders_failed_refresh(
         async def fetchrow(self, *_: Any) -> dict[str, Any]:
             return {
                 "value": good.model_dump(mode="json"),
-                "fetched_at": datetime.now(UTC) - timedelta(minutes=6),  # past HEAT_TTL
+                "fetched_at": datetime.now(UTC) - now.HEAT_TTL - timedelta(minutes=1),
             }
 
         async def execute(self, *a: Any) -> str:

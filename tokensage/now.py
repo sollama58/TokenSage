@@ -33,9 +33,13 @@ from tokensage.versions import NOW_KEY, RULES_VERSION, TREND_INPUTS_KEY
 log = structlog.get_logger("now")
 
 HEAT_KEY = "heat:"  # lookup_cache: a story's heat, shared by every coin on it
-HEAT_TTL = timedelta(minutes=5)
+# 15 minutes, not 5, and a failed lookup waits 10 (user decision 2026-10-29): from about 08:00
+# UTC that day GeckoTerminal's free API refused 80-90% of the ~9,700 lookups a day from Render's
+# shared egress, against ~35% before, and the paid CoinGecko plan can't carry them. Fewer repeat
+# lookups fit the free allowance; the heat inputs fill 3-21% of decisions and showed no lift.
+HEAT_TTL = timedelta(minutes=15)
 HEAT_STALE_MAX = 2 * HEAT_TTL  # a failed refresh falls back to cached heat only this young
-HEAT_FAILED_TTL = timedelta(minutes=3)  # retry a failed or rate-limited lookup soon
+HEAT_FAILED_TTL = timedelta(minutes=10)  # retry a failed or rate-limited lookup after this
 
 # A failed refresh that fell back to a recent cached heat writes nothing, so the coins waiting
 # on the story's single flight each searched again in turn (audit 2026-10-23 TS-3). The

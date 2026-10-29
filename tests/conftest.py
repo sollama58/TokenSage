@@ -73,6 +73,7 @@ def _no_upstream_cooldowns(monkeypatch: pytest.MonkeyPatch) -> None:
     ipfs._gateway_cooldown.clear()
     geckoterminal._cooldown_until = 0.0
     geckoterminal._next_at = 0.0
+    geckoterminal._refusals = 0
     monkeypatch.setattr(geckoterminal, "MIN_GAP_S", 0.0)
 
 
