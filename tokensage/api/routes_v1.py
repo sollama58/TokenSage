@@ -23,6 +23,8 @@ from tokensage.api.schemas import (
     NowItem,
     NowRequest,
     NowResponse,
+    PumpCoin,
+    PumpCoinResponse,
     RawFields,
     TaxonomyEntry,
     TokenHints,
@@ -32,6 +34,7 @@ from tokensage.api.schemas import (
     stored_analysis,
 )
 from tokensage.resolve.pump_ca import parse_ca
+from tokensage.sources import pumpfun
 from tokensage.taxonomy import load_taxonomy
 from tokensage.versions import LEXICON_VERSION, RULES_VERSION
 
@@ -422,4 +425,31 @@ async def meta(key: Annotated[ApiKey, Depends(require_api_key)]) -> MetaResponse
         flags=[FlagEntry(**f) for f in tax["flags"]],
         depths=depths,
         disclaimer=DISCLAIMER,
+    )
+
+
+@router.get(
+    "/pumpfun/coins/{ca}",
+    response_model=PumpCoinResponse,
+    responses={400: err("invalid_ca"), 401: err("unauthorized"), 429: err("rate_limited")},
+    summary="Relay pump.fun's single-coin read",
+)
+async def pumpfun_coin(
+    request: Request,
+    ca: str,
+    key: Annotated[ApiKey, Depends(require_api_key)],
+) -> PumpCoinResponse:
+    """pump.fun's coins-v2 for one coin, asked from this service (sources/pumpfun.py): for a
+    consumer pump.fun refuses (TrenchScanner since 2026-10-22). Always 200 with a status; a
+    shared cap keeps the volume low, so `busy` is a normal answer."""
+    mint = _ca(ca)
+    answer = await pumpfun.coin(request.app.state.http, mint)
+    return PumpCoinResponse(
+        ca=mint,
+        status=answer.status,
+        upstream_status=answer.upstream_status,
+        cf_mitigated=answer.cf_mitigated,
+        cached=answer.cached,
+        coin=PumpCoin(**answer.coin) if answer.coin else None,
+        request_id=request.state.request_id,
     )

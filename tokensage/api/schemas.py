@@ -1150,6 +1150,47 @@ class MetaResponse(_Model):
     disclaimer: str
 
 
+class PumpCoin(_Model):
+    """pump.fun's coins-v2 fields TrenchScanner reads, passed on as pump.fun gave them
+    (type-checked and clipped; sources/pumpfun.py). Untrusted text."""
+
+    mint: str
+    name: str | None = None
+    symbol: str | None = None
+    description: str | None = None
+    image_uri: str | None = None
+    twitter: str | None = None
+    telegram: str | None = None
+    website: str | None = None
+    creator: str | None = None
+    mayhem_state: str | None = None
+    charity_name: str | None = None
+    created_timestamp: float | None = Field(None, description="epoch ms")
+    usd_market_cap: float | None = None
+    market_cap_usd: float | None = None
+    complete: bool | None = None
+    is_currently_live: bool | None = None
+    is_charity: bool | None = None
+
+
+class PumpCoinResponse(_Model):
+    ca: str
+    status: Literal["ok", "not_found", "refused", "unavailable", "busy"] = Field(
+        description=(
+            "ok: pump.fun answered with the coin; not_found: it answered without it; refused: "
+            "its Cloudflare refused this service (403); unavailable: no usable answer (timeout, "
+            "429, 5xx); busy: the relay's shared per-minute cap is spent, ask again later"
+        )
+    )
+    upstream_status: int | None = None
+    cf_mitigated: str | None = Field(
+        None, description="Cloudflare's cf-mitigated header on a refusal, e.g. challenge"
+    )
+    cached: bool = False
+    coin: PumpCoin | None = None
+    request_id: str
+
+
 class ErrorBody(_Model):
     code: str
     message: str

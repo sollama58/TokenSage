@@ -3888,6 +3888,268 @@
         "title": "PairReferent",
         "type": "object"
       },
+      "PumpCoin": {
+        "additionalProperties": false,
+        "description": "pump.fun's coins-v2 fields TrenchScanner reads, passed on as pump.fun gave them\n(type-checked and clipped; sources/pumpfun.py). Untrusted text.",
+        "properties": {
+          "charity_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charity Name"
+          },
+          "complete": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Complete"
+          },
+          "created_timestamp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "epoch ms",
+            "title": "Created Timestamp"
+          },
+          "creator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "image_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Uri"
+          },
+          "is_charity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Charity"
+          },
+          "is_currently_live": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Currently Live"
+          },
+          "market_cap_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Usd"
+          },
+          "mayhem_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mayhem State"
+          },
+          "mint": {
+            "title": "Mint",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "telegram": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram"
+          },
+          "twitter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Twitter"
+          },
+          "usd_market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Market Cap"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "mint"
+        ],
+        "title": "PumpCoin",
+        "type": "object"
+      },
+      "PumpCoinResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ca": {
+            "title": "Ca",
+            "type": "string"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "cf_mitigated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cloudflare's cf-mitigated header on a refusal, e.g. challenge",
+            "title": "Cf Mitigated"
+          },
+          "coin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PumpCoin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "ok: pump.fun answered with the coin; not_found: it answered without it; refused: its Cloudflare refused this service (403); unavailable: no usable answer (timeout, 429, 5xx); busy: the relay's shared per-minute cap is spent, ask again later",
+            "enum": [
+              "ok",
+              "not_found",
+              "refused",
+              "unavailable",
+              "busy"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "upstream_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Status"
+          }
+        },
+        "required": [
+          "ca",
+          "status",
+          "request_id"
+        ],
+        "title": "PumpCoinResponse",
+        "type": "object"
+      },
       "QueueHour": {
         "additionalProperties": false,
         "properties": {
@@ -7741,6 +8003,84 @@
           }
         ],
         "summary": "Versions, taxonomy and flag codes",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/v1/pumpfun/coins/{ca}": {
+      "get": {
+        "description": "pump.fun's coins-v2 for one coin, asked from this service (sources/pumpfun.py): for a\nconsumer pump.fun refuses (TrenchScanner since 2026-10-22). Always 200 with a status; a\nshared cap keeps the volume low, so `busy` is a normal answer.",
+        "operationId": "pumpfun_coin_v1_pumpfun_coins__ca__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ca",
+            "required": true,
+            "schema": {
+              "title": "Ca",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PumpCoinResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_ca"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "rate_limited"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Relay pump.fun's single-coin read",
         "tags": [
           "v1"
         ]
