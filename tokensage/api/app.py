@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -137,6 +138,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.keys.reload(conn)
         app.state.waiter = queue.DoneWaiter(app.state.pool)
         await app.state.waiter.start()
+        # fixed-host reads the API makes itself (the pump.fun relay, routes_v1.py), metered
+        # like the analyzer's and never through an env proxy
+        app.state.http = httpx.AsyncClient(
+            headers={"User-Agent": settings.http_user_agent},
+            trust_env=False,
+            follow_redirects=False,
+            transport=metrics.MeteredTransport(),
+        )
         stop = asyncio.Event()
         key_reloader = asyncio.create_task(_reload_keys_forever(app, stop))
         # outbound call counts (the inline analyzer's) and breaker state for the admin panel
@@ -159,6 +168,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if inline is not None:
                 await inline
             await flusher
+            await app.state.http.aclose()
             await app.state.waiter.stop()
             await app.state.pool.close()
 
