@@ -18,7 +18,7 @@ from tests.fixtures.chain import SPL_MINT
 from tokensage import now
 from tokensage.engine import trends
 from tokensage.engine.knowledge import load_knowledge
-from tokensage.sources import geckoterminal
+from tokensage.sources import geckoterminal, lookups
 
 LEADER = "MooDengLeader1111111111111111111111111pump"
 OTHER = "MooDengOther22222222222222222222222222pump"
@@ -160,6 +160,10 @@ def test_fresh_trend_matches_the_stored_identity() -> None:
 
 
 def _mock_upstreams(router: respx.MockRouter) -> None:
+    # DexScreener's story search refusing, so the GeckoTerminal search below is what answers
+    router.get(url__startswith="https://api.dexscreener.com/latest/dex/search").mock(
+        return_value=httpx.Response(429)
+    )
     router.get(url__startswith="https://api.geckoterminal.com/api/v2/search/pools").mock(
         return_value=httpx.Response(200, json=SEARCH)
     )
@@ -255,3 +259,75 @@ async def test_geckoterminal_cools_down_after_a_429() -> None:
         with pytest.raises(geckoterminal.RateLimited):
             await geckoterminal.search_pools(http, "moo deng")
     assert route.call_count == 1  # the second lookup never left the process
+
+
+DEX_SEARCH_ANSWER = {
+    "pairs": [
+        {
+            "chainId": "solana",
+            "dexId": "pumpswap",
+            "pairAddress": "Pool1111111111111111111111111111111111111111",
+            "baseToken": {
+                "address": "MooA111111111111111111111111111111111111pump",
+                "name": "Moo Deng",
+                "symbol": "moodeng",
+            },
+            "priceChange": {"m5": 4.5, "h1": -12.0},
+            "volume": {"m5": 1500.5, "h1": 22000},
+            "marketCap": 250000,
+            "fdv": 260000,
+            "pairCreatedAt": 1793500000000,
+        },
+        {"chainId": "ethereum", "baseToken": {"address": "0xabc", "name": "Moo Deng"}},
+        {"chainId": "solana", "dexId": "pumpfun", "baseToken": {"address": "MooB"}, "fdv": "900"},
+    ]
+}
+
+
+def test_dexscreener_pairs_read_as_story_pools() -> None:
+    pools = lookups.parse_dex_pools(DEX_SEARCH_ANSWER)
+    assert [p.mint for p in pools] == ["MooA111111111111111111111111111111111111pump", "MooB"]
+    a, b = pools
+    assert (a.name, a.symbol, a.dex, a.mcap_usd) == ("Moo Deng", "MOODENG", "pumpswap", 250000.0)
+    assert (a.change_5m_pct, a.change_1h_pct, a.volume_5m_usd, a.volume_1h_usd) == (
+        4.5,
+        -12.0,
+        1500.5,
+        22000.0,
+    )
+    assert a.created_at is not None and a.created_at.startswith("2026-")
+    # GeckoTerminal's dex id, so now.PUMP_DEXES reads both sources alike; fdv when no market cap
+    assert (b.dex, b.mcap_usd, b.volume_1h_usd, b.created_at) == ("pump-fun", 900.0, 0.0, None)
+
+
+@respx.mock
+async def test_story_pools_come_from_dexscreener_before_geckoterminal() -> None:
+    dex = respx.get(url__startswith="https://api.dexscreener.com/latest/dex/search").mock(
+        return_value=httpx.Response(200, json=DEX_SEARCH_ANSWER)
+    )
+    gecko = respx.get(url__startswith="https://api.geckoterminal.com/").mock(
+        return_value=httpx.Response(500)
+    )
+    async with httpx.AsyncClient() as http:
+        pools = await now.search_story_pools(http, "moo deng")
+    assert pools is not None and len(pools) == 2
+    assert dex.call_count == 1 and gecko.call_count == 0
+
+
+@respx.mock
+async def test_story_pools_fall_back_to_geckoterminal_when_dexscreener_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    respx.get(url__startswith="https://api.dexscreener.com/latest/dex/search").mock(
+        return_value=httpx.Response(429)
+    )
+    asked: list[str] = []
+
+    async def gecko(http: object, query: str) -> list[geckoterminal.PoolQuote]:
+        asked.append(query)
+        return []
+
+    monkeypatch.setattr(geckoterminal, "search_pools", gecko)
+    async with httpx.AsyncClient() as http:
+        assert await now.search_story_pools(http, "moo deng") == []
+    assert asked == ["moo deng"]

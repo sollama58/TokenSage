@@ -18,7 +18,13 @@ from tokensage import now, queue
 from tokensage.api.schemas import StoryHeat
 from tokensage.db import _init_connection
 from tokensage.engine import render_summary
-from tokensage.sources import geckoterminal
+from tokensage.sources import geckoterminal, lookups
+
+
+async def _no_dex(http: object, query: str) -> None:
+    """DexScreener's story search not answering, so the GeckoTerminal fallback is exercised."""
+    return None
+
 
 STATIC = Path(__file__).resolve().parents[1] / "tokensage" / "api" / "static"
 ORIGINAL = "MooDengLeader1111111111111111111111111pump"
@@ -67,6 +73,7 @@ async def test_story_heat_falls_back_only_to_recent_heat(
         return None
 
     monkeypatch.setattr(geckoterminal, "search_pools", failing)
+    monkeypatch.setattr(lookups, "dexscreener_pools", _no_dex)
     conn = await asyncpg.connect(migrated_db)
     try:
         await _init_connection(conn)  # jsonb as dicts, as the pool's connections have
@@ -91,6 +98,7 @@ async def test_story_heat_key_carries_the_lineage_original(
         return None
 
     monkeypatch.setattr(geckoterminal, "search_pools", failing)
+    monkeypatch.setattr(lookups, "dexscreener_pools", _no_dex)
     conn = await asyncpg.connect(migrated_db)
     try:
         await _init_connection(conn)  # jsonb as dicts, as the pool's connections have

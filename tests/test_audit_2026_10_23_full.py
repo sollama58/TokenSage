@@ -27,6 +27,12 @@ from tokensage.sources import geckoterminal, lookups
 from tokensage.sources import x as xs
 from tokensage.sources.lookups import SameNameToken
 
+
+async def _no_dex(http: object, query: str) -> None:
+    """DexScreener's story search not answering, so the GeckoTerminal fallback is exercised."""
+    return None
+
+
 # ------------------------------------------------------------------ SD-1: header precheck
 
 
@@ -296,6 +302,7 @@ async def test_story_heat_waiters_reuse_the_leaders_failed_refresh(
         return None
 
     monkeypatch.setattr(geckoterminal, "search_pools", failing_search)
+    monkeypatch.setattr(lookups, "dexscreener_pools", _no_dex)
     good = StoryHeat(story="moo deng", story_kind="referent", status="ok", as_of=None)  # type: ignore[arg-type]
     writes: list[Any] = []
 

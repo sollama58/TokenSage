@@ -26,8 +26,14 @@ from tokensage.net.breaker import CircuitBreaker, breaker
 from tokensage.net.safe_fetch import Fetched
 from tokensage.resolve import metadata as md
 from tokensage.resolve import resolver
-from tokensage.sources import geckoterminal
+from tokensage.sources import geckoterminal, lookups
 from tokensage.sources import x as xs
+
+
+async def _no_dex(http: object, query: str) -> None:
+    """DexScreener's story search not answering, so the GeckoTerminal fallback is exercised."""
+    return None
+
 
 HINTS = {k: v for k, v in _HINTS.items() if k != "twitter"}  # no X fetches in these reads
 
@@ -162,6 +168,7 @@ async def test_concurrent_story_heats_search_once(
         return []
 
     monkeypatch.setattr(geckoterminal, "search_pools", fake_search)
+    monkeypatch.setattr(lookups, "dexscreener_pools", _no_dex)
     doc = {"referent": {"label": "Moo Deng Heat", "generic": False, "source": "entities:x"}}
     pool = await _pool(migrated_db)
     try:
