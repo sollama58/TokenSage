@@ -22,23 +22,19 @@ jobs:
     runs-on: ubuntu-latest
     # the suite takes a few minutes; a hung test used to hold the runner for GitHub's 6 h
     timeout-minutes: 20
-    # The runner image's own PostgreSQL (16; installed, service off), started below, as
-    # TrenchScanner's CI does: a postgres service container pulls anonymously from Docker Hub
-    # or a mirror, whose shared-IP quotas fail a run before its first step (2026-10-27 audit
-    # CH-13; ECR Public answered "Data limit exceeded" on this PR's first run).
+    # PostgreSQL 17, production's major, installed from the PostgreSQL apt repository by
+    # scripts/ci-postgres.sh as TrenchScanner's CI does: a postgres service container pulls
+    # anonymously from Docker Hub or a mirror, whose shared-IP quotas fail a run before its
+    # first step (2026-10-27 audit CH-13; ECR Public answered "Data limit exceeded" on #97's
+    # first run), and the runner image's own PostgreSQL is 16 (full audit 2026-11-02, TS-7).
     env:
       DATABASE_URL: postgresql://tokensage:tokensage@localhost:5432/tokensage
       # the DB-backed tests skip when Postgres is unreachable; in CI that is a failure
       TS_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Start PostgreSQL
-        run: |
-          sudo systemctl start postgresql.service
-          sudo -u postgres psql -v ON_ERROR_STOP=1 \
-            -c "CREATE USER tokensage WITH SUPERUSER PASSWORD 'tokensage';" \
-            -c "CREATE DATABASE tokensage OWNER tokensage;"
-          pg_isready -h localhost -p 5432 -U tokensage
+      - name: Start PostgreSQL 17
+        run: ./scripts/ci-postgres.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
