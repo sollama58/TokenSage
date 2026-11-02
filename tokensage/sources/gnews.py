@@ -14,6 +14,11 @@ from tokensage.net.breaker import breaker
 
 log = structlog.get_logger("gnews")
 URL = "https://news.google.com/rss/search?q={q}+when:{when}&hl=en-US&gl=US&ceid=US:en"
+# 8 s until 2026-11-02: Google News failed 80% of a day's searches, most of them slowly (avg
+# 5.8 s, max 8.3 s), and the full read's p95 sat at the timeout plus overhead (8.1 s) while the
+# other full-depth sources answer in under a second. A search that has not answered in 4 s is
+# not going to (full audit 2026-11-02, TS-1).
+TIMEOUT_S = 4.0
 _ITEM = re.compile(r"<item>(.*?)</item>", re.S)
 _TITLE = re.compile(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", re.S)
 _SOURCE = re.compile(r"<source[^>]*>(.*?)</source>", re.S)
@@ -47,18 +52,23 @@ class Headline:
 
 async def search(http: httpx.AsyncClient, query: str, when: str = "2d") -> list[Headline] | None:
     src = "gnews"
-    if not query or not breaker.allow(src):
+    # One caller probes after the cooldown and the rest skip at once: with allow() every caller
+    # went through together and each waited out the timeout (TS-1).
+    if not query or not breaker.allow_probe(src, TIMEOUT_S):
         return None
     try:
-        r = await http.get(URL.format(q=quote_plus(query), when=when), timeout=8.0)
+        r = await http.get(URL.format(q=quote_plus(query), when=when), timeout=TIMEOUT_S)
     except httpx.HTTPError as e:
         breaker.failure(src)
         # a timeout's str() is empty: keep the type, or the log says nothing
         log.info("gnews.error", error=f"{type(e).__name__}: {e}"[:120])
         return None
     if r.status_code != 200 or "<rss" not in r.text[:500]:
-        breaker.failure(src)
-        log.info("gnews.bad_response", status=r.status_code)
+        opened = breaker.failure(src)
+        # The shape of the answer, once per open (a consent page, a 429 served as 200, a block):
+        # the body is third-party text, so only its first bytes, with the markup collapsed.
+        body = re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", r.text[:400])).strip()[:80]
+        log.info("gnews.bad_response", status=r.status_code, **({"body": body} if opened else {}))
         return None
     breaker.success(src)
     out: list[Headline] = []
