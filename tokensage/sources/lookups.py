@@ -8,6 +8,7 @@ pump.fun's frontend-api search was asked too until its route went away (404 sinc
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections import OrderedDict
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ import structlog
 
 from tokensage.engine.pipeline import SameNameToken
 from tokensage.net.breaker import breaker
+from tokensage.sources.geckoterminal import PoolQuote
 
 log = structlog.get_logger("lookups")
 
@@ -174,3 +176,78 @@ def filter_same_name(
         if (t and rs == t) or (name_compact and rn == name_compact):
             out.append(r)
     return out
+
+
+# DexScreener's dex ids for pump.fun's two venues, as GeckoTerminal names them (now.PUMP_DEXES).
+_DEX_IDS = {"pumpfun": "pump-fun", "pumpswap": "pumpswap"}
+
+
+def _num(v: object) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, int | float | str):
+        return None
+    try:
+        f = float(v)
+    except ValueError:
+        return None
+    return f if math.isfinite(f) else None
+
+
+def parse_dex_pools(data: object) -> list[PoolQuote]:
+    """A DexScreener search answer's Solana pairs as story-heat pool quotes."""
+    out: list[PoolQuote] = []
+    pairs = data.get("pairs") if isinstance(data, dict) else None
+    for pair in pairs if isinstance(pairs, list) else []:
+        if not isinstance(pair, dict) or pair.get("chainId") != "solana":
+            continue
+        base = pair.get("baseToken")
+        if not isinstance(base, dict):
+            continue
+        mint = base.get("address")
+        if not isinstance(mint, str) or not mint:
+            continue
+        raw_chg, raw_vol = pair.get("priceChange"), pair.get("volume")
+        chg: dict = raw_chg if isinstance(raw_chg, dict) else {}
+        vol: dict = raw_vol if isinstance(raw_vol, dict) else {}
+        created = _ts_ms(pair.get("pairCreatedAt"))
+        dex = pair.get("dexId")
+        out.append(
+            PoolQuote(
+                pool=str(pair.get("pairAddress") or ""),
+                mint=mint,
+                name=(_str_or_none(base.get("name")) or "")[:120],
+                symbol=(_str_or_none(base.get("symbol")) or "").upper()[:20],
+                mcap_usd=_num(pair.get("marketCap")) or _num(pair.get("fdv")),
+                change_5m_pct=_num(chg.get("m5")),
+                change_1h_pct=_num(chg.get("h1")),
+                volume_5m_usd=_num(vol.get("m5")) or 0.0,
+                volume_1h_usd=_num(vol.get("h1")) or 0.0,
+                created_at=created.isoformat() if created else None,
+                dex=_DEX_IDS.get(dex, dex) if isinstance(dex, str) else None,
+            )
+        )
+    return out
+
+
+async def dexscreener_pools(http: httpx.AsyncClient, query: str) -> list[PoolQuote] | None:
+    """Story-heat pools from DexScreener's search (free, 300 a minute), the same shape
+    GeckoTerminal's search gives. Since 2026-10-29 80-90% of GeckoTerminal calls from Render's
+    shared egress come back 429, and on 2026-11-02 story heat reached TrenchScanner on about 1%
+    of decisions (nsHeat*, all "rate_limited"), so this is asked first. None when it was not
+    asked or did not answer; never raises."""
+    src = "dexscreener_search"
+    if not query or not breaker.allow(src):
+        return None
+    try:
+        r = await http.get(DEX_SEARCH, params={"q": query[:80]}, timeout=5.0)
+        if r.status_code != 200:
+            if r.status_code not in (404, 429):
+                breaker.failure(src)
+            log.info("lookups.dexscreener_pools_status", status=r.status_code)
+            return None
+        data = r.json()
+    except (httpx.HTTPError, ValueError) as e:
+        breaker.failure(src)
+        log.info("lookups.dexscreener_pools_failed", error=str(e)[:120])
+        return None
+    breaker.success(src)
+    return parse_dex_pools(data)

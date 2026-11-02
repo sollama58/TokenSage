@@ -27,7 +27,7 @@ from tokensage.engine import trends
 from tokensage.engine.context import Ev, ReferentCandidate
 from tokensage.engine.knowledge import load_knowledge
 from tokensage.engine.normalize import normalize
-from tokensage.sources import geckoterminal
+from tokensage.sources import geckoterminal, lookups
 from tokensage.versions import NOW_KEY, RULES_VERSION, TREND_INPUTS_KEY
 
 log = structlog.get_logger("now")
@@ -324,6 +324,20 @@ def heat_from_pools(
     return heat, lead
 
 
+async def search_story_pools(
+    http: httpx.AsyncClient, story: str
+) -> list[geckoterminal.PoolQuote] | None:
+    """The pools trading a story: DexScreener's search first, GeckoTerminal's when DexScreener
+    does not answer. GeckoTerminal's search alone left story heat "rate_limited" on about 99% of
+    TrenchScanner's decisions on 2026-11-02 (shared Render egress, see geckoterminal.py); its
+    budget now goes to the leader's peak. Raises geckoterminal.RateLimited only when DexScreener
+    did not answer and GeckoTerminal was over budget."""
+    pools = await lookups.dexscreener_pools(http, story)
+    if pools is not None:
+        return pools
+    return await geckoterminal.search_pools(http, story)
+
+
 async def story_heat(
     conn: asyncpg.Connection, http: httpx.AsyncClient, doc: dict[str, Any]
 ) -> StoryHeat | None:
@@ -360,7 +374,7 @@ async def _story_heat(
         return shared  # the single flight's leader just failed and fell back to this
     heat: StoryHeat
     try:
-        pools = await geckoterminal.search_pools(http, story)
+        pools = await search_story_pools(http, story)
         if pools is None:
             heat = StoryHeat(story=story, story_kind=kind, status="failed", as_of=None)  # type: ignore[arg-type]
         else:
