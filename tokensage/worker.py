@@ -28,12 +28,35 @@ from tokensage.db import create_pool
 from tokensage.engine import ocr
 from tokensage.logging import configure_logging
 from tokensage.net import metrics
+from tokensage.resolve.rpc import RpcError
 
 log = structlog.get_logger("worker")
 
 
 # How often the worker drops stale low-priority jobs (queue.expire_stale_low).
 EXPIRE_EVERY_S = 30.0
+
+# A read that failed on a limited or failing RPC is tried again later each time: 30 s, 2 min,
+# 8 min (RPC_RETRY_BASE_S x 4 per attempt, capped). With the flat 30 s, three attempts all
+# landed inside the same Helius 429 storm (25 minutes on 2026-11-01 22Z: 79 reads failed for
+# good, 8% of the hour's; full audit 2026-11-02, TS-2). Other failures keep queue.fail's delay.
+RPC_RETRY_BASE_S = 30
+RPC_RETRY_MAX_S = 10 * 60
+
+
+def rpc_retry_delay_s(exc: BaseException, attempts: int) -> int | None:
+    """The retry delay for a job whose failure was the RPC refusing or breaking (a 429 or a
+    5xx, anywhere in the exception's cause chain), growing with `attempts`; None for any
+    other failure."""
+    seen: set[int] = set()
+    e: BaseException | None = exc
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        status = getattr(e, "http_status", None) if isinstance(e, RpcError) else None
+        if status is not None and (status == 429 or status >= 500):
+            return min(RPC_RETRY_MAX_S, RPC_RETRY_BASE_S * 4 ** max(0, attempts - 1))
+        e = e.__cause__ or e.__context__
+    return None
 
 
 class _Deferred(Exception):
@@ -394,11 +417,13 @@ class Worker:
                     lease_token=job.lease_token,
                 )
             else:
+                rpc_delay = rpc_retry_delay_s(exc, job.attempts)
                 await queue.fail(
                     conn,
                     job.id,
                     err,
                     max_attempts=self.settings.job_max_attempts,
+                    retry_in_s=rpc_delay if rpc_delay is not None else 30,
                     lease_token=job.lease_token,
                 )
 
