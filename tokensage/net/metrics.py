@@ -184,6 +184,43 @@ class Meter:
 meter = Meter()
 
 
+class PoolHealth:
+    """Whether the shared client's connection pool still hands out connections.
+
+    From about 17:30 UTC on 2026-11-09 every outbound call the analyzer made (Helius, DexScreener,
+    Pump.fun, the trend sources) failed with httpx.PoolTimeout after exactly the pool timeout, for
+    two and a half days, until a restart: all 64 connections were held and never came back, and
+    every analyze job failed ("rpc transport error: PoolTimeout"). The process had been up since
+    the 2026-11-02 deploy, so the slots most likely leaked one at a time (a job abandoned after
+    job_max_s that never answered its cancel keeps whatever connections it holds). Only a fresh
+    process empties such a pool, so the worker restarts itself once it sees one (worker.py
+    _pool_watchdog). Any request that got a connection, whatever its answer or error, ends the
+    streak: only a pool timeout says the pool itself is out."""
+
+    def __init__(self) -> None:
+        self.first_timeout_at: float | None = None
+        self.timeouts = 0
+
+    def ok(self) -> None:
+        self.first_timeout_at = None
+        self.timeouts = 0
+
+    def timed_out(self, now: float | None = None) -> None:
+        if self.first_timeout_at is None:
+            self.first_timeout_at = time.monotonic() if now is None else now
+        self.timeouts += 1
+
+    def wedged(self, *, min_s: float, min_timeouts: int, now: float | None = None) -> bool:
+        """Pool timeouts and nothing else for at least `min_s`, at least `min_timeouts` of them."""
+        if self.first_timeout_at is None:
+            return False
+        now = time.monotonic() if now is None else now
+        return self.timeouts >= min_timeouts and now - self.first_timeout_at >= min_s
+
+
+pool_health = PoolHealth()
+
+
 async def flush(conn: asyncpg.Connection) -> int:
     """Add the counted calls into upstream_usage and mirror the circuit breakers into
     source_health. Returns the rows written; on a DB error the counts are kept for next time."""
@@ -246,11 +283,11 @@ class MeteredTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
         if host.lower() in meter.skip_hosts:
-            return await self.inner.handle_async_request(request)
+            return await self._send(request)
         t0 = time.perf_counter()
         source = classify(host)
         try:
-            resp = await self.inner.handle_async_request(request)
+            resp = await self._send(request)
         except Exception:
             meter.record(source, request.method, ok=False, ms=(time.perf_counter() - t0) * 1000)
             raise
@@ -262,6 +299,19 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             ms=(time.perf_counter() - t0) * 1000,
             rate_limited=resp.status_code == 429,
         )
+        return resp
+
+    async def _send(self, request: httpx.Request) -> httpx.Response:
+        """The inner transport's answer, with the pool's health noted (PoolHealth)."""
+        try:
+            resp = await self.inner.handle_async_request(request)
+        except httpx.PoolTimeout:
+            pool_health.timed_out()
+            raise
+        except Exception:
+            pool_health.ok()
+            raise
+        pool_health.ok()
         return resp
 
     async def aclose(self) -> None:
