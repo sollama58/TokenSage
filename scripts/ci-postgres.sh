@@ -27,7 +27,14 @@ if [[ ! -x /usr/lib/postgresql/$MAJOR/bin/postgres ]]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "postgresql-$MAJOR" >/dev/null
 fi
 
-sudo pg_ctlcluster "$MAJOR" main start 2>/dev/null || true
+# The package makes no cluster when the runner's postgresql-common has create_main_cluster off,
+# and then the start below failed silently and psql found no socket (CI on 2026-11-12, #105).
+if ! pg_lsclusters --no-header 2>/dev/null | awk -v v="$MAJOR" '$1 == v && $2 == "main" { found = 1 } END { exit !found }'; then
+  sudo pg_createcluster "$MAJOR" main --port 5432
+fi
+# "already running" is fine; any other reason shows in the log, with the clusters below
+sudo pg_ctlcluster "$MAJOR" main start || true
+pg_lsclusters
 sudo -u postgres psql -v ON_ERROR_STOP=1 -q \
   -c "CREATE USER tokensage WITH SUPERUSER PASSWORD 'tokensage';" \
   -c "CREATE DATABASE tokensage OWNER tokensage;"
