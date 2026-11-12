@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import time
 import traceback
 
 import asyncpg
@@ -43,6 +44,18 @@ EXPIRE_EVERY_S = 30.0
 RPC_RETRY_BASE_S = 30
 RPC_RETRY_MAX_S = 10 * 60
 
+# The shared HTTP client's pool counts as wedged after this long of nothing but pool timeouts,
+# at least POOL_WEDGE_MIN_TIMEOUTS of them (metrics.PoolHealth), checked every
+# POOL_WATCH_EVERY_S. A busy minute can queue a few requests past the 5 s pool timeout; two
+# minutes in which not one request got a connection cannot be. The worker then stops and exits
+# non-zero so Render starts a fresh process: 2026-11-09 to 11-12 every read failed for 2.5 days
+# on a full pool until a manual restart.
+POOL_WEDGE_S = 120.0
+POOL_WEDGE_MIN_TIMEOUTS = 20
+POOL_WATCH_EVERY_S = 15.0
+# How long the wedged client's close may take on the way out; its held connections never return.
+WEDGED_CLOSE_TIMEOUT_S = 10.0
+
 
 def rpc_retry_delay_s(exc: BaseException, attempts: int) -> int | None:
     """The retry delay for a job whose failure was the RPC refusing or breaking (a 429 or a
@@ -64,7 +77,14 @@ class _Deferred(Exception):
 
 
 class Worker:
-    def __init__(self, pool: asyncpg.Pool, settings: Settings, concurrency: int | None = None):
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        settings: Settings,
+        concurrency: int | None = None,
+        *,
+        exit_on_wedged_pool: bool = False,
+    ):
         self.pool = pool
         self.settings = settings
         self.concurrency = max(1, concurrency or settings.worker_concurrency)
@@ -74,6 +94,10 @@ class Worker:
         self._next_expiry = 0.0
         self._listen_conn: asyncpg.Connection | None = None
         self.ctx = Context.create(settings)
+        # Only the standalone worker (main) restarts itself on a wedged pool: an inline worker
+        # stopping would leave the API with no analyzer and nothing to start it again.
+        self.exit_on_wedged_pool = exit_on_wedged_pool
+        self.exit_code = 0
         ocr.set_concurrency(settings.ocr_concurrency)
         cpu.set_threads(settings.cpu_threads)
 
@@ -87,6 +111,9 @@ class Worker:
             # every other coin. Each loop takes its own pool connection per job.
             loops = [asyncio.create_task(self._loop(slot)) for slot in range(self.concurrency)]
             watchdog = asyncio.create_task(self._shutdown_watchdog(loops))
+            pool_watch = (
+                asyncio.create_task(self._pool_watchdog()) if self.exit_on_wedged_pool else None
+            )
             # the trend index is rebuilt here, never inside a job's deadline
             trends_task = asyncio.create_task(
                 fulldepth.refresh_trend_index(self.pool, self.ctx.http)
@@ -96,10 +123,35 @@ class Worker:
             finally:
                 watchdog.cancel()
                 trends_task.cancel()
+                if pool_watch is not None:
+                    pool_watch.cancel()
         finally:
             await self._stop_listener()
-            await self.ctx.close()
-            log.info("worker.stop")
+            if self.exit_code:
+                try:
+                    async with asyncio.timeout(WEDGED_CLOSE_TIMEOUT_S):
+                        await self.ctx.close()
+                except TimeoutError:
+                    log.warning("worker.http_close_timeout")
+            else:
+                await self.ctx.close()
+            log.info("worker.stop", exit_code=self.exit_code)
+
+    async def _pool_watchdog(self) -> None:
+        """Stops the worker, to exit non-zero, once the shared HTTP client's connection pool has
+        handed out nothing for POOL_WEDGE_S (see POOL_WEDGE_S and metrics.PoolHealth)."""
+        while not self.stop.is_set():
+            await asyncio.sleep(POOL_WATCH_EVERY_S)
+            health = metrics.pool_health
+            if health.wedged(min_s=POOL_WEDGE_S, min_timeouts=POOL_WEDGE_MIN_TIMEOUTS):
+                log.error(
+                    "worker.http_pool_wedged",
+                    timeouts=health.timeouts,
+                    for_s=round(time.monotonic() - (health.first_timeout_at or 0.0)),
+                )
+                self.exit_code = 1
+                self.request_stop()
+                return
 
     async def _shutdown_watchdog(self, loops: list[asyncio.Task[None]]) -> None:
         """After a stop request, give in-flight jobs a grace period, then cancel them; each
@@ -458,7 +510,7 @@ async def main() -> None:
     # trend refresher's, and spares for the job heartbeats
     pool = await create_pool(settings.database_url, min_size=2, max_size=concurrency + 6)
     await envreport.publish_quietly(pool, "worker")  # for TrenchScanner's Admin > Environment
-    w = Worker(pool, settings, concurrency=concurrency)
+    w = Worker(pool, settings, concurrency=concurrency, exit_on_wedged_pool=True)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, w.request_stop)
@@ -470,6 +522,9 @@ async def main() -> None:
         stop_flush.set()
         await flusher  # the last counts land before the pool closes
         await pool.close()
+    if w.exit_code:
+        # non-zero, so Render starts a fresh process (see POOL_WEDGE_S)
+        raise SystemExit(w.exit_code)
 
 
 if __name__ == "__main__":
